@@ -74,10 +74,12 @@ milestone.
 
 ### SFT-001 — Bootstrap the Go command and repository foundation
 
-**Status:** Ready  
-**Milestone:** 0.1.0  
-**Depends on:** None  
-**Issue/PR:** —
+**Status:** Done
+**Milestone:** 0.1.0
+**Depends on:** None
+**Issue/PR:** — (direct maintainer implementation, commit `e89931a`)
+**Completed:** 2026-07-28
+**Completion evidence:** CLI dispatcher tests and metadata-bearing binary invocation.
 
 **Authoritative references:** `AGENTS.md` §§6–7; `ARCHITECTURE.md` §§3, 5, 30.
 
@@ -104,10 +106,12 @@ boundaries; no database migration or user-visible feature.
 
 ### SFT-002 — Establish development quality gates
 
-**Status:** Planned  
-**Milestone:** 0.1.0  
-**Depends on:** SFT-001  
-**Issue/PR:** —
+**Status:** Done
+**Milestone:** 0.1.0
+**Depends on:** SFT-001
+**Issue/PR:** — (direct maintainer implementation, commit `b09b849`)
+**Completed:** 2026-07-28
+**Completion evidence:** Local `make check` parity and the CI check/race workflows.
 
 **Authoritative references:** `AGENTS.md` §§18–20; `ARCHITECTURE.md` §§32–35.
 
@@ -132,10 +136,12 @@ CGO compilation, and artifact metadata.
 
 ### SFT-003 — Implement configuration and safe process logging
 
-**Status:** Planned  
-**Milestone:** 0.1.0  
-**Depends on:** SFT-001  
-**Issue/PR:** —
+**Status:** Done
+**Milestone:** 0.1.0
+**Depends on:** SFT-001
+**Issue/PR:** — (direct maintainer implementation, commit `1edf3a8`)
+**Completed:** 2026-07-28
+**Completion evidence:** Configuration boundary, `_FILE`, and sensitive-log capture tests.
 
 **Authoritative references:** `ARCHITECTURE.md` §9; `AGENTS.md` §§7.4, 13.4.
 
@@ -165,10 +171,12 @@ memory-limit defaults and secret handling.
 
 ### SFT-004 — Implement application lifecycle and local control transport
 
-**Status:** Planned  
-**Milestone:** 0.1.0  
-**Depends on:** SFT-003  
-**Issue/PR:** —
+**Status:** Done
+**Milestone:** 0.1.0
+**Depends on:** SFT-003
+**Issue/PR:** — (direct maintainer implementation, commit `88d91e9`)
+**Completed:** 2026-07-28
+**Completion evidence:** Listener, signal, timeout, socket, panic, and race tests.
 
 **Authoritative references:** `ARCHITECTURE.md` §§4, 6–8, 30.
 
@@ -180,8 +188,10 @@ used by administrative CLI commands.
 
 - Both listeners run in one long-lived process with distinct middleware roots.
 - Critical component failure cancels the application exactly once.
-- Shutdown stops admission, drains accepted work within the configured timeout,
-  checkpoints safely, and closes resources in documented order.
+- Shutdown marks readiness unhealthy, stops current listener admission, bounds
+  active HTTP work by the configured timeout, and closes resources introduced
+  by this task in documented order. Queue-drain and WAL-checkpoint integration
+  remain assigned to SFT-013 and SFT-005 respectively.
 - The control socket is owner-only, is removed on clean shutdown, rejects
   unauthorized access, and exposes no TCP administration API.
 - HTTP panic recovery returns a generic error with request ID; lifecycle panics
@@ -199,7 +209,7 @@ or migration. Security review covers socket permissions and safe errors.
 
 ### SFT-005 — Implement the SQLite lifecycle
 
-**Status:** Planned  
+**Status:** Ready
 **Milestone:** 0.1.0  
 **Depends on:** SFT-003  
 **Issue/PR:** —
@@ -265,7 +275,7 @@ required if implementation cannot preserve a documented invariant.
 
 ### SFT-007 — Implement canonical event and source normalization
 
-**Status:** Planned  
+**Status:** Ready
 **Milestone:** 0.1.0  
 **Depends on:** SFT-001  
 **Issue/PR:** —

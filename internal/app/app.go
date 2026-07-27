@@ -4,11 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"log/slog"
 	"net"
 	"net/http"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"time"
 
 	"github.com/drilonrecica/siftail/internal/config"
@@ -18,8 +20,9 @@ import (
 
 // App composes the long-running Siftail process.
 type App struct {
-	cfg    config.Config
-	logger *slog.Logger
+	cfg          config.Config
+	logger       *slog.Logger
+	shuttingDown atomic.Bool
 }
 
 // New creates an application root. It does not open listeners or databases.
@@ -57,7 +60,7 @@ func (a *App) ensureDataDir() error {
 	if err := os.MkdirAll(a.cfg.DataDir, 0750); err != nil {
 		return fmt.Errorf("creating data directory %q: %w", a.cfg.DataDir, err)
 	}
-	return nil
+	return a.cfg.IsWritableDataDir()
 }
 
 func (a *App) controlSocketPath() string {
@@ -65,27 +68,17 @@ func (a *App) controlSocketPath() string {
 }
 
 func (a *App) openControlSocket() (net.Listener, error) {
-	path := a.controlSocketPath()
-	// Remove stale socket left by a previous unclean shutdown.
-	if _, err := os.Stat(path); err == nil {
-		if err := os.Remove(path); err != nil {
-			return nil, fmt.Errorf("removing stale control socket %q: %w", path, err)
-		}
-	}
-	l, err := net.Listen("unix", path)
-	if err != nil {
-		return nil, err
-	}
-	if err := os.Chmod(path, 0600); err != nil {
-		_ = l.Close()
-		return nil, fmt.Errorf("setting control socket permissions: %w", err)
-	}
-	return l, nil
+	return openOwnerOnlyControlSocket(a.controlSocketPath())
 }
 
 func (a *App) controlMux() *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ping", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.Header().Set("Allow", http.MethodGet)
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("pong"))
 	})
@@ -93,25 +86,10 @@ func (a *App) controlMux() *http.ServeMux {
 }
 
 func (a *App) runControlServer(ctx context.Context, l net.Listener) error {
-	mux := a.controlMux()
-	srv := &http.Server{
-		Handler:      mux,
-		ReadTimeout:  5 * time.Second,
-		WriteTimeout: 10 * time.Second,
-	}
+	srv := a.newServer(a.controlMux(), "control")
 
-	go func() {
-		<-ctx.Done()
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), a.cfg.ShutdownTimeout)
-		defer cancel()
-		_ = srv.Shutdown(shutdownCtx)
-	}()
-
-	a.logger.Info("control socket listening", "path", a.controlSocketPath())
-	if err := srv.Serve(l); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		return fmt.Errorf("control server: %w", err)
-	}
-	return nil
+	a.logger.Info("component started", "component", "control")
+	return a.serveHTTP(ctx, srv, l, "control")
 }
 
 func (a *App) uiMux() *http.ServeMux {
@@ -121,6 +99,10 @@ func (a *App) uiMux() *http.ServeMux {
 		_, _ = w.Write([]byte("ok"))
 	})
 	mux.HandleFunc("/health/ready", func(w http.ResponseWriter, r *http.Request) {
+		if a.shuttingDown.Load() {
+			http.Error(w, "not ready", http.StatusServiceUnavailable)
+			return
+		}
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	})
@@ -145,10 +127,16 @@ func (a *App) newServer(handler http.Handler, name string) *http.Server {
 		),
 	)
 	return &http.Server{
-		Handler:      base,
-		ReadTimeout:  10 * time.Second,
-		WriteTimeout: 30 * time.Second,
-		ErrorLog:     slog.NewLogLogger(a.logger.Handler(), slog.LevelError),
+		Handler:           base,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       10 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		MaxHeaderBytes:    16 * 1024,
+		ErrorLog: log.New(
+			safeHTTPErrorWriter{logger: a.logger, component: name},
+			"",
+			0,
+		),
 	}
 }
 
@@ -168,18 +156,61 @@ func (a *App) runHTTPServer(ctx context.Context, srv *http.Server, addr, name st
 		return fmt.Errorf("%s listener: %w", name, err)
 	}
 
+	a.logger.Info("component started", "component", name)
+	return a.serveHTTP(ctx, srv, listener, name)
+}
+
+func (a *App) serveHTTP(ctx context.Context, srv *http.Server, listener net.Listener, name string) error {
+	serveResult := make(chan error, 1)
 	go func() {
-		<-ctx.Done()
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), a.cfg.ShutdownTimeout)
-		defer cancel()
-		if err := srv.Shutdown(shutdownCtx); err != nil {
-			a.logger.Error("server shutdown error", "server", name, "error", err)
-		}
+		serveResult <- srv.Serve(listener)
 	}()
 
-	a.logger.Info("server listening", "server", name, "addr", listener.Addr().String())
-	if err := srv.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		return fmt.Errorf("%s server: %w", name, err)
+	select {
+	case err := <-serveResult:
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			return fmt.Errorf("%s server: %w", name, err)
+		}
+		if ctx.Err() == nil {
+			return fmt.Errorf("%s server stopped unexpectedly", name)
+		}
+		return nil
+	case <-ctx.Done():
+		a.shuttingDown.Store(true)
+	}
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), a.cfg.ShutdownTimeout)
+	shutdownErr := srv.Shutdown(shutdownCtx)
+	cancel()
+	if shutdownErr != nil {
+		a.logger.Error("server shutdown timed out",
+			"component", name,
+			"error_category", "shutdown_timeout",
+		)
+		if closeErr := srv.Close(); closeErr != nil && !errors.Is(closeErr, http.ErrServerClosed) {
+			return fmt.Errorf("%s forced close: %w", name, closeErr)
+		}
+	}
+
+	serveErr := <-serveResult
+	if serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
+		return fmt.Errorf("%s server: %w", name, serveErr)
+	}
+	if shutdownErr != nil {
+		return fmt.Errorf("%s server shutdown exceeded %s: %w", name, a.cfg.ShutdownTimeout, shutdownErr)
 	}
 	return nil
+}
+
+type safeHTTPErrorWriter struct {
+	logger    *slog.Logger
+	component string
+}
+
+func (w safeHTTPErrorWriter) Write(message []byte) (int, error) {
+	w.logger.Warn("http server reported a connection error",
+		"component", w.component,
+		"error_category", "http_connection",
+	)
+	return len(message), nil
 }

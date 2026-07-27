@@ -11,32 +11,66 @@ import (
 // ConfigureLogger initializes process logging according to the configuration.
 // It writes to stdout and never logs incoming payloads, bodies, or credentials.
 func ConfigureLogger(cfg Config) (*slog.Logger, error) {
+	return configureLogger(cfg, os.Stdout)
+}
+
+func configureLogger(cfg Config, output io.Writer) (*slog.Logger, error) {
 	level, err := parseLogLevel(cfg.LogLevel)
 	if err != nil {
 		return nil, err
 	}
 
 	opts := &slog.HandlerOptions{
-		Level:     level,
-		AddSource: false,
-		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
-			// Ensure no accidental secret keys are emitted by lowercasing
-			// and keeping values as-is; secrets are redacted at the source.
-			return a
-		},
+		Level:       level,
+		AddSource:   false,
+		ReplaceAttr: redactSensitiveAttr,
 	}
 
 	var handler slog.Handler
 	switch cfg.LogFormat {
 	case "json":
-		handler = slog.NewJSONHandler(os.Stdout, opts)
+		handler = slog.NewJSONHandler(output, opts)
 	case "text":
-		handler = slog.NewTextHandler(os.Stdout, opts)
+		handler = slog.NewTextHandler(output, opts)
 	default:
 		return nil, fmt.Errorf("unsupported log format: %q", cfg.LogFormat)
 	}
 
 	return slog.New(handler), nil
+}
+
+func redactSensitiveAttr(_ []string, attr slog.Attr) slog.Attr {
+	if isSensitiveLogKey(attr.Key) {
+		return slog.String(attr.Key, "[redacted]")
+	}
+	return attr
+}
+
+func isSensitiveLogKey(key string) bool {
+	key = strings.ToLower(strings.TrimSpace(key))
+	key = strings.NewReplacer("-", "_", ".", "_").Replace(key)
+
+	switch key {
+	case "authorization", "cookie", "set_cookie",
+		"password", "passwd", "secret",
+		"token", "session", "session_id",
+		"token_hash", "password_hash", "session_hash",
+		"body", "request_body", "response_body",
+		"payload", "message", "raw", "attributes",
+		"environment", "env":
+		return true
+	}
+
+	for _, fragment := range []string{
+		"_authorization", "_password", "_passwd", "_secret",
+		"_token", "_token_hash", "_password_hash", "_session_hash",
+		"_body", "_payload", "_message", "_raw",
+	} {
+		if strings.HasSuffix(key, fragment) {
+			return true
+		}
+	}
+	return false
 }
 
 func parseLogLevel(level string) (slog.Level, error) {

@@ -101,6 +101,19 @@ func TestParseInvalidURL(t *testing.T) {
 	}
 }
 
+func TestParseURLRejectsCredentials(t *testing.T) {
+	clearEnv(t)
+	setEnv(t, "SIFTAIL_PUBLIC_URL", "https://administrator:secret@logs.example.com")
+
+	_, err := Parse()
+	if err == nil {
+		t.Fatal("expected URL credentials to be rejected")
+	}
+	if strings.Contains(err.Error(), "secret") {
+		t.Fatalf("validation error leaked URL password: %v", err)
+	}
+}
+
 func TestParseInvalidLogLevel(t *testing.T) {
 	clearEnv(t)
 	setEnv(t, "SIFTAIL_LOG_LEVEL", "verbose")
@@ -108,6 +121,36 @@ func TestParseInvalidLogLevel(t *testing.T) {
 	_, err := Parse()
 	if err == nil {
 		t.Fatal("expected error for invalid log level")
+	}
+}
+
+func TestParseInvalidLogFormat(t *testing.T) {
+	clearEnv(t)
+	setEnv(t, "SIFTAIL_LOG_FORMAT", "yaml")
+
+	_, err := Parse()
+	if err == nil {
+		t.Fatal("expected error for invalid log format")
+	}
+}
+
+func TestParseInvalidShutdownTimeout(t *testing.T) {
+	clearEnv(t)
+	setEnv(t, "SIFTAIL_SHUTDOWN_TIMEOUT", "eventually")
+
+	_, err := Parse()
+	if err == nil {
+		t.Fatal("expected error for invalid shutdown timeout")
+	}
+}
+
+func TestParseInvalidInteger(t *testing.T) {
+	clearEnv(t)
+	setEnv(t, "SIFTAIL_MAX_EVENTS_PER_REQUEST", "many")
+
+	_, err := Parse()
+	if err == nil {
+		t.Fatal("expected error for invalid integer")
 	}
 }
 
@@ -129,6 +172,60 @@ func TestParseQueueTooSmall(t *testing.T) {
 	_, err := Parse()
 	if err == nil {
 		t.Fatal("expected error for queue bytes smaller than max event bytes")
+	}
+}
+
+func TestValidateRejectsEveryNonpositiveLimit(t *testing.T) {
+	clearEnv(t)
+	base, err := Parse()
+	if err != nil {
+		t.Fatalf("Parse defaults: %v", err)
+	}
+
+	tests := []struct {
+		name string
+		set  func(*Config)
+	}{
+		{"compressed bytes", func(c *Config) { c.MaxCompressedRequestBytes = 0 }},
+		{"decompressed bytes", func(c *Config) { c.MaxDecompressedRequestBytes = 0 }},
+		{"events per request", func(c *Config) { c.MaxEventsPerRequest = 0 }},
+		{"event bytes", func(c *Config) { c.MaxEventBytes = 0 }},
+		{"queue events", func(c *Config) { c.QueueMaxEvents = 0 }},
+		{"queue bytes", func(c *Config) { c.QueueMaxBytes = 0 }},
+		{"resident events", func(c *Config) { c.IngestResidentMaxEvents = 0 }},
+		{"resident bytes", func(c *Config) { c.IngestResidentMaxBytes = 0 }},
+		{"decoders", func(c *Config) { c.IngestMaxDecoders = 0 }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := base
+			tt.set(&cfg)
+			if err := cfg.Validate(); err == nil {
+				t.Fatal("expected validation failure")
+			}
+		})
+	}
+}
+
+func TestValidateRejectsResidentLimitsBelowQueue(t *testing.T) {
+	clearEnv(t)
+	cfg, err := Parse()
+	if err != nil {
+		t.Fatalf("Parse defaults: %v", err)
+	}
+
+	cfg.IngestResidentMaxEvents = cfg.QueueMaxEvents - 1
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected resident event limit below queue to fail")
+	}
+
+	cfg, err = Parse()
+	if err != nil {
+		t.Fatalf("Parse defaults: %v", err)
+	}
+	cfg.IngestResidentMaxBytes = cfg.QueueMaxBytes - 1
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected resident byte limit below queue to fail")
 	}
 }
 
@@ -200,6 +297,32 @@ func TestSanitizedCopy(t *testing.T) {
 	s.TrustedProxyCIDRs[0] = "changed"
 	if cfg.TrustedProxyCIDRs[0] == "changed" {
 		t.Fatal("Sanitized returned a shallow copy")
+	}
+}
+
+func TestIsWritableDataDir(t *testing.T) {
+	dir := t.TempDir()
+	cfg := Config{DataDir: dir}
+	if err := cfg.IsWritableDataDir(); err != nil {
+		t.Fatalf("IsWritableDataDir: %v", err)
+	}
+	matches, err := filepath.Glob(filepath.Join(dir, ".siftail-write-check-*"))
+	if err != nil {
+		t.Fatalf("glob write checks: %v", err)
+	}
+	if len(matches) != 0 {
+		t.Fatalf("write check left temporary files: %v", matches)
+	}
+}
+
+func TestIsWritableDataDirRejectsFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "data-file")
+	if err := os.WriteFile(path, []byte("not a directory"), 0600); err != nil {
+		t.Fatalf("write data file: %v", err)
+	}
+	cfg := Config{DataDir: path}
+	if err := cfg.IsWritableDataDir(); err == nil {
+		t.Fatal("expected file data path to fail")
 	}
 }
 

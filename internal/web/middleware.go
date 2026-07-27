@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"runtime/debug"
 	"time"
 )
 
@@ -15,10 +14,7 @@ const requestIDHeader = "X-Request-ID"
 // RequestID assigns a correlation ID to every request and response.
 func RequestID(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		id := r.Header.Get(requestIDHeader)
-		if id == "" {
-			id = generateID()
-		}
+		id := generateID()
 		w.Header().Set(requestIDHeader, id)
 		next.ServeHTTP(w, r.WithContext(ContextWithRequestID(r.Context(), id)))
 	})
@@ -39,8 +35,7 @@ func PanicRecovery(logger *slog.Logger) func(http.Handler) http.Handler {
 					}
 					logger.Error("request panic recovered",
 						"request_id", id,
-						"panic", rec,
-						"stack", debug.Stack(),
+						"error_category", "handler_panic",
 					)
 					w.WriteHeader(http.StatusInternalServerError)
 					_, _ = fmt.Fprintf(w, "internal error (request %s)\n", id)
@@ -58,10 +53,14 @@ func RequestLogger(logger *slog.Logger) func(http.Handler) http.Handler {
 			start := time.Now()
 			ww := &responseRecorder{ResponseWriter: w, statusCode: http.StatusOK}
 			next.ServeHTTP(ww, r)
+			route := r.Pattern
+			if route == "" {
+				route = "unmatched"
+			}
 			logger.Info("http request",
 				"request_id", RequestIDFromContext(r.Context()),
 				"method", r.Method,
-				"path", r.URL.Path,
+				"operation", route,
 				"status", ww.statusCode,
 				"duration", time.Since(start),
 			)
@@ -80,16 +79,39 @@ func WithCommonHeaders(next http.Handler) http.Handler {
 
 type responseRecorder struct {
 	http.ResponseWriter
-	statusCode int
+	statusCode  int
+	wroteHeader bool
+}
+
+func (rr *responseRecorder) Write(p []byte) (int, error) {
+	if !rr.wroteHeader {
+		rr.WriteHeader(http.StatusOK)
+	}
+	return rr.ResponseWriter.Write(p)
 }
 
 func (rr *responseRecorder) WriteHeader(code int) {
+	if rr.wroteHeader {
+		return
+	}
+	rr.wroteHeader = true
 	rr.statusCode = code
 	rr.ResponseWriter.WriteHeader(code)
 }
 
+func (rr *responseRecorder) Flush() {
+	if !rr.wroteHeader {
+		rr.WriteHeader(http.StatusOK)
+	}
+	_ = http.NewResponseController(rr.ResponseWriter).Flush()
+}
+
+func (rr *responseRecorder) Unwrap() http.ResponseWriter {
+	return rr.ResponseWriter
+}
+
 func generateID() string {
-	b := make([]byte, 8)
+	b := make([]byte, 16)
 	if _, err := rand.Read(b); err != nil {
 		// Fall back to a timestamp-based ID if crypto/rand fails.
 		return fmt.Sprintf("%d", time.Now().UnixNano())

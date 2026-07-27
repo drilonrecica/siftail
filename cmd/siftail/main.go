@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"syscall"
@@ -13,71 +14,86 @@ import (
 )
 
 func main() {
-	if len(os.Args) < 2 {
-		printUsage()
-		os.Exit(1)
+	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
+}
+
+func run(args []string, stdout, stderr io.Writer) int {
+	if len(args) == 0 {
+		printUsage(stderr)
+		return 1
 	}
 
-	cmd := os.Args[1]
+	cmd := args[0]
 	switch cmd {
 	case "version":
-		runVersion()
+		runVersion(stdout)
+		return 0
 	case "serve":
-		runServe()
-	case "config":
-		if len(os.Args) < 3 {
-			fmt.Fprintln(os.Stderr, "siftail: missing config subcommand")
-			printUsage()
-			os.Exit(1)
+		if err := runServe(); err != nil {
+			fmt.Fprintf(stderr, "siftail: %v\n", err)
+			return 1
 		}
-		sub := os.Args[2]
+		return 0
+	case "config":
+		if len(args) < 2 {
+			fmt.Fprintln(stderr, "siftail: missing config subcommand")
+			printUsage(stderr)
+			return 1
+		}
+		sub := args[1]
 		switch sub {
 		case "validate":
-			runConfigValidate()
+			if err := runConfigValidate(stdout); err != nil {
+				fmt.Fprintf(stderr, "configuration invalid: %v\n", err)
+				return 1
+			}
+			return 0
 		default:
-			fmt.Fprintf(os.Stderr, "siftail: unknown config subcommand %q\n\n", sub)
-			printUsage()
-			os.Exit(1)
+			fmt.Fprintf(stderr, "siftail: unknown config subcommand %q\n\n", sub)
+			printUsage(stderr)
+			return 1
 		}
 	case "help", "-h", "--help":
-		printUsage()
+		printUsage(stdout)
+		return 0
 	default:
-		fmt.Fprintf(os.Stderr, "siftail: unknown command %q\n\n", cmd)
-		printUsage()
-		os.Exit(1)
+		fmt.Fprintf(stderr, "siftail: unknown command %q\n\n", cmd)
+		printUsage(stderr)
+		return 1
 	}
 }
 
-func runVersion() {
-	fmt.Printf("siftail version %s\n", version.Version)
-	fmt.Printf("commit: %s\n", version.Commit)
-	fmt.Printf("build date: %s\n", version.BuildDate)
-	fmt.Printf("go version: %s\n", version.GoVersion())
+func runVersion(stdout io.Writer) {
+	fmt.Fprintf(stdout, "siftail version %s\n", version.Version)
+	fmt.Fprintf(stdout, "commit: %s\n", version.Commit)
+	fmt.Fprintf(stdout, "build date: %s\n", version.BuildDate)
+	fmt.Fprintf(stdout, "go version: %s\n", version.GoVersion())
 }
 
-func runConfigValidate() {
+func runConfigValidate(stdout io.Writer) error {
 	cfg, err := config.Parse()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "configuration invalid: %v\n", err)
-		os.Exit(1)
+		return err
 	}
-	fmt.Println("configuration valid")
-	fmt.Printf("data dir: %s\n", cfg.DataDir)
-	fmt.Printf("ui addr: %s\n", cfg.UIAddr)
-	fmt.Printf("ingest addr: %s\n", cfg.IngestAddr)
+	if err := cfg.IsWritableDataDir(); err != nil {
+		return err
+	}
+	fmt.Fprintln(stdout, "configuration valid")
+	fmt.Fprintf(stdout, "data dir: %s\n", cfg.DataDir)
+	fmt.Fprintf(stdout, "ui addr: %s\n", cfg.UIAddr)
+	fmt.Fprintf(stdout, "ingest addr: %s\n", cfg.IngestAddr)
+	return nil
 }
 
-func runServe() {
+func runServe() error {
 	cfg, err := config.Parse()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "configuration invalid: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("configuration invalid: %w", err)
 	}
 
 	logger, err := config.ConfigureLogger(cfg)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "logger setup failed: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("logger setup failed: %w", err)
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -85,18 +101,19 @@ func runServe() {
 
 	application := app.New(cfg, logger)
 	if err := application.Run(ctx); err != nil {
-		logger.Error("application error", "error", err)
-		os.Exit(1)
+		logger.Error("application stopped", "error_category", "critical_component")
+		return fmt.Errorf("application stopped unexpectedly")
 	}
 
 	logger.Info("shutdown complete")
+	return nil
 }
 
-func printUsage() {
-	fmt.Fprintln(os.Stderr, "Usage: siftail <command>")
-	fmt.Fprintln(os.Stderr, "")
-	fmt.Fprintln(os.Stderr, "Commands:")
-	fmt.Fprintln(os.Stderr, "  version         Print version information")
-	fmt.Fprintln(os.Stderr, "  serve           Start the Siftail server")
-	fmt.Fprintln(os.Stderr, "  config validate Validate process configuration without opening the database")
+func printUsage(w io.Writer) {
+	fmt.Fprintln(w, "Usage: siftail <command>")
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "Commands:")
+	fmt.Fprintln(w, "  version         Print version information")
+	fmt.Fprintln(w, "  serve           Start the Siftail server")
+	fmt.Fprintln(w, "  config validate Validate process configuration without opening the database")
 }

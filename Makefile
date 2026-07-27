@@ -1,4 +1,4 @@
-.PHONY: fmt vet test race-test build clean
+.PHONY: fmt fmt-check vet test race-test build check clean
 
 GO       := go
 BINARY   := siftail
@@ -14,17 +14,27 @@ LDFLAGS := -X github.com/drilonrecica/siftail/internal/version.Version=$(VERSION
 fmt:
 	$(GO) fmt ./...
 
-vet: fmt
+fmt-check:
+	@files="$$(gofmt -l .)"; \
+	if [ -n "$$files" ]; then \
+		echo "Go files need formatting:"; \
+		echo "$$files"; \
+		exit 1; \
+	fi
+
+vet:
 	$(GO) vet ./...
 
-test: vet
+test:
 	$(GO) test ./...
 
-race-test: vet
+race-test:
 	$(GO) test -race ./...
 
 build:
 	$(GO) build -ldflags "$(LDFLAGS)" -o $(BINARY) ./cmd/siftail
+
+check: fmt-check vet test build
 
 clean:
 	rm -f $(BINARY)

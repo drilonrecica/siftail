@@ -1,6 +1,8 @@
-# Siftail Planning Package
+# Siftail
 
-This package contains the authoritative planning documents for **Siftail**, a fast, private, self-hosted log viewer designed first for Coolify and Fluent Bit.
+This repository contains the implementation and authoritative specifications for
+**Siftail**, a fast, private, self-hosted log viewer designed first for Coolify
+and Fluent Bit.
 
 The documents are written to be standalone. Coding agents should not need access to the planning conversation that produced them.
 
@@ -60,18 +62,39 @@ The name is explained subtly in selected copy: users can **sift through historic
 
 ## Development
 
-Siftail is built with **Go 1.22** and requires **CGO** for the SQLite driver (`mattn/go-sqlite3`).
+The supported Go toolchain is declared by [`go.mod`](go.mod), which is also the
+version source used by CI. CI enables CGO and installs the C compiler required
+by the selected SQLite driver when that driver is introduced in SFT-005.
 
 Common local checks:
 
 ```bash
 make fmt        # go fmt ./...
+make fmt-check  # verify formatting without modifying files
 make vet        # go vet ./...
 make test       # go test ./...
 make race-test  # go test -race ./...
 make build      # build the siftail binary
+make check      # formatting, vet, tests, and metadata-bearing build
 ```
+
+No process secret environment variable exists yet. When one is introduced,
+direct and `_FILE` forms will be mutually exclusive; `_FILE` input removes only
+trailing CR/LF bytes and never appears in sanitized configuration or logs.
+
+### Current dependency rationale
+
+- `golang.org/x/sync/errgroup` provides owned cancellation and first-error
+  propagation for the application’s critical components. The standard library
+  does not provide the same combined group/error boundary. It has no transitive
+  module dependencies and adds no runtime service or public API. Only its
+  group/cancellation implementation is linked; binary-size impact has not yet
+  been measured. It is maintained by the Go project under the BSD 3-Clause
+  license.
 
 ## Important note
 
-These are planning and implementation specifications, not generated application code. When implementation intentionally changes an accepted decision, update the relevant specification, tests, migrations, and—when the decision is consequential—an ADR in the same change.
+The specification documents are authoritative inputs to the implementation, not
+generated descriptions of it. When implementation intentionally changes an
+accepted decision, update the relevant specification, tests, migrations, and—
+when the decision is consequential—an ADR in the same change.

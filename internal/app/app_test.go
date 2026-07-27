@@ -1,6 +1,7 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"log/slog"
@@ -71,6 +72,15 @@ func TestAppStartsListeners(t *testing.T) {
 
 	waitForServer(t, "http://"+cfg.UIAddr+"/health/live")
 	waitForServer(t, "http://"+cfg.IngestAddr+"/health/live")
+
+	ingestReady, err := http.Get("http://" + cfg.IngestAddr + "/health/ready")
+	if err != nil {
+		t.Fatalf("ingest readiness request: %v", err)
+	}
+	ingestReady.Body.Close()
+	if ingestReady.StatusCode != http.StatusNotFound {
+		t.Fatalf("ingestion router unexpectedly exposes UI readiness: %d", ingestReady.StatusCode)
+	}
 
 	resp, err := http.Get("http://" + cfg.UIAddr + "/health/live")
 	if err != nil {
@@ -145,13 +155,44 @@ func TestAppListenerCollision(t *testing.T) {
 	if !strings.Contains(err.Error(), "ui listener") {
 		t.Fatalf("error does not mention ui listener: %v", err)
 	}
+	if _, err := os.Stat(filepath.Join(cfg.DataDir, "siftail-control.sock")); !os.IsNotExist(err) {
+		t.Fatalf("control socket remains after critical listener failure: %v", err)
+	}
+}
+
+func TestAppRejectsDataPathThatIsNotDirectory(t *testing.T) {
+	cfg := testConfig(t)
+	dataPath := filepath.Join(t.TempDir(), "not-a-directory")
+	if err := os.WriteFile(dataPath, []byte("operator data"), 0600); err != nil {
+		t.Fatalf("write data path: %v", err)
+	}
+	cfg.DataDir = dataPath
+	cfg.DatabasePath = filepath.Join(dataPath, "siftail.db")
+
+	app := New(cfg, testLogger(t))
+	err := app.Run(context.Background())
+	if err == nil {
+		t.Fatal("expected invalid data path to fail")
+	}
+	if !strings.Contains(err.Error(), "data directory") {
+		t.Fatalf("error does not identify data directory: %v", err)
+	}
 }
 
 func TestAppStaleControlSocketRemoved(t *testing.T) {
 	cfg := testConfig(t)
 	stale := filepath.Join(cfg.DataDir, "siftail-control.sock")
-	if err := os.WriteFile(stale, []byte("stale"), 0644); err != nil {
-		t.Fatalf("create stale socket: %v", err)
+	addr, err := net.ResolveUnixAddr("unix", stale)
+	if err != nil {
+		t.Fatalf("resolve stale socket: %v", err)
+	}
+	staleListener, err := net.ListenUnix("unix", addr)
+	if err != nil {
+		t.Fatalf("listen stale socket: %v", err)
+	}
+	staleListener.SetUnlinkOnClose(false)
+	if err := staleListener.Close(); err != nil {
+		t.Fatalf("close stale socket: %v", err)
 	}
 
 	app := New(cfg, testLogger(t))
@@ -175,6 +216,59 @@ func TestAppStaleControlSocketRemoved(t *testing.T) {
 
 	cancel()
 	<-errCh
+}
+
+func TestAppDoesNotRemoveNonSocketAtControlPath(t *testing.T) {
+	cfg := testConfig(t)
+	path := filepath.Join(cfg.DataDir, "siftail-control.sock")
+	const content = "operator data"
+	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+		t.Fatalf("write control-path file: %v", err)
+	}
+
+	app := New(cfg, testLogger(t))
+	if _, err := app.openControlSocket(); err == nil {
+		t.Fatal("expected non-socket control path to be rejected")
+	}
+
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read preserved file: %v", err)
+	}
+	if string(got) != content {
+		t.Fatalf("control-path file was modified: %q", got)
+	}
+}
+
+func TestAppDoesNotDetachLiveControlSocket(t *testing.T) {
+	cfg := testConfig(t)
+	path := filepath.Join(cfg.DataDir, "siftail-control.sock")
+	addr, err := net.ResolveUnixAddr("unix", path)
+	if err != nil {
+		t.Fatalf("resolve socket: %v", err)
+	}
+	live, err := net.ListenUnix("unix", addr)
+	if err != nil {
+		t.Fatalf("listen socket: %v", err)
+	}
+	defer live.Close()
+
+	app := New(cfg, testLogger(t))
+	if _, err := app.openControlSocket(); err == nil {
+		t.Fatal("expected live control socket to be rejected")
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("live control socket was removed: %v", err)
+	}
+}
+
+func TestControlUIDAuthorization(t *testing.T) {
+	if !isAuthorizedControlUID(1000, 1000) {
+		t.Fatal("owner UID was rejected")
+	}
+	if isAuthorizedControlUID(1000, 1001) {
+		t.Fatal("different peer UID was authorized")
+	}
 }
 
 func TestAppControlSocketPing(t *testing.T) {
@@ -212,33 +306,90 @@ func TestAppControlSocketPing(t *testing.T) {
 		t.Fatalf("control ping body = %q", body)
 	}
 
+	request, err := http.NewRequest(http.MethodPost, "http://unix/ping", strings.NewReader("ignored"))
+	if err != nil {
+		t.Fatalf("create control POST: %v", err)
+	}
+	response, err := client.Do(request)
+	if err != nil {
+		t.Fatalf("control POST: %v", err)
+	}
+	response.Body.Close()
+	if response.StatusCode != http.StatusMethodNotAllowed {
+		t.Fatalf("control POST status = %d, want 405", response.StatusCode)
+	}
+
 	cancel()
 	<-errCh
 }
 
 func TestAppShutdownTimeout(t *testing.T) {
 	cfg := testConfig(t)
-	cfg.ShutdownTimeout = 100 * time.Millisecond
-
+	cfg.ShutdownTimeout = 50 * time.Millisecond
 	app := New(cfg, testLogger(t))
+
+	requestStarted := make(chan struct{})
+	requestStopped := make(chan struct{})
+	srv := app.newServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(requestStarted)
+		<-r.Context().Done()
+		close(requestStopped)
+	}), "slow")
+	addr := freePort(t)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- app.Run(ctx)
+		errCh <- app.runHTTPServer(ctx, srv, addr, "slow")
 	}()
 
-	waitForServer(t, "http://"+cfg.UIAddr+"/health/live")
-
-	// Start a slow request that outlives the shutdown timeout.
-	go http.Get("http://" + cfg.UIAddr + "/health/live")
+	requestDone := make(chan struct{})
+	go func() {
+		defer close(requestDone)
+		_, _ = http.Get("http://" + addr)
+	}()
+	select {
+	case <-requestStarted:
+	case <-time.After(3 * time.Second):
+		t.Fatal("slow request did not start")
+	}
 
 	start := time.Now()
 	cancel()
-	<-errCh
+	err := <-errCh
 	elapsed := time.Since(start)
+	if err == nil || !strings.Contains(err.Error(), "shutdown exceeded") {
+		t.Fatalf("shutdown error = %v, want timeout category", err)
+	}
 	if elapsed > 2*time.Second {
 		t.Fatalf("shutdown took too long: %v", elapsed)
+	}
+	select {
+	case <-requestStopped:
+	case <-time.After(time.Second):
+		t.Fatal("forced close did not cancel the active request")
+	}
+	<-requestDone
+}
+
+func TestSafeHTTPErrorWriterDoesNotLogServerMessage(t *testing.T) {
+	var output bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&output, nil))
+	writer := safeHTTPErrorWriter{logger: logger, component: "ui"}
+
+	const sensitive = "authorization bearer must-not-leak"
+	written, err := writer.Write([]byte(sensitive))
+	if err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	if written != len(sensitive) {
+		t.Fatalf("written = %d, want %d", written, len(sensitive))
+	}
+	if strings.Contains(output.String(), sensitive) {
+		t.Fatalf("server message leaked into process log: %s", output.String())
+	}
+	if !strings.Contains(output.String(), "http_connection") {
+		t.Fatalf("safe error category missing: %s", output.String())
 	}
 }
 

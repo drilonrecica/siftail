@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 )
 
@@ -58,6 +59,7 @@ func listUnknownVars(known map[string]struct{}) []string {
 			unknown = append(unknown, name)
 		}
 	}
+	sort.Strings(unknown)
 	return unknown
 }
 

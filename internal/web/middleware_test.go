@@ -31,7 +31,7 @@ func TestRequestIDAssigned(t *testing.T) {
 	}
 }
 
-func TestRequestIDPreserved(t *testing.T) {
+func TestRequestIDDoesNotTrustCallerValue(t *testing.T) {
 	handler := RequestID(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -41,8 +41,8 @@ func TestRequestIDPreserved(t *testing.T) {
 	rr := httptest.NewRecorder()
 	handler.ServeHTTP(rr, req)
 
-	if got := rr.Header().Get("X-Request-ID"); got != "client-id" {
-		t.Fatalf("X-Request-ID = %q, want client-id", got)
+	if got := rr.Header().Get("X-Request-ID"); got == "" || got == "client-id" {
+		t.Fatalf("X-Request-ID = %q, want generated internal ID", got)
 	}
 }
 
@@ -71,6 +71,9 @@ func TestPanicRecovery(t *testing.T) {
 	if !strings.Contains(buf.String(), "panic") {
 		t.Fatal("expected panic log")
 	}
+	if strings.Contains(buf.String(), "boom") {
+		t.Fatal("panic value leaked into log")
+	}
 }
 
 func TestRequestLoggerDoesNotLogBody(t *testing.T) {
@@ -88,6 +91,25 @@ func TestRequestLoggerDoesNotLogBody(t *testing.T) {
 	out := buf.String()
 	if strings.Contains(out, "secret-body") {
 		t.Fatalf("request body leaked into logs: %s", out)
+	}
+}
+
+func TestRequestLoggerDoesNotLogHostilePath(t *testing.T) {
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, nil))
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/known", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	handler := RequestLogger(logger)(mux)
+
+	req := httptest.NewRequest(http.MethodGet, "/secret-token-in-path", nil)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if strings.Contains(buf.String(), "secret-token-in-path") {
+		t.Fatalf("untrusted path leaked into logs: %s", buf.String())
 	}
 }
 

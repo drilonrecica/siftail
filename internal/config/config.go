@@ -275,6 +275,18 @@ func (c Config) IsWritableDataDir() error {
 	if !info.IsDir() {
 		return fmt.Errorf("data directory %q is not a directory", c.DataDir)
 	}
+	probe, err := os.CreateTemp(c.DataDir, ".siftail-write-check-*")
+	if err != nil {
+		return fmt.Errorf("data directory %q is not writable: %w", c.DataDir, err)
+	}
+	probePath := probe.Name()
+	if err := probe.Close(); err != nil {
+		_ = os.Remove(probePath)
+		return fmt.Errorf("closing data directory write check: %w", err)
+	}
+	if err := os.Remove(probePath); err != nil {
+		return fmt.Errorf("removing data directory write check: %w", err)
+	}
 	return nil
 }
 
@@ -291,13 +303,16 @@ func validateAddr(addr, name string) error {
 func validateURL(raw, name string) error {
 	u, err := url.Parse(raw)
 	if err != nil {
-		return fmt.Errorf("%s: invalid URL %q", name, raw)
+		return fmt.Errorf("%s: invalid URL", name)
 	}
 	if u.Scheme != "http" && u.Scheme != "https" {
 		return fmt.Errorf("%s: URL must use http or https scheme", name)
 	}
 	if u.Host == "" {
 		return fmt.Errorf("%s: URL must include a host", name)
+	}
+	if u.User != nil {
+		return fmt.Errorf("%s: URL must not contain credentials", name)
 	}
 	return nil
 }
