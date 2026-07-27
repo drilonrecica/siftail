@@ -283,10 +283,14 @@ required if implementation cannot preserve a documented invariant.
 
 ### SFT-007 — Implement canonical event and source normalization
 
-**Status:** Ready
+**Status:** Done
 **Milestone:** 0.1.0  
 **Depends on:** SFT-001  
-**Issue/PR:** —
+**Issue/PR:** — (direct maintainer implementation)
+**Completed:** 2026-07-28
+**Completion evidence:** Table-driven canonicalization, timestamp precedence,
+raw/multiline preservation, source fallback/distinction, level inference,
+duplicate/control/limit, canonical equality, JSON-depth, and bounded fuzz tests.
 
 **Authoritative references:** `DOMAIN.md` §§5–12; `AGENTS.md` §10; ADR 0004.
 
