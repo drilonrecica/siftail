@@ -359,10 +359,15 @@ Audit integration is added in `0.4.0`; no public administration API is created.
 
 ### SFT-009 — Implement the authenticated ingestion HTTP boundary
 
-**Status:** Planned  
+**Status:** Done
 **Milestone:** 0.1.0  
 **Depends on:** SFT-004, SFT-008  
-**Issue/PR:** —
+**Issue/PR:** — (direct maintainer implementation)
+**Completed:** 2026-07-28
+**Completion evidence:** HTTP admission tests for route/method, bearer syntax,
+active/revoked authentication, token-bound Server identity, media/encoding,
+compressed size, timeout, request ID, safe status mapping, and payload-free
+errors; full race suite.
 
 **Authoritative references:** `ARCHITECTURE.md` §§11.1–11.4, 11.7; ADR 0002.
 

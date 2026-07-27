@@ -343,6 +343,14 @@ func TestAppShutdownTimeout(t *testing.T) {
 		errCh <- app.runHTTPServer(ctx, srv, addr, "slow")
 	}()
 
+	for {
+		conn, err := net.DialTimeout("tcp", addr, 20*time.Millisecond)
+		if err == nil {
+			_ = conn.Close()
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
 	requestDone := make(chan struct{})
 	go func() {
 		defer close(requestDone)

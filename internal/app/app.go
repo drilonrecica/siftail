@@ -16,6 +16,7 @@ import (
 
 	"github.com/drilonrecica/siftail/internal/config"
 	"github.com/drilonrecica/siftail/internal/database"
+	"github.com/drilonrecica/siftail/internal/ingest"
 	"github.com/drilonrecica/siftail/internal/sources"
 	"github.com/drilonrecica/siftail/internal/web"
 	"golang.org/x/sync/errgroup"
@@ -162,10 +163,12 @@ func (a *App) uiMux() *http.ServeMux {
 
 func (a *App) ingestMux() *http.ServeMux {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/health/live", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("ok"))
+	store := sources.NewStore(a.db.Reader())
+	handler := ingest.NewHandler(store, nil, ingest.Limits{
+		MaxCompressedBytes: a.cfg.MaxCompressedRequestBytes,
+		RequestTimeout:     30 * time.Second,
 	})
+	mux.Handle("/api/v1/ingest", handler)
 	return mux
 }
 
