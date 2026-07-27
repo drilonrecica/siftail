@@ -475,10 +475,15 @@ migration. Benchmark accounting overhead.
 
 ### SFT-012 — Implement coordinated transactional persistence
 
-**Status:** Planned  
+**Status:** Done
 **Milestone:** 0.1.0  
 **Depends on:** SFT-006, SFT-007, SFT-008, SFT-011  
-**Issue/PR:** —
+**Issue/PR:** — (direct maintainer implementation)
+**Completed:** 2026-07-28
+**Completion evidence:** Real-SQLite coordinator and writer tests cover serialized
+transactions, rollback, trust and quota rejection, bounded cache churn,
+stable-ID idempotency/conflict, deterministic post-commit publication, safe
+database error/status classification, and concurrent race stress.
 
 **Authoritative references:** `ARCHITECTURE.md` §§14–15; `DOMAIN.md` §§8, 12–14,
 29; ADRs 0002 and 0004.

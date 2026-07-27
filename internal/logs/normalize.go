@@ -692,7 +692,7 @@ func (e CanonicalEvent) RetainedBytes() int64 {
 func CanonicalEqual(a, b CanonicalEvent) bool {
 	a.ReceivedAtUS, b.ReceivedAtUS = 0, 0
 	return a.EventAtUS == b.EventAtUS &&
-		a.Source == b.Source &&
+		sourceIdentityEqual(a.Source, b.Source) &&
 		containerEqual(a.Container, b.Container) &&
 		a.Stream == b.Stream && a.Level == b.Level &&
 		a.OriginalLevel == b.OriginalLevel &&
@@ -701,6 +701,14 @@ func CanonicalEqual(a, b CanonicalEvent) bool {
 		bytes.Equal(a.Attributes, b.Attributes) &&
 		a.SourceEventID == b.SourceEventID &&
 		commonEqual(a.Common, b.Common)
+}
+
+func sourceIdentityEqual(a, b SourceIdentity) bool {
+	return a.ServerID == b.ServerID &&
+		a.Project == b.Project &&
+		a.Environment == b.Environment &&
+		a.Application == b.Application &&
+		a.Service == b.Service
 }
 
 func containerEqual(a, b *ContainerIdentity) bool {

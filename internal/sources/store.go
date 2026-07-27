@@ -17,12 +17,40 @@ import (
 )
 
 type Store struct {
-	db  *sql.DB
-	now func() time.Time
+	db      *sql.DB
+	mutator databaseMutator
+	now     func() time.Time
 }
 
 func NewStore(db *sql.DB) *Store {
-	return &Store{db: db, now: time.Now}
+	return &Store{db: db, mutator: directMutator{db: db}, now: time.Now}
+}
+
+// NewCoordinatedStore routes mutations through the active server's single
+// database coordinator while retaining the ordinary read pool for lookups.
+func NewCoordinatedStore(db *sql.DB, mutator databaseMutator) *Store {
+	return &Store{db: db, mutator: mutator, now: time.Now}
+}
+
+type databaseMutator interface {
+	Do(context.Context, func(*sql.Tx) error) error
+}
+
+type directMutator struct{ db *sql.DB }
+
+func (m directMutator) Do(ctx context.Context, run func(*sql.Tx) error) error {
+	tx, err := m.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin source mutation: %w", err)
+	}
+	if err := run(tx); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit source mutation: %w", err)
+	}
+	return nil
 }
 
 type Server struct {
@@ -48,15 +76,22 @@ func (s *Store) CreateServer(ctx context.Context, name, hostname string) (Server
 		return Server{}, fmt.Errorf("server hostname: %w", err)
 	}
 	created := s.now().UnixMicro()
-	result, err := s.db.ExecContext(ctx,
-		"INSERT INTO servers(name, hostname, created_at_us) VALUES (?, nullif(?, ''), ?)",
-		name, hostname, created)
+	var id int64
+	err := s.mutator.Do(ctx, func(tx *sql.Tx) error {
+		result, err := tx.ExecContext(ctx,
+			"INSERT INTO servers(name, hostname, created_at_us) VALUES (?, nullif(?, ''), ?)",
+			name, hostname, created)
+		if err != nil {
+			return fmt.Errorf("create server: %w", err)
+		}
+		id, err = result.LastInsertId()
+		if err != nil {
+			return fmt.Errorf("read server ID: %w", err)
+		}
+		return nil
+	})
 	if err != nil {
-		return Server{}, fmt.Errorf("create server: %w", err)
-	}
-	id, err := result.LastInsertId()
-	if err != nil {
-		return Server{}, fmt.Errorf("read server ID: %w", err)
+		return Server{}, err
 	}
 	return Server{ID: id, Name: name, Hostname: hostname, CreatedAtUS: created}, nil
 }
@@ -105,15 +140,22 @@ func (s *Store) CreateToken(ctx context.Context, serverID int64, name string) (C
 	plaintext := "sft_" + base64.RawURLEncoding.EncodeToString(random)
 	hash := sha256.Sum256([]byte(plaintext))
 	fingerprint := hex.EncodeToString(hash[:6])
-	result, err := s.db.ExecContext(ctx, `INSERT INTO ingestion_tokens(
-		server_id, name, token_hash, fingerprint, created_at_us
-	) VALUES (?, ?, ?, ?, ?)`, serverID, name, hash[:], fingerprint, s.now().UnixMicro())
+	var id int64
+	err := s.mutator.Do(ctx, func(tx *sql.Tx) error {
+		result, err := tx.ExecContext(ctx, `INSERT INTO ingestion_tokens(
+			server_id, name, token_hash, fingerprint, created_at_us
+		) VALUES (?, ?, ?, ?, ?)`, serverID, name, hash[:], fingerprint, s.now().UnixMicro())
+		if err != nil {
+			return fmt.Errorf("create token: %w", err)
+		}
+		id, err = result.LastInsertId()
+		if err != nil {
+			return fmt.Errorf("read token ID: %w", err)
+		}
+		return nil
+	})
 	if err != nil {
-		return CreatedToken{}, fmt.Errorf("create token: %w", err)
-	}
-	id, err := result.LastInsertId()
-	if err != nil {
-		return CreatedToken{}, fmt.Errorf("read token ID: %w", err)
+		return CreatedToken{}, err
 	}
 	return CreatedToken{
 		ID: id, ServerID: serverID, Name: name,
@@ -125,20 +167,22 @@ func (s *Store) RevokeToken(ctx context.Context, id int64) error {
 	if id <= 0 {
 		return errors.New("token ID must be positive")
 	}
-	result, err := s.db.ExecContext(ctx,
-		"UPDATE ingestion_tokens SET revoked_at_us=? WHERE id=? AND revoked_at_us IS NULL",
-		s.now().UnixMicro(), id)
-	if err != nil {
-		return fmt.Errorf("revoke token: %w", err)
-	}
-	affected, err := result.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("revoke token: %w", err)
-	}
-	if affected == 0 {
-		return errors.New("active token not found")
-	}
-	return nil
+	return s.mutator.Do(ctx, func(tx *sql.Tx) error {
+		result, err := tx.ExecContext(ctx,
+			"UPDATE ingestion_tokens SET revoked_at_us=? WHERE id=? AND revoked_at_us IS NULL",
+			s.now().UnixMicro(), id)
+		if err != nil {
+			return fmt.Errorf("revoke token: %w", err)
+		}
+		affected, err := result.RowsAffected()
+		if err != nil {
+			return fmt.Errorf("revoke token: %w", err)
+		}
+		if affected == 0 {
+			return errors.New("active token not found")
+		}
+		return nil
+	})
 }
 
 // VerifyToken always performs at least one constant-time hash comparison,

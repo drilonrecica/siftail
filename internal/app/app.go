@@ -27,6 +27,7 @@ type App struct {
 	cfg          config.Config
 	logger       *slog.Logger
 	db           *database.DB
+	coordinator  *database.Coordinator
 	shuttingDown atomic.Bool
 }
 
@@ -65,6 +66,12 @@ func (a *App) Run(ctx context.Context) error {
 		_ = os.Remove(a.controlSocketPath())
 	}()
 
+	coordinator := database.NewCoordinator(db.Writer())
+	a.coordinator = coordinator
+	defer func() { a.coordinator = nil }()
+	g.Go(func() error { return coordinator.Run(ctx) })
+	<-coordinator.Ready()
+
 	g.Go(func() error { return a.runControlServer(ctx, controlListener) })
 	g.Go(func() error { return a.runUIServer(ctx) })
 	g.Go(func() error { return a.runIngestServer(ctx) })
@@ -98,7 +105,7 @@ func (a *App) controlMux() *http.ServeMux {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("pong"))
 	})
-	store := sources.NewStore(a.db.Writer())
+	store := sources.NewCoordinatedStore(a.db.Reader(), a.coordinator)
 	mux.HandleFunc("POST /servers", func(w http.ResponseWriter, r *http.Request) {
 		var input struct {
 			Name     string `json:"name"`
