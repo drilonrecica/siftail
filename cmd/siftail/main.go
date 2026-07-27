@@ -1,9 +1,13 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"os/signal"
+	"syscall"
 
+	"github.com/drilonrecica/siftail/internal/app"
 	"github.com/drilonrecica/siftail/internal/config"
 	"github.com/drilonrecica/siftail/internal/version"
 )
@@ -18,6 +22,8 @@ func main() {
 	switch cmd {
 	case "version":
 		runVersion()
+	case "serve":
+		runServe()
 	case "config":
 		if len(os.Args) < 3 {
 			fmt.Fprintln(os.Stderr, "siftail: missing config subcommand")
@@ -61,10 +67,36 @@ func runConfigValidate() {
 	fmt.Printf("ingest addr: %s\n", cfg.IngestAddr)
 }
 
+func runServe() {
+	cfg, err := config.Parse()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "configuration invalid: %v\n", err)
+		os.Exit(1)
+	}
+
+	logger, err := config.ConfigureLogger(cfg)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "logger setup failed: %v\n", err)
+		os.Exit(1)
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	application := app.New(cfg, logger)
+	if err := application.Run(ctx); err != nil {
+		logger.Error("application error", "error", err)
+		os.Exit(1)
+	}
+
+	logger.Info("shutdown complete")
+}
+
 func printUsage() {
 	fmt.Fprintln(os.Stderr, "Usage: siftail <command>")
 	fmt.Fprintln(os.Stderr, "")
 	fmt.Fprintln(os.Stderr, "Commands:")
 	fmt.Fprintln(os.Stderr, "  version         Print version information")
+	fmt.Fprintln(os.Stderr, "  serve           Start the Siftail server")
 	fmt.Fprintln(os.Stderr, "  config validate Validate process configuration without opening the database")
 }
