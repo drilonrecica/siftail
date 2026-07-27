@@ -1,2 +1,55 @@
-# siftail
-Fast, private log search and live tailing for self-hosted apps—built for Coolify and Fluent Bit.
+# Siftail Planning Package
+
+This package contains the authoritative planning documents for **Siftail**, a fast, private, self-hosted log viewer designed first for Coolify and Fluent Bit.
+
+The documents are written to be standalone. Coding agents should not need access to the planning conversation that produced them.
+
+## Reading order
+
+1. [`AGENTS.md`](AGENTS.md) — mandatory repository and implementation rules
+2. [`DOMAIN.md`](DOMAIN.md) — canonical concepts, data semantics, and invariants
+3. [`PRODUCT.md`](PRODUCT.md) — product vision, workflows, scope, and milestones
+4. [`ARCHITECTURE.md`](ARCHITECTURE.md) — technical implementation and operations
+5. [`DESIGN.md`](DESIGN.md) — interaction, visual, responsive, and accessibility specification
+
+## Document responsibilities
+
+| Document | Authority |
+|---|---|
+| `PRODUCT.md` | What is being built, for whom, why, and what is excluded |
+| `DOMAIN.md` | Event model, source identity, ordering, lifecycle, retention, and invariants |
+| `ARCHITECTURE.md` | Go/HTMX/SQLite runtime, security, ingestion, queries, deployment, testing, and recovery |
+| `DESIGN.md` | Screens, interactions, visual system, copy, keyboard behavior, mobile, and accessibility |
+| `AGENTS.md` | Mandatory working rules for coding agents and contributors |
+
+## Fixed project identity
+
+- Product: **Siftail**
+- Tagline: **Fast, private logs for self-hosted apps.**
+- CLI and repository: `siftail`
+- Environment prefix: `SIFTAIL_`
+- Default database: `siftail.db`
+- Target license: Apache License 2.0
+
+The name is explained subtly in selected copy: users can **sift through historical logs and tail live events**.
+
+## Foundational decisions
+
+- one Docker container;
+- one Go process;
+- separate UI and ingestion listeners;
+- SQLite with WAL through `mattn/go-sqlite3`;
+- Go templates, HTMX, focused vanilla JavaScript, and plain CSS;
+- no production Node.js runtime;
+- one local administrator;
+- one independently revocable ingestion token per server;
+- commit-before-acknowledgement;
+- batch atomicity;
+- bounded memory and disk;
+- no telemetry or external runtime services;
+- Coolify-first, generic Fluent Bit HTTP best effort;
+- metrics, traces, multi-tenancy, Kubernetes, dashboards, and AI analysis are out of scope.
+
+## Important note
+
+These are planning and implementation specifications, not generated application code. When implementation intentionally changes an accepted decision, update the relevant specification, tests, migrations, and—when the decision is consequential—an ADR in the same change.
