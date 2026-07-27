@@ -53,6 +53,18 @@ func run(args []string, stdout, stderr io.Writer) int {
 			printUsage(stderr)
 			return 1
 		}
+	case "server":
+		if err := runServerCommand(args[1:], stdout); err != nil {
+			fmt.Fprintf(stderr, "siftail: %v\n", err)
+			return 1
+		}
+		return 0
+	case "token":
+		if err := runTokenCommand(args[1:], stdout); err != nil {
+			fmt.Fprintf(stderr, "siftail: %v\n", err)
+			return 1
+		}
+		return 0
 	case "help", "-h", "--help":
 		printUsage(stdout)
 		return 0
@@ -116,4 +128,8 @@ func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "  version         Print version information")
 	fmt.Fprintln(w, "  serve           Start the Siftail server")
 	fmt.Fprintln(w, "  config validate Validate process configuration without opening the database")
+	fmt.Fprintln(w, "  server create    Create a trusted Server")
+	fmt.Fprintln(w, "  server list      List trusted Servers")
+	fmt.Fprintln(w, "  token create     Create a one-time ingestion token")
+	fmt.Fprintln(w, "  token revoke     Revoke an ingestion token")
 }

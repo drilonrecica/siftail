@@ -323,10 +323,14 @@ maps may cross the normalizer boundary.
 
 ### SFT-008 — Implement Server and ingestion-token CLI management
 
-**Status:** Planned  
+**Status:** Done
 **Milestone:** 0.1.0  
 **Depends on:** SFT-004, SFT-006  
-**Issue/PR:** —
+**Issue/PR:** — (direct maintainer implementation)
+**Completed:** 2026-07-28
+**Completion evidence:** Real SQLite Server/token lifecycle, overlap,
+revocation, missing-server rollback, hash-only storage, offline CLI, live
+owner-only control-socket, one-time display, invalid-argument, and race tests.
 
 **Authoritative references:** `DOMAIN.md` §§20, 30; `ARCHITECTURE.md` §§20, 30.
 

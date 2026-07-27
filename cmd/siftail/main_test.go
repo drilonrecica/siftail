@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"net"
 	"net/http"
@@ -12,7 +13,81 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/drilonrecica/siftail/internal/app"
+	"github.com/drilonrecica/siftail/internal/config"
 )
+
+func TestAdministrativeCLIOffline(t *testing.T) {
+	clearSiftailEnv(t)
+	dataDir := t.TempDir()
+	t.Setenv("SIFTAIL_DATA_DIR", dataDir)
+
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"server", "create", "--name", "Production", "--hostname", "prod.example"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("create server: %s", stderr.String())
+	}
+	stdout.Reset()
+	if code := run([]string{"server", "list"}, &stdout, &stderr); code != 0 || !strings.Contains(stdout.String(), "Production") {
+		t.Fatalf("list servers: code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+	stdout.Reset()
+	if code := run([]string{"token", "create", "--server", "1", "--name", "primary"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("create token: %s", stderr.String())
+	}
+	output := stdout.String()
+	if strings.Count(output, "sft_") != 1 {
+		t.Fatalf("plaintext token must appear exactly once: %q", output)
+	}
+	stdout.Reset()
+	if code := run([]string{"token", "revoke", "--id", "1"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("revoke token: %s", stderr.String())
+	}
+	if strings.Contains(stdout.String()+stderr.String(), "sft_") {
+		t.Fatal("later command leaked plaintext token")
+	}
+}
+
+func TestAdministrativeCLIUsesLiveControlSocket(t *testing.T) {
+	clearSiftailEnv(t)
+	dataDir := t.TempDir()
+	cfg := config.Config{
+		DataDir: dataDir, DatabasePath: filepath.Join(dataDir, "siftail.db"),
+		UIAddr: freeTCPAddr(t), IngestAddr: freeTCPAddr(t),
+		LogLevel: "error", LogFormat: "text", ShutdownTimeout: time.Second,
+		MaxCompressedRequestBytes: 5 << 20, MaxDecompressedRequestBytes: 25 << 20,
+		MaxEventsPerRequest: 10000, MaxEventBytes: 1 << 20,
+		QueueMaxEvents: 20000, QueueMaxBytes: 32 << 20,
+		IngestResidentMaxEvents: 30000, IngestResidentMaxBytes: 64 << 20,
+		IngestMaxDecoders: 4,
+	}
+	t.Setenv("SIFTAIL_DATA_DIR", dataDir)
+	t.Setenv("SIFTAIL_UI_ADDR", cfg.UIAddr)
+	t.Setenv("SIFTAIL_INGEST_ADDR", cfg.IngestAddr)
+	t.Setenv("SIFTAIL_LOG_LEVEL", "error")
+
+	logger, err := config.ConfigureLogger(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	application := app.New(cfg, logger)
+	ctx, cancel := context.WithCancel(context.Background())
+	errCh := make(chan error, 1)
+	go func() { errCh <- application.Run(ctx) }()
+	waitForHTTP(t, "http://"+cfg.UIAddr+"/health/live", nil, &bytes.Buffer{})
+
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"server", "create", "--name", "Online"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("online server create: %s", stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "Online") {
+		t.Fatalf("online output = %q", stdout.String())
+	}
+	cancel()
+	if err := <-errCh; err != nil {
+		t.Fatal(err)
+	}
+}
 
 func TestRunVersion(t *testing.T) {
 	var stdout, stderr bytes.Buffer
@@ -127,13 +202,15 @@ func waitForHTTP(t *testing.T, url string, cmd *exec.Cmd, output *bytes.Buffer) 
 			response.Body.Close()
 			return
 		}
-		if cmd.ProcessState != nil {
+		if cmd != nil && cmd.ProcessState != nil {
 			t.Fatalf("serve helper exited early\n%s", output.String())
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	_ = cmd.Process.Kill()
-	_ = cmd.Wait()
+	if cmd != nil {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+	}
 	t.Fatalf("serve helper did not become ready\n%s", output.String())
 }
 

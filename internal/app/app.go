@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/drilonrecica/siftail/internal/config"
 	"github.com/drilonrecica/siftail/internal/database"
+	"github.com/drilonrecica/siftail/internal/sources"
 	"github.com/drilonrecica/siftail/internal/web"
 	"golang.org/x/sync/errgroup"
 )
@@ -23,6 +25,7 @@ import (
 type App struct {
 	cfg          config.Config
 	logger       *slog.Logger
+	db           *database.DB
 	shuttingDown atomic.Bool
 }
 
@@ -49,6 +52,8 @@ func (a *App) Run(ctx context.Context) error {
 			a.logger.Error("database shutdown failed", "component", "database", "error_category", "database_close")
 		}
 	}()
+	a.db = db
+	defer func() { a.db = nil }()
 
 	controlListener, err := a.openControlSocket()
 	if err != nil {
@@ -91,6 +96,42 @@ func (a *App) controlMux() *http.ServeMux {
 		}
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("pong"))
+	})
+	store := sources.NewStore(a.db.Writer())
+	mux.HandleFunc("POST /servers", func(w http.ResponseWriter, r *http.Request) {
+		var input struct {
+			Name     string `json:"name"`
+			Hostname string `json:"hostname"`
+		}
+		if !decodeControlJSON(w, r, &input) {
+			return
+		}
+		server, err := store.CreateServer(r.Context(), input.Name, input.Hostname)
+		writeControlJSON(w, server, err)
+	})
+	mux.HandleFunc("GET /servers", func(w http.ResponseWriter, r *http.Request) {
+		servers, err := store.ListServers(r.Context())
+		writeControlJSON(w, servers, err)
+	})
+	mux.HandleFunc("POST /tokens", func(w http.ResponseWriter, r *http.Request) {
+		var input struct {
+			ServerID int64  `json:"server_id"`
+			Name     string `json:"name"`
+		}
+		if !decodeControlJSON(w, r, &input) {
+			return
+		}
+		token, err := store.CreateToken(r.Context(), input.ServerID, input.Name)
+		writeControlJSON(w, token, err)
+	})
+	mux.HandleFunc("POST /tokens/revoke", func(w http.ResponseWriter, r *http.Request) {
+		var input struct {
+			ID int64 `json:"id"`
+		}
+		if !decodeControlJSON(w, r, &input) {
+			return
+		}
+		writeControlJSON(w, struct{}{}, store.RevokeToken(r.Context(), input.ID))
 	})
 	return mux
 }
@@ -215,6 +256,28 @@ func (a *App) serveHTTP(ctx context.Context, srv *http.Server, listener net.List
 type safeHTTPErrorWriter struct {
 	logger    *slog.Logger
 	component string
+}
+
+func decodeControlJSON(w http.ResponseWriter, r *http.Request, target any) bool {
+	r.Body = http.MaxBytesReader(w, r.Body, 8<<10)
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(target); err != nil {
+		http.Error(w, "invalid request", http.StatusBadRequest)
+		return false
+	}
+	return true
+}
+
+func writeControlJSON(w http.ResponseWriter, value any, err error) {
+	w.Header().Set("Content-Type", "application/json")
+	if err != nil {
+		http.Error(w, "administrative operation failed", http.StatusBadRequest)
+		return
+	}
+	if err := json.NewEncoder(w).Encode(value); err != nil {
+		http.Error(w, "administrative operation failed", http.StatusInternalServerError)
+	}
 }
 
 func (w safeHTTPErrorWriter) Write(message []byte) (int, error) {
