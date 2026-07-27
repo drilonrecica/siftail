@@ -245,10 +245,14 @@ image, and architecture implications; no application schema yet.
 
 ### SFT-006 — Add the initial schema and migration harness
 
-**Status:** Planned  
+**Status:** Done
 **Milestone:** 0.1.0  
 **Depends on:** SFT-005  
-**Issue/PR:** —
+**Issue/PR:** — (direct maintainer implementation)
+**Completed:** 2026-07-28
+**Completion evidence:** Fresh/no-op/rollback migration tests, real SQLite
+constraint and ordering tests, query-plan assertions for critical indexes,
+schema compatibility checks, and full integrity verification.
 
 **Authoritative references:** `ARCHITECTURE.md` §§10.4–10.7, 32.2–32.3;
 `DOMAIN.md` §§5, 12–14; ADRs 0001 and 0004.

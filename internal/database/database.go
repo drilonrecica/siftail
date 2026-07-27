@@ -17,7 +17,7 @@ import (
 )
 
 const (
-	MaxSchemaVersion = 0
+	MaxSchemaVersion = 1
 	readConnections  = 4
 	writerDriverName = "siftail-sqlite-writer"
 	readerDriverName = "siftail-sqlite-reader"
@@ -90,6 +90,9 @@ func Open(ctx context.Context, path string) (*DB, error) {
 		return fail(err)
 	}
 	if err := checkSchemaCompatible(ctx, writer, MaxSchemaVersion); err != nil {
+		return fail(err)
+	}
+	if err := Migrate(ctx, writer); err != nil {
 		return fail(err)
 	}
 	if err := QuickCheck(ctx, writer); err != nil {
