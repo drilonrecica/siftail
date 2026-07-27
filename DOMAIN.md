@@ -59,7 +59,9 @@ Outside the bounded context:
 - secret classification;
 - compliance archiving.
 
-Siftail may observe a container transition, but it does not own deployment truth. It may store an inferred deployment boundary, but it does not claim a deployment succeeded.
+Siftail may observe container transitions, but it does not own deployment truth.
+Version one stores container metadata only. A future inferred boundary must never
+claim that a deployment succeeded.
 
 ---
 
@@ -126,7 +128,9 @@ Server
                 └── Container instance
 ```
 
-In most domain operations, “source” means the stable hierarchy through Service. Container instance is retained as event metadata and as a deployment-boundary signal.
+In most domain operations, “source” means the stable hierarchy through Service.
+Container instance is retained as event metadata and may support a future
+deployment-boundary feature.
 
 ### 3.11 Source alias
 
@@ -150,7 +154,8 @@ Additional application-provided fields preserved as JSON after selected common f
 
 ### 3.16 Deployment boundary
 
-An inferred transition between container instances for the same stable service. It is an internal timeline marker, not an application log event.
+A reserved post-dogfood concept for an inferred transition between container instances
+for the same stable service. It is not part of the version-one persisted model.
 
 ### 3.17 Retention policy
 
@@ -224,6 +229,7 @@ LogEvent
 - id: InternalEventID
 - event_at_us: UnixMicroseconds
 - received_at_us: UnixMicroseconds
+- retention_at_us: derived UnixMicroseconds
 - source_id: StableSourceID
 - container_instance_id: optional ContainerInstanceID
 - stream: LogStream
@@ -266,7 +272,9 @@ Rules:
 - normalized to UTC semantics;
 - may be earlier or later than receive time because clocks can drift;
 - is not silently clamped to receive time;
-- extreme invalid timestamps are rejected or replaced according to explicit validation rules and accompanied by safe diagnostic metadata;
+- an explicitly supplied timestamp must parse unambiguously and fall within
+  years 0001 through 9999 or the entire request is rejected;
+- only an absent timestamp falls back to receive time;
 - event-time source must be testable.
 
 ### 5.3 Receive timestamp
@@ -283,6 +291,10 @@ It is:
 ### 5.4 Commit timestamp
 
 A per-event commit timestamp is not stored. Commit latency is operational state, not permanent event data.
+
+`retention_at_us` is the immutable derived value
+`min(event_at_us, received_at_us)`. It may be represented by an indexed
+expression rather than a separately stored column.
 
 ### 5.5 Source identity
 
@@ -349,7 +361,7 @@ For plain text:
 - do not normalize whitespace;
 - do not remove stack-trace lines;
 - do not redact;
-- reject or safely encode invalid byte sequences according to one documented policy.
+- reject invalid UTF-8 at the JSON transport boundary.
 
 For structured JSON:
 
@@ -381,8 +393,8 @@ Rules:
 - object only at the top level;
 - canonical valid JSON;
 - bounded nesting depth;
-- bounded total size;
-- duplicate JSON keys follow one documented decoder policy;
+- maximum canonical size 256 KiB;
+- duplicate JSON keys at any nesting level reject the entire request;
 - no dynamic database columns;
 - no arbitrary schema mutation;
 - unknown fields are preserved when within limits;
@@ -395,9 +407,9 @@ Rules:
 It is used for deduplication only when:
 
 - explicitly present;
-- valid under length and character constraints;
+- no longer than 255 UTF-8 bytes and free of control characters;
 - scoped to the stable source;
-- treated as opaque.
+- treated as an opaque, case-sensitive value.
 
 Siftail does not invent a source event ID from message hashes.
 
@@ -421,7 +433,7 @@ The following are non-negotiable without an approved domain change.
 12. Events without stable source IDs may legitimately be duplicated after retry.
 13. Hash-based message deduplication is prohibited.
 14. Multiline reconstruction is a source/Fluent Bit responsibility in version one.
-15. A deployment boundary is not a log event.
+15. A future deployment boundary is not a log event.
 16. Retention deletes oldest eligible events first.
 17. Aliases never mutate original metadata.
 18. Application-log deletion does not erase security audit history.
@@ -462,24 +474,21 @@ A cursor must also be bound to the query shape or validated so it cannot produce
 
 ### 8.1 Supported deduplication
 
-When `source_event_id` exists, Siftail may enforce uniqueness on:
+When `source_event_id` exists, Siftail enforces uniqueness on:
 
 ```text
 (stable_source_id, source_event_id)
 ```
 
-A duplicate with the same identity is not inserted twice.
+A duplicate with the same identity and identical canonical content is a
+successful idempotent no-op. Canonical comparison includes event time, source
+identity, container identity, stream, normalized and original level, raw
+message, structured attributes, and normalized common fields. It excludes the
+internal ID and receive time.
 
-The implementation must define whether a request containing already-known IDs:
-
-- treats them as successfully idempotent;
-- counts them separately in response metadata;
-- or rejects conflicting content for the same identity.
-
-Recommended behavior:
-
-- identical or unverifiable repeats are treated as already accepted;
-- conflicting content for the same source event ID is recorded as a diagnostic and rejected for that whole request unless a safe deterministic policy is specified.
+If the same identity is reused for different canonical content, Siftail rejects
+the entire request with `Conflict`; no new events from that request commit.
+Conflicts among records in the same request follow the same rule.
 
 ### 8.2 Unsupported deduplication
 
@@ -513,8 +522,8 @@ Authenticated HTTP request
 → transport decoder
 → ReceivedRecord
 → canonical normalizer
-→ source resolution
-→ CanonicalEvent
+→ CanonicalEvent with stable SourceIdentity
+→ transactional database source resolution
 → batch persistence
 → committed event publication
 ```
@@ -567,7 +576,7 @@ No “best effort” partial batch insertion is allowed in version one.
 
 ## 10. Log-level normalization
 
-Recommended mapping table:
+Canonical mapping table:
 
 | Input examples | Normalized |
 |---|---|
@@ -579,17 +588,18 @@ Recommended mapping table:
 | `fatal`, `critical`, `crit`, `panic`, `emerg`, `alert` | `fatal` |
 | absent or unrecognized | `unknown` |
 
-Conservative text inference may recognize strong prefixes such as:
+When no structured level exists, version one performs conservative prefix-only
+inference. After ignoring leading ASCII whitespace, it recognizes these
+case-insensitive tokens:
 
 ```text
-ERROR:
-[ERROR]
-WARN
-FATAL
-panic:
+TRACE DEBUG INFO NOTICE WARN WARNING ERROR ERR
+FATAL CRITICAL CRIT PANIC EMERG ALERT
 ```
 
-It must not classify a normal sentence merely because it contains the word “error.”
+The token must be at the start, optionally enclosed in `[]`, and followed by
+end-of-message, ASCII whitespace, or `:`. It must not classify a normal sentence
+because a level word appears later in the message.
 
 Structured level fields take precedence over text inference.
 
@@ -709,13 +719,17 @@ Stable keys should:
 
 - be deterministic;
 - preserve distinctions important to identity;
-- reject or encode control characters;
-- have bounded length;
-- avoid locale-sensitive case conversion;
+- reject control characters and invalid UTF-8;
+- be no longer than 128 UTF-8 bytes per component;
+- trim surrounding ASCII whitespace but otherwise preserve the supplied,
+  case-sensitive UTF-8 value without slugification or locale-sensitive folding;
 - not depend on display alias;
 - not be regenerated from mutable labels after creation without an explicit merge operation.
 
-The exact key algorithm is an architectural detail, but migrations must preserve identity.
+The composite key is the length-delimited sequence of the five normalized
+components under the trusted `server_id`. Case-only or Unicode-normalization
+changes therefore create distinct sources rather than risking an implicit merge.
+Migrations must preserve this identity.
 
 ---
 
@@ -738,25 +752,28 @@ Batch persistence updates `last_seen_at` in aggregate, not once per event.
 
 ### 13.3 Active state
 
-Recommended derived state:
+Derived state:
 
 - Active: received an event within the last 24 hours.
 - Inactive: no event within 24 hours.
 - Cleanup eligible: inactive for 90 days.
 
-These durations are defaults and may be globally configurable later. Version one may keep them fixed if no operational setting is required.
+These durations are fixed process constants in version one.
 
 ### 13.4 Automatic source removal
 
 A source must not be automatically removed when it:
 
 - has a manual alias;
-- is pinned;
 - has an active server/token relationship;
 - is referenced by retained administrative metadata;
 - has application events remaining.
 
 Automatic cleanup may remove only unprotected, empty, stale source metadata.
+
+Each server is limited to 10,000 retained stable sources. A request that would
+create sources beyond that limit is rejected atomically. This is a safety bound,
+not a sizing target.
 
 ### 13.5 Source merge
 
@@ -778,7 +795,12 @@ A container instance tracks:
 
 Container instances are ephemeral. They should not clutter primary source selection.
 
-A new container identity for the same stable service may produce a deployment boundary.
+Unreferenced container instances are removed by bounded cleanup. Each server is
+limited to 100,000 retained container instances; a request that would exceed the
+limit is rejected atomically.
+
+Inferring a deployment boundary from container changes is a post-dogfood
+candidate and is not implemented in the pre-public milestones.
 
 ---
 
@@ -786,7 +808,7 @@ A new container identity for the same stable service may produce a deployment bo
 
 ### 15.1 Creation condition
 
-Create an inferred boundary when:
+If this post-dogfood feature is accepted, create an inferred boundary when:
 
 - a stable service has a previously observed active or most recent container identity;
 - a committed event arrives with a different valid container identity;
@@ -854,16 +876,17 @@ Consequences:
 
 ### 16.3 Size eligibility
 
-When database usage exceeds the configured application database limit, Siftail deletes oldest application events regardless of age until it reaches a safe target below the limit.
-
-A hysteresis target is recommended to avoid repeated tiny cleanup cycles, for example reclaiming toward 90–95% of the limit.
+The size worker wakes when the active SQLite footprint reaches 95% of the
+configured limit and deletes oldest application events regardless of age toward
+90%. If safe bounded reclamation cannot keep the footprint within the configured
+target, ingestion enters storage-full degraded mode.
 
 ### 16.4 Deletion order
 
 Canonical deletion order:
 
 ```text
-event_at_us ASC, id ASC
+retention_at_us ASC, id ASC
 ```
 
 Deletion occurs in bounded batches, initially around 10,000 events per transaction, tuned by benchmark.
@@ -884,13 +907,16 @@ Application-event retention does not automatically delete:
 
 ### 16.6 Size accounting
 
-The database-size policy must account for the SQLite database and operational files according to one documented calculation, likely including:
+The active SQLite footprint is:
 
 - main database file;
 - WAL file;
-- possibly temporary operational overhead.
+- shared-memory file when present.
 
-The configured limit is a Siftail safety target, not a guarantee that the host filesystem will never fill due to unrelated data.
+Backup files, restore rollback copies, export staging files, filesystem
+snapshots, and unrelated host data are excluded. The configured limit is a
+Siftail safety target; bounded overshoot by one admitted batch and transient WAL
+work is possible, and Siftail cannot constrain unrelated files.
 
 ---
 
@@ -900,8 +926,8 @@ The configured limit is a Siftail safety target, not a guarantee that the host f
 
 `Clear logs`:
 
-- deletes application events within the selected source scope;
-- deletes associated inferred deployment boundaries when they no longer provide context;
+- captures an internal event-ID watermark and deletes application events within
+  the selected source scope at or below that watermark in bounded chunks;
 - retains source identity;
 - retains aliases;
 - retains server/token configuration;
@@ -912,14 +938,18 @@ The configured limit is a Siftail safety target, not a guarantee that the host f
 
 `Remove source`:
 
-- deletes application events within the source scope;
+- captures an internal event-ID watermark and deletes application events within
+  the source scope at or below that watermark in bounded chunks;
 - deletes removable container instances;
-- deletes deployment boundaries;
 - deletes aliases;
 - deletes the selected source metadata when referentially safe;
 - never deletes the trusted Server merely because one source is removed;
 - records an audit event;
 - notifies affected browser clients.
+
+Purge operations are not one large atomic transaction. Events committed after
+the watermark remain. A removed source may be discovered again if its sender
+continues to emit events; the confirmation copy must state this.
 
 ### 17.3 Confirmation
 
@@ -1112,7 +1142,8 @@ Audit invariants:
 - no ingestion token;
 - no raw authorization header;
 - no password hash or token hash;
-- retained independently, default 365 days;
+- retained independently for at most 365 days and 100,000 records, whichever
+  limit removes an older record first;
 - application-log purge does not erase audit history.
 
 ---
@@ -1147,7 +1178,7 @@ Invariants:
 
 - no incoming message payload;
 - no secret material;
-- bounded to latest 50–100 records or another explicit cap;
+- bounded to the latest 100 records;
 - not a substitute for process stdout/stderr logs;
 - may be stored in a dedicated bounded table or memory structure.
 
@@ -1160,6 +1191,7 @@ Conceptual query:
 ```text
 HistoricalQuery
 - source_scope
+- container_instance_id: optional
 - from_us
 - to_us
 - levels[]
@@ -1180,14 +1212,22 @@ Invariants:
 
 - bounded time range required;
 - default range one hour;
+- maximum range 31 days;
+- range semantics are inclusive `from_us` and exclusive `to_us`;
+- quick presets resolve to absolute timestamps and remain a historical snapshot
+  until the operator chooses a new range;
 - query state serializable into URL parameters;
-- message contains/excludes are case-insensitive according to a documented SQLite-safe collation strategy;
+- message contains/excludes use literal ASCII-case-insensitive substring
+  matching; `%`, `_`, and the SQL escape character have no wildcard meaning;
+- non-ASCII case variants are distinct in version one;
 - no regex;
 - no arbitrary query language;
 - no arbitrary JSON path;
 - result order deterministic;
 - page size bounded, default 200;
 - cursor pagination, not offset pagination;
+- cursor is a versioned opaque value containing event time, event ID, and a
+  fingerprint of the canonical query shape, protected against tampering;
 - query export applies to complete matching range within export limits.
 
 ---
@@ -1212,10 +1252,13 @@ Rules:
 
 - only committed events are published;
 - publisher never blocks the database writer on a slow client;
-- each subscriber queue is bounded;
-- when a subscriber cannot keep up, Siftail sends a control indication and closes or resynchronizes according to one documented policy;
+- each subscriber queue is bounded to 256 messages and 2 MiB;
+- when a subscriber cannot keep up, Siftail sends a truncation control
+  indication when possible and closes the subscription;
+- reconnect begins with newly committed events; version one does not replay
+  `Last-Event-ID` and reports that a gap may exist;
 - live client truncation affects browser presentation only, not persisted history;
-- deletion/purge sends control events to affected subscribers;
+- deletion/purge sends control events to affected Live and History workspaces;
 - live state is not mixed automatically into an active historical query.
 
 ---
@@ -1229,15 +1272,15 @@ Contains all database state required for complete restoration:
 - administrator;
 - server records;
 - token hashes and metadata;
-- sessions, unless deliberately excluded by policy;
 - sources and aliases;
 - application events;
-- deployment boundaries;
 - settings;
 - audit events;
 - schema metadata.
 
 A full backup does not contain recoverable plaintext tokens because Siftail never stores them.
+Active and historical session rows are excluded. Restore always requires a
+fresh login.
 
 ### 26.2 Configuration-only backup
 
@@ -1248,17 +1291,15 @@ Contains:
 - token metadata and hashes as explicitly designed;
 - sources and aliases;
 - settings;
-- audit metadata according to policy;
 - schema metadata.
 
 Excludes:
 
 - application log events;
 - raw log attributes;
-- deployment boundaries derived solely from event history where not useful;
+- security audit and diagnostic events;
+- active and historical browser sessions;
 - plaintext credentials.
-
-The exact inclusion of sessions should be explicit. Recommended: exclude active sessions so restoration requires fresh login.
 
 ### 26.3 Backup verification
 
@@ -1284,7 +1325,14 @@ Restore requires:
 - startup integrity check after restore;
 - audit record where possible.
 
-An older binary must refuse a backup/database schema newer than it supports.
+A configuration-only restore replaces the active database; it is not a merge or
+import. A current binary automatically migrates an older supported restored
+schema. An older binary must refuse a backup/database schema newer than it
+supports.
+
+Restore rolls password and ingestion-token state back to the backup point.
+Previously revoked credentials may therefore become valid again; the operator
+must review and rotate credentials after restoration when that risk matters.
 
 ---
 
@@ -1487,9 +1535,12 @@ Three events with identical message and timestamp granularity but no source even
 
 Two events from the same stable source with `source_event_id=evt-42` are treated idempotently according to the persistence rule. The same ID from a different stable source is unrelated.
 
-### 32.5 Container transition
+### 32.5 Future container transition
 
-The stable service `nextup/api` emits from container `api-old`, then from `api-new`. Siftail stores both container instances and may create one inferred deployment boundary at the first committed event from `api-new`.
+The stable service `nextup/api` emits from container `api-old`, then from `api-new`.
+Version one stores both container instances without creating a boundary. The reserved
+post-dogfood feature could later create one inferred boundary at the first committed
+event from `api-new`.
 
 ---
 

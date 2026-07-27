@@ -46,7 +46,10 @@ The architecture must optimize, in order, for:
 
 The system should be easy to describe:
 
-> One Go process receives logs on one listener, serves the authenticated UI on another listener, stores data in one SQLite database, and embeds its HTML, HTMX, JavaScript, and CSS assets into the binary.
+> One long-running Go process receives logs on one listener, serves the authenticated
+> UI on another listener, stores data in one SQLite database, and embeds its HTML,
+> HTMX, JavaScript, and CSS assets into the binary. Focused, short-lived CLI commands
+> run from the same binary.
 
 ---
 
@@ -64,7 +67,7 @@ The system should be easy to describe:
 | Client scripting | Small focused vanilla JavaScript modules |
 | Styling | Plain CSS with semantic custom properties |
 | Deployment | One Docker container |
-| Runtime process | One Go process |
+| Runtime process | One long-running Go process; short-lived administrative CLI commands |
 | Persistent state | One mounted `/data` directory |
 | Production Node.js | None |
 | TLS | Reverse proxy termination |
@@ -156,6 +159,7 @@ Recommended `/data` layout:
 ├── siftail.db
 ├── siftail.db-wal
 ├── siftail.db-shm
+├── siftail-control.sock  # owner-only; exists only while the server is active
 ├── restore-staging/       # created only during controlled restore
 └── backups/               # optional operator-mounted destination, not required
 ```
@@ -379,7 +383,6 @@ SIFTAIL_LOG_LEVEL=info
 SIFTAIL_LOG_FORMAT=text
 SIFTAIL_SHUTDOWN_TIMEOUT=30s
 SIFTAIL_TRUSTED_PROXY_CIDRS=
-SIFTAIL_PROXY_SHARED_SECRET_FILE=
 ```
 
 Additional limit variables may be supported only when process-level tuning is justified:
@@ -391,6 +394,9 @@ SIFTAIL_MAX_EVENTS_PER_REQUEST=10000
 SIFTAIL_MAX_EVENT_BYTES=1048576
 SIFTAIL_QUEUE_MAX_EVENTS=20000
 SIFTAIL_QUEUE_MAX_BYTES=33554432
+SIFTAIL_INGEST_RESIDENT_MAX_EVENTS=30000
+SIFTAIL_INGEST_RESIDENT_MAX_BYTES=67108864
+SIFTAIL_INGEST_MAX_DECODERS=4
 ```
 
 Defaults must be documented and visible in sanitized effective configuration.
@@ -416,7 +422,6 @@ SQLite-backed settings include:
 - maximum database size;
 - audit retention days;
 - source aliases;
-- source pinned state if implemented;
 - theme default where server-level default is needed;
 - token metadata and lifecycle;
 - export limits where operationally adjustable.
@@ -434,10 +439,10 @@ Fail startup for:
 - malformed trusted proxy CIDR;
 - nonpositive limits;
 - queue byte limit smaller than max event size;
-- unsafe or contradictory proxy configuration;
 - both secret and `_FILE` form set.
 
-Unknown unrelated environment variables are ignored.
+Unknown variables using the reserved `SIFTAIL_` prefix fail validation. Unknown
+unrelated environment variables are ignored.
 
 ---
 
@@ -459,8 +464,10 @@ Consequences:
 
 Use:
 
+- one write coordinator for ingestion, retention, purges, settings, authentication,
+  audit, session cleanup, and other mutations;
 - one dedicated writer connection or a `*sql.DB` constrained to one writer connection;
-- a small read connection pool;
+- a read connection pool capped at four connections by default;
 - separate backup connection as required by online backup API;
 - short-lived migration connection during startup where appropriate.
 
@@ -472,7 +479,7 @@ Initial required settings, validated through tests and benchmarks:
 
 ```sql
 PRAGMA journal_mode = WAL;
-PRAGMA synchronous = NORMAL;
+PRAGMA synchronous = FULL;
 PRAGMA foreign_keys = ON;
 PRAGMA busy_timeout = 5000;
 PRAGMA temp_store = MEMORY;
@@ -528,17 +535,15 @@ A likely normalized schema includes:
 - `sessions`;
 - `servers`;
 - `ingestion_tokens`;
-- `projects`;
-- `environments`;
-- `applications`;
-- `services`;
+- `sources`;
 - `container_instances`;
 - `log_events`;
-- `deployment_boundaries`;
 - `security_audit_events`;
 - `diagnostic_events` if persisted.
 
-The exact normalization may combine some hierarchy tables if benchmarks and code clarity support it, but domain identity and foreign-key integrity must remain explicit.
+`sources` stores the complete stable logical hierarchy as bounded, typed columns. This
+avoids speculative hierarchy joins while preserving exact identity and foreign-key
+integrity. Deployment boundaries are not stored in version one.
 
 ### 10.7 Log-event schema sketch
 
@@ -549,6 +554,8 @@ CREATE TABLE log_events (
     id                    INTEGER PRIMARY KEY,
     event_at_us           INTEGER NOT NULL,
     received_at_us        INTEGER NOT NULL,
+    retention_at_us       INTEGER GENERATED ALWAYS AS
+                              (min(event_at_us, received_at_us)) STORED,
     source_id             INTEGER NOT NULL,
     container_instance_id INTEGER,
     stream                TEXT NOT NULL,
@@ -565,7 +572,7 @@ CREATE TABLE log_events (
     http_path             TEXT,
     http_status           INTEGER,
     duration_ms           REAL,
-    FOREIGN KEY(source_id) REFERENCES services(id),
+    FOREIGN KEY(source_id) REFERENCES sources(id),
     FOREIGN KEY(container_instance_id) REFERENCES container_instances(id)
 );
 ```
@@ -584,6 +591,9 @@ Core indexes should cover:
 CREATE INDEX log_events_time_idx
 ON log_events(event_at_us DESC, id DESC);
 
+CREATE INDEX log_events_retention_idx
+ON log_events(retention_at_us, id);
+
 CREATE INDEX log_events_source_time_idx
 ON log_events(source_id, event_at_us DESC, id DESC);
 
@@ -593,9 +603,17 @@ ON log_events(source_id, level_normalized, event_at_us DESC, id DESC);
 CREATE INDEX log_events_request_id_idx
 ON log_events(request_id)
 WHERE request_id IS NOT NULL;
+
+CREATE INDEX log_events_container_time_idx
+ON log_events(container_instance_id, event_at_us DESC, id DESC)
+WHERE container_instance_id IS NOT NULL;
 ```
 
-Every index must justify write amplification and retention cost. Avoid indexing every normalized attribute automatically.
+These indexes serve primary history order, source filtering, retention deletion, level
+filtering, exact request-ID lookup, and opt-in container filtering. The container index
+is intentionally limited to a secondary workflow. Benchmarks at 1M and 10M rows must
+confirm that each retained index earns its write, storage, and retention-deletion cost.
+Avoid indexing every normalized attribute automatically.
 
 ### 10.8 Handwritten SQL
 
@@ -626,13 +644,15 @@ Content-Type: application/x-ndjson
 Content-Encoding: gzip   # optional but recommended
 ```
 
-Compatible Fluent Bit HTTP shapes may use:
+Accepted request shapes are exactly:
 
-- `application/json`;
-- JSON arrays;
-- JSON lines;
-- documented Fluent Bit timestamps and tag fields.
+- `application/x-ndjson`: one JSON object per non-empty line;
+- `application/json`: one JSON object or one array of JSON objects.
 
+Only absent or `gzip` content encoding is accepted. Empty batches, trailing
+non-whitespace data, invalid UTF-8, duplicate JSON object keys at any nesting level,
+non-object records, and unsupported timestamp forms reject the entire request.
+Documented Fluent Bit timestamps and tag fields are normalized within those shapes.
 The endpoint contract must be documented with examples.
 
 ### 11.2 Authentication order
@@ -660,8 +680,12 @@ Initial defaults:
 | Events per request | 10,000 |
 | Single event payload | 1 MiB |
 | JSON nesting depth | 32 |
+| Canonical attributes | 256 KiB per event |
 | Queue events | 20,000 |
 | Queue retained bytes | 32 MiB |
+| Decode plus queue events | 30,000 |
+| Decode plus queue retained bytes | 64 MiB |
+| Concurrent decoders | 4 |
 
 Limits must be applied in the application even when the reverse proxy also limits requests.
 
@@ -690,7 +714,11 @@ HTTP body
 → complete in-memory WriteBatch
 ```
 
-Version one accepts the entire request as one atomic batch. It may stream-decode records into a bounded batch structure but does not queue partial requests.
+Version one stream-decodes the entire request into a bounded batch structure and does
+not queue partial requests. A decoder acquires aggregate resident event and byte
+capacity as records are retained. On successful queue admission, ownership of that
+accounting transfers to the queue without double counting; rejection or parse failure
+releases it exactly once.
 
 ### 11.6 Request atomicity
 
@@ -712,6 +740,7 @@ If record 9,999 fails, none of the request is queued.
 | `400` | Malformed or invalid input | Do not retry unchanged |
 | `401` | Invalid or missing token | Fix credentials |
 | `403` | Authenticated token violates source policy | Fix configuration |
+| `409` | Stable source event ID reused with different canonical content | Fix producer identity |
 | `413` | Request/event too large | Reduce batch or event |
 | `415` | Unsupported format/encoding | Fix format |
 | `429` | Temporary rate limit | Retry with backoff |
@@ -815,14 +844,17 @@ The result channel must be buffered or otherwise used safely so writer completio
 
 ### 13.2 Capacity
 
-Queue capacity is enforced by both:
+Queue capacity is the queued subset of the process-wide ingestion resident budget and
+is enforced by both:
 
 - total queued event count;
 - total approximate retained bytes.
 
 Whichever threshold is reached first rejects the next complete request with `503`.
 
-Accounting must be atomic and released exactly once.
+Decode and queue capacity share accounting for at most 30,000 resident events and
+64 MiB of retained bytes. At most four requests decode concurrently. Accounting must
+be atomic, transfer ownership explicitly, and be released exactly once.
 
 ### 13.3 No unbounded goroutines
 
@@ -850,7 +882,9 @@ Do not remove arbitrary queued batches based on a disconnected client if doing s
 
 ### 14.1 Single writer
 
-One writer component serializes application-event transactions.
+One write coordinator serializes application-event transactions and all other SQLite
+mutations. Retention and administrative writes may be scheduled between ingestion
+batches but cannot open an independent competing writer path.
 
 Benefits:
 
@@ -869,14 +903,13 @@ For each `WriteBatch`:
 1. Begin transaction.
 2. Resolve distinct stable sources using cache and upserts.
 3. Resolve container instances.
-4. Infer deployment transitions where enabled.
+4. Check source-event-ID idempotency.
 5. Insert events using prepared statements.
-6. Handle source-event-ID idempotency.
-7. Update source/container last_seen in aggregate.
-8. Commit.
-9. Release queue accounting.
-10. Notify waiting request.
-11. Publish committed events to live broker in ID order.
+6. Update source/container last_seen in aggregate.
+7. Commit.
+8. Release queue accounting.
+9. Notify waiting request.
+10. Publish newly committed events to the live broker in ID order.
 ```
 
 No live publication before successful commit.
@@ -897,11 +930,11 @@ Check every error.
 
 ### 14.5 Deduplication conflicts
 
-Use the partial unique index for non-null `source_event_id`.
-
-Define explicit behavior for duplicate IDs. Do not use `INSERT OR REPLACE`, because replacement mutates historical identity and can delete/reinsert rows.
-
-Prefer conflict-ignore with accounting for already-known IDs, or query/validate when conflicting content must be detected.
+Use the partial unique index for non-null `source_event_id`. When the existing event's
+canonical persisted content is identical, the record is an idempotent no-op and is not
+republished. When the same ID has different canonical content, reject the entire
+request with `409` and roll back every change made for it. Do not use `INSERT OR
+REPLACE`, because replacement mutates historical identity and can delete/reinsert rows.
 
 ---
 
@@ -928,6 +961,12 @@ For each batch:
 - stale display aliases are not cached in the ingestion path unless safely invalidated;
 - cache key uses stable normalized identity, never mutable display name.
 
+### 15.3 Discovery bounds
+
+Enforce at most 10,000 stable sources and 100,000 container instances per server.
+Creating records beyond either limit rejects the complete ingestion request. Inactive
+container-instance metadata may be removed only when no retained event references it.
+
 ---
 
 ## 16. Historical query architecture
@@ -936,15 +975,19 @@ For each batch:
 
 Every query includes:
 
-- bounded time range;
+- half-open time range `[from, to)` of at most 31 days;
 - source scope or explicit all-source scope;
 - page limit;
 - ordering direction;
-- optional level/stream/message/common-field filters.
+- optional level/stream/message/common-field filters;
+- optional exact container-instance filter.
+
+Relative presets resolve to absolute microsecond endpoints when a query starts. Page
+links retain those endpoints so pagination never drifts with wall-clock time.
 
 ### 16.2 Cursor pagination
 
-Use keyset pagination over:
+Use a versioned, authenticated cursor containing the query fingerprint and keyset over:
 
 ```text
 (event_at_us, id)
@@ -960,13 +1003,14 @@ ORDER BY event_at_us DESC, id DESC
 LIMIT :limit
 ```
 
-Do not use offset pagination for deep history.
+Reject a cursor when its version or fingerprint does not match the current query. Do
+not use offset pagination for deep history.
 
 ### 16.3 Search
 
-Version one uses case-insensitive substring search constrained by time and preferably source.
-
-Do not assume SQLite's default `LIKE` behavior is correct for every Unicode expectation. Define and test the supported case-insensitivity semantics honestly. ASCII case-insensitive behavior may be sufficient initially if documented.
+Version one uses literal substring search constrained by time and preferably source.
+Only ASCII letters are case-folded. Valid non-ASCII UTF-8 is compared byte-for-byte,
+and `%`, `_`, and backslash have no wildcard or escape meaning.
 
 Do not add FTS5 until measured need.
 
@@ -996,12 +1040,15 @@ Apply request contexts and reasonable server timeouts. Broad expensive queries s
 
 ### 16.6 Exports
 
-Export runs a streaming cursor query independent of the visible page.
+Export runs a streaming cursor query independent of the visible page. One export may
+run at a time. It writes a private staging file under `/data`, verifies final row and
+byte limits, then serves the completed artifact. Cancellation removes the staging
+file, so clients never receive an undocumented partial export.
 
 Requirements:
 
 - enforce max rows and/or bytes;
-- stream encoder output;
+- stream encoder output to the bounded staging artifact;
 - respond with text or NDJSON;
 - do not hold all results in memory;
 - audit the action;
@@ -1013,7 +1060,7 @@ Initial export safety defaults:
 - maximum 100,000 events;
 - maximum 256 MiB streamed response;
 - whichever limit is reached first;
-- clear truncated-export metadata or explicit refusal rather than silent partial output.
+- explicit refusal rather than silent partial output.
 
 ---
 
@@ -1039,7 +1086,8 @@ type Subscriber struct {
 
 ### 17.2 Bounded subscribers
 
-Each subscriber has a small bounded channel.
+Each subscriber has a bounded queue of at most 256 messages and 2 MiB of encoded
+payload. The process accepts at most 16 concurrent live subscriptions.
 
 The broker must not block when a subscriber is slow.
 
@@ -1073,15 +1121,19 @@ event: control
 data: {"type":"source_purged"}
 ```
 
-Recommended payload: compact JSON interpreted by the focused client module, or safely pre-rendered HTML if measured simpler. JSON preserves separation of data and DOM behavior and is likely preferable.
+The payload is compact JSON interpreted by the focused client module. Message and
+attribute previews are capped at 8 KiB per event; the browser fetches complete event
+details through the authenticated event-detail route.
 
 ### 17.4 Reconnection
 
-Native `EventSource` reconnects automatically.
+Native `EventSource` reconnects automatically. Version one does not replay
+`Last-Event-ID`; reconnection starts from newly committed events and always displays a
+possible-gap notice with a link to an absolute History range.
 
-Support `Last-Event-ID` only if semantics are clear and bounded. It may replay from SQLite within a small recent window, but must not become an unbounded historical catch-up mechanism.
-
-A simple first version may reconnect from “now” and indicate a possible gap, directing the user to History mode.
+Purge and source-removal control events are also delivered through a lightweight
+authenticated History control stream so an open historical view cannot silently show
+deleted rows.
 
 ### 17.5 Security
 
@@ -1117,6 +1169,10 @@ HTMX handles:
 - URL push/replace for history queries.
 
 HTMX is embedded in the binary. No CDN.
+
+Authenticated HTML, fragments, exports, and token-display responses use
+`Cache-Control: no-store`. Disable HTMX history snapshot caching; browser navigation
+reissues an authenticated request instead of restoring potentially sensitive DOM.
 
 ### 18.3 Vanilla JavaScript
 
@@ -1185,23 +1241,28 @@ The command reads password securely from TTY where possible. Do not accept plain
 
 An optional one-time bootstrap environment mechanism may be added only if it can be made safe and clearly documented. CLI remains primary.
 
+The one administrator username is 3–64 ASCII letters, digits, `.`, `_`, or `-`, and
+is compared case-sensitively. Passwords are 12–1024 UTF-8 bytes and are never trimmed
+or normalized.
+
 ### 19.2 Password hashing
 
 Use Argon2id.
 
-Initial benchmark target:
+Initial parameters:
 
-- memory: 32–64 MiB;
-- iterations: 2–3;
+- memory: 32 MiB;
+- iterations: 3;
 - parallelism: 1.
 
-Store parameters with the hash. Benchmark on low-resource hardware. Authentication is infrequent, so a modest cost is acceptable.
+Store parameters with the hash and permit at most two concurrent password-hash
+operations. Benchmark on low-resource hardware before changing these values.
 
 ### 19.3 Sessions
 
-Use high-entropy opaque tokens.
+Use 32-byte high-entropy opaque tokens and allow at most 64 active sessions.
 
-Store a cryptographic hash of the token, not plaintext.
+Store a SHA-256 hash of the token, not plaintext.
 
 Cookie:
 
@@ -1237,22 +1298,12 @@ Do not introduce Redis.
 
 Responses must not reveal whether username exists.
 
-### 19.6 Trusted-proxy mode
+### 19.6 Reverse-proxy boundary
 
-Optional and explicitly enabled.
-
-Requires both:
-
-- configured trusted proxy CIDR/address;
-- shared secret or validated cryptographic assertion.
-
-Rules:
-
-- direct clients cannot set trusted identity headers;
-- inbound identity headers are ignored/stripped unless request comes from trusted proxy;
-- shared-secret comparison is constant-time;
-- configuration errors fail startup;
-- proxy mode does not disable CSRF for browser state changes without an explicit safe design.
+Version one supports ordinary reverse proxies and TLS termination but does not accept
+identity headers or forward-auth assertions. Forwarded scheme, host, and client
+address metadata is considered only from configured proxy networks. Trusted identity
+authentication is deferred until after public dogfood and requires a separate ADR.
 
 ---
 
@@ -1360,15 +1411,22 @@ Each transaction should complete quickly enough not to starve ingestion.
 
 ### 23.3 Size cleanup
 
-Measure configured database usage. If above threshold:
+Measure the active SQLite footprint as the main database plus WAL and SHM files.
+When it reaches 95% of the configured limit:
 
-- delete oldest events toward a lower safe target;
+- delete oldest events by `(retention_at_us, id)` toward 90%;
 - repeat bounded chunks;
 - stop on error;
 - expose last result;
 - never delete audit/configuration indiscriminately.
 
-### 23.4 Vacuum and checkpoint
+### 23.4 Audit cleanup
+
+Delete the oldest security audit records in bounded chunks when they are older than
+the configured age or the table exceeds 100,000 rows. Application-log retention never
+deletes audit records.
+
+### 23.5 Vacuum and checkpoint
 
 After meaningful deletion:
 
@@ -1378,17 +1436,12 @@ After meaningful deletion:
 
 A full `VACUUM` is a manual CLI maintenance command because it rewrites the database and may need substantial free disk.
 
-### 23.5 Concurrency
+### 23.6 Concurrency
 
 Retention writes serialize through the writer/database coordination strategy.
 
-Options:
-
-- send maintenance work to the same writer;
-- acquire explicit write coordination;
-- use a dedicated connection with application-level serialization.
-
-Do not let retention and ingestion create uncontrolled `SQLITE_BUSY` contention.
+Send maintenance work through the write coordinator. Do not let retention and
+ingestion create uncontrolled `SQLITE_BUSY` contention.
 
 ---
 
@@ -1441,18 +1494,22 @@ Do not copy the live main database file alone while WAL writes are active.
 1. Validate output path and available space.
 2. Open destination exclusively.
 3. Run online backup in bounded steps if supported.
-4. Close destination safely.
-5. Run quick/integrity verification.
-6. Record checksum and metadata if desired.
-7. Atomically expose final backup filename.
-8. Report success and audit.
+4. Delete session rows from the destination in a committed transaction.
+5. Close destination safely.
+6. Run quick/integrity verification.
+7. Record checksum and metadata if desired.
+8. Atomically expose final backup filename.
+9. Report success and audit.
 ```
+
+Every backup type excludes the `sessions` table contents.
 
 ### 25.3 Configuration-only backup
 
 Implement as a new SQLite artifact containing the allowed configuration tables and backup metadata, or another well-defined format. Prefer SQLite to avoid inventing a second serialization system.
 
-Exclude application events and active sessions unless explicitly required.
+Exclude application events, diagnostic events, security audit events, and sessions.
+Restore replaces the corresponding configuration state; it does not merge records.
 
 ### 25.4 Verify command
 
@@ -1482,12 +1539,15 @@ Checks:
 7. Remove stale WAL/SHM safely.
 8. Open restored database.
 9. Check schema compatibility.
-10. Run migrations only if explicitly allowed.
+10. Migrate a supported older schema using normal forward migrations.
 11. Run quick check.
 12. Reopen services or instruct restart.
 ```
 
-Restore is primarily CLI-driven.
+Restore is primarily CLI-driven. Keep exactly one managed rollback copy and replace
+the preceding managed rollback only after the new database passes compatibility and
+integrity checks. Because sessions are excluded, every restore invalidates browser
+sessions and requires a new sign-in.
 
 ### 25.6 Downgrade behavior
 
@@ -1578,7 +1638,6 @@ Never log:
 - ingestion tokens;
 - password values;
 - token/password hashes;
-- proxy shared secrets.
 
 On decode failure, log only safe metadata:
 
@@ -1597,7 +1656,8 @@ Use a sortable random identifier such as ULID only if dependency and collision b
 
 ### 27.5 Diagnostic event list
 
-Maintain latest 50–100 sanitized operational events in a bounded table or ring. This powers the authenticated diagnostics section.
+Maintain exactly the latest 100 sanitized operational events in a bounded table or
+ring. This powers the authenticated diagnostics section.
 
 It is not a second log database.
 
@@ -1632,7 +1692,9 @@ Use Fluent Bit HTTP output:
 
 ### 28.3 Illustrative configuration
 
-Exact keys must be validated against the supported Fluent Bit version and Coolify's custom drain environment.
+Before implementation, pin the supported Coolify and Fluent Bit release range and
+store representative payload/configuration fixtures from that range. Exact keys must
+be validated against those versions and Coolify's custom drain environment.
 
 ```ini
 [SERVICE]
@@ -1641,7 +1703,7 @@ Exact keys must be validated against the supported Fluent Bit version and Coolif
     storage.path              /tmp/siftail-fluent-bit
     storage.sync              normal
     storage.checksum          off
-    storage.max_chunks_up     128
+    storage.max_chunks_up     16
     storage.backlog.mem_limit 16M
 
 [INPUT]
@@ -1662,11 +1724,18 @@ Exact keys must be validated against the supported Fluent Bit version and Coolif
     Port           443
     URI            /api/v1/ingest
     Format         json_lines
+    json_date_key  date
+    json_date_format iso8601
     Compress       gzip
     Header         Authorization Bearer <TOKEN>
     tls            On
     Retry_Limit    False
+    storage.total_limit_size 256M
 ```
+
+The 256 MiB filesystem buffer is a bounded retry cushion, not a lossless-delivery
+promise. The generator must refuse to present a configuration as ready when the
+supported Coolify version cannot provide a tested self-container exclusion.
 
 This sample is conceptual. Generated configuration must account for:
 
@@ -1732,7 +1801,6 @@ These references inform integration, but Siftail's tested contract and integrati
 - administrator password hash;
 - sessions;
 - ingestion tokens;
-- proxy shared secret;
 - source metadata;
 - backups;
 - audit history.
@@ -1803,6 +1871,8 @@ siftail admin create
 siftail admin reset-password
 siftail sessions revoke-all
 
+siftail server create
+siftail server list
 siftail token create
 siftail token revoke
 
@@ -1828,6 +1898,12 @@ Rules:
 - commands return useful exit codes;
 - commands can run in container through `docker exec`;
 - help text avoids exposing secrets.
+
+When `siftail serve` is active, administrative commands use a private owner-only Unix
+control socket under `/data` so all mutations still pass through the write coordinator.
+No TCP administration API is exposed. Direct database maintenance and restore commands
+require the server to be stopped; online backup and diagnostics use the control socket.
+`version` and `config validate` do not open the database.
 
 ---
 
@@ -2217,8 +2293,7 @@ Recommended sequence:
 15. Coolify config generator and guided test;
 16. backup/verify/restore;
 17. audit and hardening;
-18. deployment markers;
-19. public documentation and packaging.
+18. public documentation and packaging.
 
 Do not begin visual polish before ingestion correctness is demonstrated.
 

@@ -477,14 +477,19 @@ Display absolute range in a tooltip or summary:
 27 Jul 2026, 20:00–21:00
 ```
 
-Use the browser locale and configured/user timezone for display, while querying canonical UTC timestamps.
+Use the browser locale and browser timezone for row and range display. Event details
+also show the canonical UTC timestamp. Version one has no server-side timezone setting.
 
 Custom range requirements:
 
 - clear From and To labels;
 - validation that To is after From;
-- maximum supported range documented or enforced;
+- half-open semantics `[From, To)`;
+- maximum range of 31 days;
 - Apply action if native controls create partial intermediate values.
+
+Resolve a relative preset to absolute endpoints when it is applied and keep those
+endpoints in every pagination URL.
 
 ### 10.3 Level filter
 
@@ -525,7 +530,10 @@ Behavior:
 - Enter executes immediately;
 - show active search as part of result summary;
 - do not run on every keystroke without delay;
-- search controls are clearly scoped to message text.
+- search controls are clearly scoped to message text;
+- comparison is literal with ASCII-only case folding;
+- valid non-ASCII text is compared exactly;
+- `%`, `_`, and backslash are ordinary characters, not wildcard syntax.
 
 Placeholder examples:
 
@@ -544,9 +552,10 @@ Initially support exact filters for:
 - logger;
 - HTTP method;
 - HTTP status;
-- error type.
+- error type;
+- container instance.
 
-These may live under an “More filters” disclosure to keep the main bar compact.
+These may live under a “More filters” disclosure to keep the main bar compact.
 
 Do not expose arbitrary JSON paths.
 
@@ -676,7 +685,7 @@ When rendered limit is exceeded:
 
 When pending limit is exceeded:
 
-- drop oldest pending browser-only items or close/resync according to client protocol;
+- close and reconnect the subscription from “now”;
 - state clearly:
 
 > Live view was truncated while you were scrolled away. Use History to inspect the full interval.
@@ -703,8 +712,8 @@ On disconnect:
 - show Reconnecting;
 - do not clear visible rows;
 - use native reconnect behavior;
-- after reconnection, indicate any possible gap if replay is not guaranteed;
-- direct user to History for authoritative interval review.
+- after reconnection, always indicate a possible gap because version one does not replay;
+- direct the user to History using an absolute range covering the gap.
 
 ---
 
@@ -875,9 +884,10 @@ A side drawer is not the default because inline expansion preserves timeline con
 
 ---
 
-## 14. Deployment boundaries
+## 14. Future deployment boundaries
 
-When implemented, show a subtle separator:
+This interaction is reserved for a post-dogfood candidate and must not appear in
+version one. If implemented after an approved product change, show a subtle separator:
 
 ```text
 ──────── Container changed · 14:32:11 ────────
@@ -924,8 +934,7 @@ Actions:
 - set/remove alias;
 - inspect container instances;
 - clear logs;
-- remove source;
-- pin source if pinning is implemented.
+- remove source.
 
 ### 15.4 Alias editing
 
@@ -1152,7 +1161,7 @@ Read-only process configuration:
 - ingestion listener;
 - public URL;
 - authentication mode;
-- trusted proxy status;
+- forwarded-header trust networks;
 - log format/level;
 - request and queue limits.
 
@@ -1241,7 +1250,9 @@ Options:
 
 Explain:
 
-> Full backups include retained application logs. Configuration-only backups exclude application log events.
+> Full backups include retained application logs. Configuration-only backups exclude
+> application logs, diagnostics, and audit history. All backups exclude browser
+> sessions, so restore requires a new sign-in.
 
 ### 21.3 Restore warning
 
@@ -1951,6 +1962,8 @@ Avoid replacing the entire application shell for ordinary actions.
 ### 38.2 History updates
 
 Selectors update immediately. Text search is debounced. HTMX updates URL state.
+Disable HTMX history snapshot caching. Authenticated pages and fragments use
+`Cache-Control: no-store`, so Back and Forward navigation refetches authorized state.
 
 ### 38.3 Error handling
 

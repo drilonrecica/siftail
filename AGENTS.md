@@ -51,9 +51,12 @@ When sources conflict:
 3. `PRODUCT.md` for scope and user outcomes.
 4. `ARCHITECTURE.md` for technical decisions.
 5. `DESIGN.md` for presentation and interactions.
-6. ADRs for later approved changes.
+6. Accepted ADRs for the reasoning behind decisions already reflected in the authoritative documents.
 7. Issue or PR description.
 8. Historical discussion.
+
+`AGENTS.md` governs repository process and implementation discipline. It does not
+override the behavior defined by the four product specifications.
 
 If implemented behavior intentionally changes, update tests and every affected authoritative document in the same change.
 
@@ -68,7 +71,9 @@ Every agent must preserve these unless an explicitly approved architectural chan
 ### 4.1 Runtime
 
 - One production container.
-- One Go process.
+- One long-running production Go process. Focused, short-lived maintenance CLI
+  invocations are allowed; commands that replace or rewrite the active database
+  require the server process to be stopped.
 - Two HTTP listeners in the same process: UI and ingestion.
 - One persistent `/data` volume.
 - No Node.js runtime in production.
@@ -96,7 +101,9 @@ Every agent must preserve these unless an explicitly approved architectural chan
 - No unbounded goroutine per event/request.
 - Multiline assembly belongs to Fluent Bit/source in version one.
 - No hash-based message deduplication.
-- Optional deduplication uses stable source-provided event ID scoped to source.
+- Deduplication uses a stable source-provided event ID scoped to source when one
+  is present. Identical repeats are idempotent; conflicting reuse rejects the
+  entire request.
 
 ### 4.4 Events
 
@@ -114,8 +121,11 @@ Every agent must preserve these unless an explicitly approved architectural chan
 - SQLite is deliberate and first-class.
 - One controlled writer.
 - WAL mode.
+- `synchronous=FULL`; an acknowledged transaction must survive an OS crash or
+  power loss, subject to the guarantees of the host filesystem and storage.
 - Global age and database-size retention.
-- Oldest events deleted first in bounded chunks.
+- Oldest events by `min(event_at_us, received_at_us), id` are deleted first in
+  bounded chunks.
 - Full `VACUUM` is never automatic routine maintenance.
 - Disk-full mode rejects ingestion and preserves reads where possible.
 - Never recreate or delete the database silently after an error.
@@ -129,7 +139,9 @@ Every agent must preserve these unless an explicitly approved architectural chan
 - Session and ingestion tokens stored only as hashes.
 - CSRF token plus Origin validation for state-changing browser requests.
 - Strict security headers.
-- Trusted-proxy mode requires explicit trusted networks and shared verification.
+- Identity-header or forward-auth proxy authentication is not part of the
+  pre-public milestones. If introduced later, it requires explicit trusted
+  networks and cryptographic/shared verification.
 - No unauthenticated setup page.
 - No password printed to logs.
 
@@ -385,6 +397,8 @@ Enforce:
 - event count;
 - event bytes;
 - JSON depth;
+- aggregate decoding and queued event count;
+- aggregate decoding and queued retained bytes;
 - queue events;
 - queue bytes.
 
@@ -408,6 +422,7 @@ A reverse proxy limit does not replace application limits.
 ### 9.5 Queue
 
 - Store complete `WriteBatch` objects.
+- Account decoded batches against the aggregate ingestion budget before queueing.
 - Queue is bounded by count and bytes.
 - Queue full returns `503`.
 - No persistent internal overflow spool.
@@ -426,6 +441,9 @@ Client disconnect after queueing may leave an ambiguous outcome; writer may stil
 Allowed:
 
 - stable source event ID, scoped to stable source.
+- identical canonical repeats are successful no-ops.
+- reuse of the same identity for different canonical content rejects the whole
+  request with a conflict response.
 
 Forbidden:
 
@@ -631,7 +649,10 @@ Do not add:
 
 ### 13.5 Trusted proxy
 
-Do not trust identity headers from arbitrary requests. Require configured proxy network plus verification secret/assertion.
+Ordinary TLS termination and reverse proxying do not authorize identity headers.
+Do not implement identity-header authentication in the pre-public milestones.
+If it is introduced later, require a configured proxy network plus a
+verification secret or cryptographic assertion.
 
 ---
 
@@ -642,7 +663,7 @@ Do not trust identity headers from arbitrary requests. Require configured proxy 
 - global age limit;
 - global database-size limit;
 - whichever triggers first;
-- oldest first;
+- oldest first by the canonical retention timestamp;
 - bounded transactions;
 - application logs only;
 - separate audit retention.
@@ -678,6 +699,8 @@ Purge emits control event to affected live/history views. Deletion does not wait
 - Older binary refuses newer schema.
 - No arbitrary SQL CLI.
 - Full and configuration-only backup semantics must remain distinct.
+- Active browser sessions are excluded from every backup type; restore always
+  requires a fresh login.
 
 ---
 
@@ -842,7 +865,7 @@ Required:
 At minimum before merge:
 
 ```bash
-gofmt -w .
+go fmt ./...
 go vet ./...
 go test ./...
 ```

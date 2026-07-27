@@ -11,6 +11,7 @@ The documents are written to be standalone. Coding agents should not need access
 3. [`PRODUCT.md`](PRODUCT.md) — product vision, workflows, scope, and milestones
 4. [`ARCHITECTURE.md`](ARCHITECTURE.md) — technical implementation and operations
 5. [`DESIGN.md`](DESIGN.md) — interaction, visual, responsive, and accessibility specification
+6. [`docs/decisions/`](docs/decisions/) — accepted reasoning for hard-to-reverse decisions
 
 ## Document responsibilities
 
@@ -21,6 +22,7 @@ The documents are written to be standalone. Coding agents should not need access
 | `ARCHITECTURE.md` | Go/HTMX/SQLite runtime, security, ingestion, queries, deployment, testing, and recovery |
 | `DESIGN.md` | Screens, interactions, visual system, copy, keyboard behavior, mobile, and accessibility |
 | `AGENTS.md` | Mandatory working rules for coding agents and contributors |
+| Accepted ADRs | Why consequential technical and domain decisions were approved |
 
 ## Fixed project identity
 
@@ -29,16 +31,16 @@ The documents are written to be standalone. Coding agents should not need access
 - CLI and repository: `siftail`
 - Environment prefix: `SIFTAIL_`
 - Default database: `siftail.db`
-- Target license: Apache License 2.0
+- License: Apache License 2.0
 
 The name is explained subtly in selected copy: users can **sift through historical logs and tail live events**.
 
 ## Foundational decisions
 
 - one Docker container;
-- one Go process;
+- one long-running Go process, with focused short-lived CLI commands from the same binary;
 - separate UI and ingestion listeners;
-- SQLite with WAL through `mattn/go-sqlite3`;
+- SQLite with WAL and `synchronous=FULL` through `mattn/go-sqlite3`;
 - Go templates, HTMX, focused vanilla JavaScript, and plain CSS;
 - no production Node.js runtime;
 - one local administrator;

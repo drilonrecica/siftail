@@ -6,7 +6,7 @@
 **Tagline:** Fast, private logs for self-hosted apps.  
 **Primary integration:** Coolify custom Fluent Bit log drains  
 **Secondary integration:** Generic Fluent Bit HTTP output, best effort  
-**License target:** Apache License 2.0
+**License:** Apache License 2.0
 
 ---
 
@@ -34,7 +34,10 @@ When documents appear to conflict, apply this order:
 3. `PRODUCT.md` for scope and intended outcomes.
 4. `ARCHITECTURE.md` for technical realization.
 5. `DESIGN.md` for user interaction and presentation.
-6. `AGENTS.md` for implementation process and repository rules.
+6. Accepted ADRs for the reasoning behind later approved decisions.
+
+`AGENTS.md` governs implementation process and repository rules. It does not override
+the product or system behavior defined above.
 
 A deliberate change to product behavior must update all affected documents in the same change.
 
@@ -463,7 +466,8 @@ The following are explicitly outside version one and should not be introduced ac
 - organizations;
 - multiple users;
 - permissions and roles;
-- SSO integrations beyond optional trusted-proxy authentication;
+- SSO integrations;
+- trusted identity-header or forward-auth authentication before the public dogfood release;
 - hosted control plane;
 - billing;
 - usage metering;
@@ -578,8 +582,9 @@ The historical workspace must provide:
 - cascading source filters;
 - multiple explicit level selection;
 - independent stdout/stderr/unknown stream filtering;
-- case-insensitive message substring search;
+- literal ASCII case-folded message substring search;
 - one temporary “does not contain” filter;
+- an exact container-instance filter under More filters;
 - exact filters for selected normalized fields such as request ID, logger, method, status, and error type;
 - deterministic cursor pagination;
 - 200 events per initial page;
@@ -588,6 +593,7 @@ The historical workspace must provide:
 - complete query state in the browser URL.
 
 Historical results must not silently mix newly arriving live events into the result set.
+One historical query may cover at most 31 days.
 
 ### 10.5 Live-tail workspace
 
@@ -627,7 +633,9 @@ Source aliases change presentation only and never rewrite original metadata.
 
 ### 10.7 Deployment boundaries
 
-After the initial usable release, Siftail should infer a lightweight deployment boundary when the active container identity changes for a stable service.
+Deployment-boundary inference is a post-dogfood candidate, not a version-one
+requirement. If accepted later, Siftail may infer a lightweight deployment boundary
+when the active container identity changes for a stable service.
 
 A deployment boundary:
 
@@ -651,9 +659,13 @@ Defaults:
 - application logs: 14 days;
 - maximum database size: 4 GB;
 - audit records: 365 days;
+- audit record cap: 100,000;
 - cleanup interval: one hour.
 
 When either application-log threshold is reached, oldest application logs are deleted in bounded chunks.
+Size retention starts when the active SQLite footprint reaches 95% of the configured
+limit and targets 90%. The active footprint is the main database plus its WAL and SHM
+files.
 
 If the host filesystem becomes full despite normal retention, Siftail enters degraded read-only behavior:
 
@@ -677,7 +689,7 @@ Required behavior:
 - expired session rows are removed after a seven-day grace period;
 - progressive login throttling by source identity and account;
 - no CAPTCHA or external dependency;
-- optional trusted-proxy authentication with strict network and shared-secret validation.
+- ordinary reverse-proxy and TLS termination support without trusting identity headers.
 
 ### 10.10 Security audit
 
@@ -691,7 +703,6 @@ Siftail records immutable, bounded security-sensitive administrative events, inc
 - retention changes;
 - backup and restore operations;
 - source purges;
-- trusted-proxy configuration changes where applicable.
 
 Audit entries never include plaintext credentials, authorization headers, full application log content, or session tokens.
 
@@ -717,7 +728,7 @@ The authenticated status page must show:
 - readiness state;
 - sanitized effective configuration.
 
-The diagnostics area may show the latest 50–100 sanitized operational events. It must not mirror raw process logs or application logs.
+The diagnostics area may show the latest 100 sanitized operational events. It must not mirror raw process logs or application logs.
 
 ### 10.12 Backup, verification, and restore
 
@@ -731,6 +742,9 @@ Before the first public release, Siftail must provide:
 - preservation of the current database as a rollback copy during restore;
 - clear requirement that ingestion be stopped during restore;
 - audit events for backup and restore actions.
+
+Every backup type excludes active and historical administrator sessions. Restoring a
+backup therefore requires a new sign-in.
 
 Suggested CLI:
 
@@ -876,14 +890,18 @@ Navigation should remain compact. There is no analytics dashboard homepage.
 
 Version one provides:
 
-- case-insensitive substring search over `message_text`;
-- one case-insensitive “does not contain” condition;
+- literal substring search over `message_text` with ASCII-only case folding;
+- one literal “does not contain” condition using the same comparison;
 - selected exact structured-field filters;
 - explicit level multiselect;
 - explicit stream multiselect;
 - hierarchical source selection;
-- bounded time ranges;
+- an exact container-instance filter under More filters;
+- half-open time ranges `[from, to)` of at most 31 days;
 - deterministic cursor pagination.
+
+Non-ASCII text is compared byte-for-byte after valid UTF-8 decoding. Search terms have
+no wildcard or escape syntax.
 
 Version one does not provide:
 
@@ -979,8 +997,7 @@ Representative queries:
 - exact request-ID lookup;
 - cursor pagination;
 - source listing;
-- retention deletion;
-- inferred deployment-boundary retrieval.
+- retention deletion.
 
 ### 15.5 Image and dependency footprint
 
@@ -1043,7 +1060,7 @@ The UI shows a sanitized effective configuration, never raw secrets or complete 
 ### 18.1 Repository and license
 
 - public repository;
-- Apache License 2.0;
+- licensed under Apache License 2.0;
 - maintainer-led governance;
 - external contributions accepted selectively;
 - technically sound scope expansion may still be declined.
@@ -1099,6 +1116,7 @@ Required:
 - bounded queue;
 - batch commit;
 - commit-before-acknowledgement;
+- administrator server creation and token management through the CLI;
 - source discovery;
 - integration tests;
 - command-line ingestion tests;
@@ -1131,6 +1149,7 @@ Required:
 - pause/resume and bounded client buffers;
 - aliases;
 - source lifecycle;
+- browser server and ingestion-token management;
 - retention age and size limits;
 - status page;
 - generated Coolify configuration;
@@ -1149,7 +1168,6 @@ Required:
 - database checks;
 - operational diagnostics;
 - audit log;
-- trusted-proxy option;
 - disk-full degraded mode;
 - migration fixtures;
 - failure-path tests;
