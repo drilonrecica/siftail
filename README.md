@@ -58,6 +58,20 @@ The name is explained subtly in selected copy: users can **sift through historic
 - Coolify-first, generic Fluent Bit HTTP best effort;
 - metrics, traces, multi-tenancy, Kubernetes, dashboards, and AI analysis are out of scope.
 
+## Development
+
+Siftail is built with **Go 1.22** and requires **CGO** for the SQLite driver (`mattn/go-sqlite3`).
+
+Common local checks:
+
+```bash
+make fmt        # go fmt ./...
+make vet        # go vet ./...
+make test       # go test ./...
+make race-test  # go test -race ./...
+make build      # build the siftail binary
+```
+
 ## Important note
 
 These are planning and implementation specifications, not generated application code. When implementation intentionally changes an accepted decision, update the relevant specification, tests, migrations, and—when the decision is consequential—an ADR in the same change.
