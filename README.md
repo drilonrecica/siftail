@@ -89,9 +89,10 @@ The authenticated endpoint is `POST /api/v1/ingest`. It accepts Fluent Bit
 optional `Content-Encoding: gzip`. The application independently caps compressed
 and decompressed input, record count and size, JSON depth, and retained bytes.
 Malformed final records, duplicate keys, trailing data, and non-object records
-reject the complete request. Siftail currently returns `503` after valid decoding
-because durable writer integration and commit-backed `204` acknowledgement are
-assigned to SFT-012 and SFT-013.
+reject the complete request. A `204 No Content` response means the complete
+request committed durably to SQLite. Capacity and temporary database failures
+return `503`; storage-full failures return `507`; a conflicting reuse of a
+stable source event ID returns `409`.
 
 The fixtures track Fluent Bit's official
 [HTTP output](https://docs.fluentbit.io/manual/data-pipeline/outputs/http) and
@@ -99,6 +100,57 @@ Coolify's documented
 [custom Fluent Bit drain](https://coolify.io/docs/knowledge-base/drain-logs).
 Coolify aliases are compile-time compatibility rules, including the documented
 `coolify.app_name` field.
+
+### Command-line ingestion smoke test
+
+This focused workflow needs the `siftail` binary, a POSIX shell, `curl`, and
+`gzip`; it does not require an SQLite client or arbitrary SQL. Use disposable
+paths and ports when running it locally:
+
+```bash
+export SIFTAIL_DATA_DIR=/tmp/siftail-smoke
+export SIFTAIL_UI_ADDR=127.0.0.1:18080
+export SIFTAIL_INGEST_ADDR=127.0.0.1:18081
+
+./siftail server create --name Smoke
+TOKEN_OUTPUT=$(./siftail token create --server 1 --name smoke)
+while IFS= read -r LINE; do
+  case "$LINE" in
+    "token (shown once): "*) SIFTAIL_SMOKE_TOKEN=${LINE#*: } ;;
+  esac
+done <<EOF
+$TOKEN_OUTPUT
+EOF
+unset TOKEN_OUTPUT LINE
+
+./siftail serve &
+SIFTAIL_SMOKE_PID=$!
+trap 'kill "$SIFTAIL_SMOKE_PID" 2>/dev/null; wait "$SIFTAIL_SMOKE_PID" 2>/dev/null' EXIT
+until curl --silent --fail "http://$SIFTAIL_UI_ADDR/health/live" >/dev/null; do sleep 0.1; done
+
+curl --fail-with-body \
+  -H "Authorization: Bearer $SIFTAIL_SMOKE_TOKEN" \
+  -H "Content-Type: application/x-ndjson" \
+  --data-binary '{"timestamp":"2026-07-28T08:00:00Z","application":"smoke","service":"api","log":"plain smoke event"}' \
+  "http://$SIFTAIL_INGEST_ADDR/api/v1/ingest"
+
+printf '%s\n' '{"date":"2026-07-28T08:00:01Z","coolify_application_name":"smoke","coolify_service_name":"worker","log":"gzip smoke event"}' |
+  gzip -c |
+  curl --fail-with-body \
+    -H "Authorization: Bearer $SIFTAIL_SMOKE_TOKEN" \
+    -H "Content-Type: application/x-ndjson" \
+    -H "Content-Encoding: gzip" \
+    --data-binary @- \
+    "http://$SIFTAIL_INGEST_ADDR/api/v1/ingest"
+
+kill "$SIFTAIL_SMOKE_PID"
+wait "$SIFTAIL_SMOKE_PID"
+trap - EXIT
+unset SIFTAIL_SMOKE_TOKEN SIFTAIL_SMOKE_PID
+```
+
+Both ingestion calls must return HTTP `204`; that status is the commit
+confirmation. Remove the disposable data directory after the process exits.
 
 ### Current dependency rationale
 

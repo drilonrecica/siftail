@@ -1,0 +1,1 @@
+[{"date":"2026-07-28T08:00:01Z","coolify_project_name":"smoke","coolify_environment_name":"test","coolify_application_name":"fixture","coolify_service_name":"worker","container_id":"fluent-1","container_name":"fixture-worker-1","stream":"stderr","log":"gzip smoke event","source_event_id":"smoke-gzip-1"}]

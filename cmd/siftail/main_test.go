@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"fmt"
 	"net"
@@ -16,6 +17,8 @@ import (
 
 	"github.com/drilonrecica/siftail/internal/app"
 	"github.com/drilonrecica/siftail/internal/config"
+	"github.com/drilonrecica/siftail/internal/database"
+	"github.com/drilonrecica/siftail/internal/logs"
 )
 
 func TestAdministrativeCLIOffline(t *testing.T) {
@@ -168,6 +171,165 @@ func TestServeHandlesSIGTERMAndRemovesControlSocket(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dataDir, "siftail-control.sock")); !os.IsNotExist(err) {
 		t.Fatalf("control socket remains after SIGTERM: %v", err)
+	}
+}
+
+func TestDurableIngestionSubprocessSmoke(t *testing.T) {
+	if testing.Short() {
+		t.Skip("subprocess smoke test")
+	}
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	work := t.TempDir()
+	binary := filepath.Join(work, "siftail-smoke")
+	build := exec.Command("go", "build", "-o", binary, "./cmd/siftail")
+	build.Dir = root
+	if output, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build smoke binary: %v\n%s", err, output)
+	}
+
+	dataDir := filepath.Join(work, "data")
+	if err := os.Mkdir(dataDir, 0750); err != nil {
+		t.Fatal(err)
+	}
+	uiAddr := freeTCPAddr(t)
+	ingestAddr := freeTCPAddr(t)
+	environment := append(withoutSiftailEnv(os.Environ()),
+		"SIFTAIL_DATA_DIR="+dataDir,
+		"SIFTAIL_UI_ADDR="+uiAddr,
+		"SIFTAIL_INGEST_ADDR="+ingestAddr,
+		"SIFTAIL_LOG_LEVEL=error",
+	)
+	serve := exec.Command(binary, "serve")
+	serve.Env = environment
+	var processOutput bytes.Buffer
+	serve.Stdout = &processOutput
+	serve.Stderr = &processOutput
+	if err := serve.Start(); err != nil {
+		t.Fatal(err)
+	}
+	waited := false
+	defer func() {
+		if waited {
+			return
+		}
+		_ = serve.Process.Kill()
+		_ = serve.Wait()
+	}()
+	waitForHTTP(t, "http://"+uiAddr+"/health/live", serve, &processOutput)
+
+	var serverOutput []byte
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		command := exec.Command(binary, "server", "create", "--name", "Smoke")
+		command.Env = environment
+		serverOutput, err = command.CombinedOutput()
+		if err == nil {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if err != nil || !strings.Contains(string(serverOutput), "server 1 created") {
+		t.Fatalf("create smoke Server through CLI: %v", err)
+	}
+
+	tokenCommand := exec.Command(binary, "token", "create", "--server", "1", "--name", "smoke")
+	tokenCommand.Env = environment
+	tokenOutput, err := tokenCommand.Output()
+	if err != nil {
+		t.Fatalf("create smoke token through CLI: %v", err)
+	}
+	token := oneTimeToken(tokenOutput)
+	if token == "" {
+		t.Fatal("token CLI did not return one one-time token")
+	}
+
+	plain, err := os.ReadFile(filepath.Join(root, "cmd/siftail/testdata/ingest/canonical.ndjson"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	postSmokeFixture(t, ingestAddr, token, "application/x-ndjson", "", plain)
+
+	fluent, err := os.ReadFile(filepath.Join(root, "cmd/siftail/testdata/ingest/fluent-bit.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var compressed bytes.Buffer
+	gzipWriter := gzip.NewWriter(&compressed)
+	if _, err := gzipWriter.Write(fluent); err != nil {
+		t.Fatal(err)
+	}
+	if err := gzipWriter.Close(); err != nil {
+		t.Fatal(err)
+	}
+	postSmokeFixture(t, ingestAddr, token, "application/json", "gzip", compressed.Bytes())
+
+	if err := serve.Process.Signal(syscall.SIGTERM); err != nil {
+		t.Fatal(err)
+	}
+	if err := serve.Wait(); err != nil {
+		t.Fatalf("smoke server shutdown: %v\n%s", err, processOutput.String())
+	}
+	waited = true
+	if _, err := os.Stat(filepath.Join(dataDir, "siftail-control.sock")); !os.IsNotExist(err) {
+		t.Fatalf("smoke control socket remains: %v", err)
+	}
+
+	db, err := database.Open(context.Background(), filepath.Join(dataDir, "siftail.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	events, err := logs.NewStore(db.Reader()).Recent(context.Background(), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 2 {
+		t.Fatalf("committed smoke events = %d, want 2", len(events))
+	}
+	messages := map[string]bool{}
+	for _, event := range events {
+		messages[event.MessageText] = true
+		if string(event.MessageRaw) != event.MessageText {
+			t.Fatalf("raw payload was not preserved for %q", event.MessageText)
+		}
+	}
+	if !messages["plain smoke event"] || !messages["gzip smoke event"] {
+		t.Fatalf("smoke messages = %#v", messages)
+	}
+}
+
+func oneTimeToken(output []byte) string {
+	for _, line := range strings.Split(string(output), "\n") {
+		const prefix = "token (shown once): "
+		if strings.HasPrefix(line, prefix) {
+			return strings.TrimPrefix(line, prefix)
+		}
+	}
+	return ""
+}
+
+func postSmokeFixture(t *testing.T, addr, token, mediaType, encoding string, body []byte) {
+	t.Helper()
+	request, err := http.NewRequest(http.MethodPost, "http://"+addr+"/api/v1/ingest", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Authorization", "Bearer "+token)
+	request.Header.Set("Content-Type", mediaType)
+	if encoding != "" {
+		request.Header.Set("Content-Encoding", encoding)
+	}
+	client := &http.Client{Timeout: 5 * time.Second}
+	response, err := client.Do(request)
+	if err != nil {
+		t.Fatalf("post smoke fixture: %v", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusNoContent {
+		t.Fatalf("smoke ingestion status = %d", response.StatusCode)
 	}
 }
 

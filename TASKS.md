@@ -555,10 +555,15 @@ latency includes queue and commit time by design.
 
 ### SFT-014 — Build the ingestion integration and smoke suites
 
-**Status:** Planned  
+**Status:** Done
 **Milestone:** 0.1.0  
 **Depends on:** SFT-013  
-**Issue/PR:** —
+**Issue/PR:** — (direct maintainer implementation)
+**Completed:** 2026-07-28
+**Completion evidence:** Real-database HTTP coverage plus the subprocess smoke
+test build and run production Siftail, create Server/token state through CLI
+paths, ingest plain NDJSON and gzip Fluent Bit fixtures, shut down cleanly, and
+verify preserved rows through the bounded production log store.
 
 **Authoritative references:** `AGENTS.md` §§18.1–18.5; `ARCHITECTURE.md` §32.
 
