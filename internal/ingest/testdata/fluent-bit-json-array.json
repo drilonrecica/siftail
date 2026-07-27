@@ -1,0 +1,16 @@
+[
+  {
+    "date": "2026-07-27T20:14:55.123456Z",
+    "log": "web request complete",
+    "stream": "stdout",
+    "coolify.app_name": "web",
+    "container_name": "checkout-web-1"
+  },
+  {
+    "date": 1785183296.25,
+    "log": "{\"level\":\"ERROR\",\"message\":\"worker failed\",\"request_id\":\"req-42\"}",
+    "stream": "stderr",
+    "coolify.app_name": "worker",
+    "container_id": "abc123"
+  }
+]

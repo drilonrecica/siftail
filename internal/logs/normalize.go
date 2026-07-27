@@ -228,7 +228,7 @@ func normalizeSource(fields map[string]json.RawMessage, serverID int64) (SourceI
 	project := firstString(fields, "coolify_project_name", "project_name", "com.docker.compose.project", "project")
 	environment := firstString(fields, "coolify_environment_name", "environment_name", "environment", "env")
 	application := firstString(fields, "coolify_application_name", "application_name", "application", "app")
-	service := firstString(fields, "coolify_service_name", "service_name", "com.docker.compose.service", "service")
+	service := firstString(fields, "coolify_service_name", "coolify.app_name", "service_name", "com.docker.compose.service", "service")
 	containerID := firstString(fields, "container_id", "container.id")
 	containerName := firstString(fields, "container_name", "container.name")
 
@@ -291,12 +291,13 @@ func stableContainerName(value string) string {
 
 func normalizeMessage(fields map[string]json.RawMessage, recordRaw []byte) ([]byte, string, map[string]json.RawMessage, error) {
 	var raw json.RawMessage
-	for _, key := range []string{"log", "message", "msg"} {
-		if value, ok := fields[key]; ok {
-			raw = value
-			delete(fields, key)
-			break
-		}
+	if value, ok := fields["log"]; ok {
+		raw = value
+		delete(fields, "log")
+	} else if len(recordRaw) > 0 && (fields["message"] != nil || fields["msg"] != nil) {
+		raw = recordRaw
+		delete(fields, "message")
+		delete(fields, "msg")
 	}
 	if len(raw) == 0 {
 		raw = recordRaw
@@ -478,7 +479,7 @@ func isTransportField(key string) bool {
 		"coolify_project_name", "environment", "environment_name", "env",
 		"coolify_environment_name", "application", "application_name", "app",
 		"coolify_application_name", "service", "service_name",
-		"coolify_service_name", "com.docker.compose.project",
+		"coolify_service_name", "coolify.app_name", "com.docker.compose.project",
 		"com.docker.compose.service", "compose_project":
 		return true
 	default:

@@ -397,10 +397,15 @@ latency, and denial-of-service boundaries.
 
 ### SFT-010 — Implement bounded JSON and NDJSON decoding
 
-**Status:** Planned  
+**Status:** Done
 **Milestone:** 0.1.0  
 **Depends on:** SFT-007, SFT-009  
-**Issue/PR:** —
+**Issue/PR:** — (direct maintainer implementation)
+**Completed:** 2026-07-28
+**Completion evidence:** Official-format JSON array/JSON Lines fixtures,
+Coolify alias fixtures, gzip/plain/multiline normalization, boundary and
+decompression-bomb tests, object/duplicate/depth/trailing/final-record
+rejections, atomic empty result assertions, and bounded decoder fuzzing.
 
 **Authoritative references:** `ARCHITECTURE.md` §§11.3–12.4; `DOMAIN.md` §9;
 ADR 0002.

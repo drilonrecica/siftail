@@ -82,6 +82,24 @@ No process secret environment variable exists yet. When one is introduced,
 direct and `_FILE` forms will be mutually exclusive; `_FILE` input removes only
 trailing CR/LF bytes and never appears in sanitized configuration or logs.
 
+### Ingestion compatibility
+
+The authenticated endpoint is `POST /api/v1/ingest`. It accepts Fluent Bit
+`json` as one object or an array of objects and `json_lines` as NDJSON, with an
+optional `Content-Encoding: gzip`. The application independently caps compressed
+and decompressed input, record count and size, JSON depth, and retained bytes.
+Malformed final records, duplicate keys, trailing data, and non-object records
+reject the complete request. Siftail currently returns `503` after valid decoding
+because durable writer integration and commit-backed `204` acknowledgement are
+assigned to SFT-012 and SFT-013.
+
+The fixtures track Fluent Bit's official
+[HTTP output](https://docs.fluentbit.io/manual/data-pipeline/outputs/http) and
+Coolify's documented
+[custom Fluent Bit drain](https://coolify.io/docs/knowledge-base/drain-logs).
+Coolify aliases are compile-time compatibility rules, including the documented
+`coolify.app_name` field.
+
 ### Current dependency rationale
 
 - `github.com/mattn/go-sqlite3` v1.14.48 is the accepted SQLite driver. It
