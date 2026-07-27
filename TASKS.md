@@ -209,10 +209,14 @@ or migration. Security review covers socket permissions and safe errors.
 
 ### SFT-005 — Implement the SQLite lifecycle
 
-**Status:** Ready
+**Status:** Done
 **Milestone:** 0.1.0  
 **Depends on:** SFT-003  
-**Issue/PR:** —
+**Issue/PR:** — (direct maintainer implementation)
+**Completed:** 2026-07-28
+**Completion evidence:** Real SQLite pragma, pool, corruption, compatibility,
+checkpoint, close, application-lifecycle, and race tests; linux/amd64 binary
+measured at 13,291,176 bytes from a 9,274,021-byte baseline.
 
 **Authoritative references:** `ARCHITECTURE.md` §§10.1–10.5; ADR 0001.
 

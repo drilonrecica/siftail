@@ -84,6 +84,14 @@ trailing CR/LF bytes and never appears in sanitized configuration or logs.
 
 ### Current dependency rationale
 
+- `github.com/mattn/go-sqlite3` v1.14.48 is the accepted SQLite driver. It
+  bundles SQLite, is MIT licensed, requires CGO and a C toolchain, and adds no
+  runtime service. Production images must therefore build explicitly for
+  `linux/amd64` and `linux/arm64`. On linux/amd64 with Go 1.25, the initial
+  linked database lifecycle increased the unstripped binary from 9,274,021
+  bytes to 13,291,176 bytes (+4,017,155 bytes) in the SFT-005 linux/amd64
+  verification build. Database or driver security updates require normal
+  dependency review and a rebuilt container.
 - `golang.org/x/sync/errgroup` provides owned cancellation and first-error
   propagation for the application’s critical components. The standard library
   does not provide the same combined group/error boundary. It has no transitive

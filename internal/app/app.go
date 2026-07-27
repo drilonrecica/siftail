@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/drilonrecica/siftail/internal/config"
+	"github.com/drilonrecica/siftail/internal/database"
 	"github.com/drilonrecica/siftail/internal/web"
 	"golang.org/x/sync/errgroup"
 )
@@ -39,6 +40,15 @@ func (a *App) Run(ctx context.Context) error {
 	if err := a.ensureDataDir(); err != nil {
 		return err
 	}
+	db, err := database.Open(ctx, a.cfg.DatabasePath)
+	if err != nil {
+		return fmt.Errorf("database startup: %w", err)
+	}
+	defer func() {
+		if err := db.Close(); err != nil {
+			a.logger.Error("database shutdown failed", "component", "database", "error_category", "database_close")
+		}
+	}()
 
 	controlListener, err := a.openControlSocket()
 	if err != nil {
