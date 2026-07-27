@@ -9,6 +9,7 @@ import (
 )
 
 var ErrQueueClosed = errors.New("ingestion queue is closed")
+var ErrAdmissionClosed = errors.New("ingestion admission is closed")
 
 type AdmissionLimits struct {
 	MaxDecoders       int
@@ -26,6 +27,8 @@ type Admission struct {
 	mu       sync.Mutex
 	resident ledger
 	queued   ledger
+	closed   chan struct{}
+	once     sync.Once
 }
 
 type ledger struct {
@@ -37,16 +40,36 @@ func NewAdmission(limits AdmissionLimits) *Admission {
 	return &Admission{
 		decoders: make(chan struct{}, limits.MaxDecoders),
 		limits:   limits,
+		closed:   make(chan struct{}),
 	}
 }
 
 func (a *Admission) beginDecode(ctx context.Context) (*residentLease, error) {
 	select {
+	case <-a.closed:
+		return nil, ErrAdmissionClosed
+	default:
+	}
+	select {
 	case a.decoders <- struct{}{}:
+		select {
+		case <-a.closed:
+			<-a.decoders
+			return nil, ErrAdmissionClosed
+		default:
+		}
 		return &residentLease{admission: a, decoderHeld: true}, nil
+	case <-a.closed:
+		return nil, ErrAdmissionClosed
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
+}
+
+// Close rejects new decoders. Existing decoder leases remain valid and release
+// their accounting through the ordinary ownership path.
+func (a *Admission) Close() {
+	a.once.Do(func() { close(a.closed) })
 }
 
 type residentLease struct {
@@ -134,10 +157,10 @@ func NewWriteBatch(decoded DecodedBatch, requestID string, serverID int64) *Writ
 // Complete delivers a buffered result and releases all capacity exactly once.
 func (b *WriteBatch) Complete(err error) {
 	b.once.Do(func() {
-		b.Result <- err
 		if b.lease != nil {
 			b.lease.release()
 		}
+		b.Result <- err
 	})
 }
 

@@ -44,8 +44,14 @@ type Limits struct {
 type Handler struct {
 	tokens  *sources.Store
 	decoder Decoder
+	queue   *Queue
 	limits  Limits
 	now     func() time.Time
+}
+
+func (h *Handler) WithQueue(queue *Queue) *Handler {
+	h.queue = queue
+	return h
 }
 
 func NewHandler(tokens *sources.Store, decoder Decoder, limits Limits) *Handler {
@@ -115,12 +121,30 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		RequestID: requestID(r),
 	})
 	if err == nil {
-		if batch.lease != nil {
-			batch.lease.release()
+		if h.queue == nil {
+			if batch.lease != nil {
+				batch.lease.release()
+			}
+			writeSafe(w, http.StatusServiceUnavailable)
+			return
 		}
-		// Persistence is introduced by SFT-012/SFT-013. Never acknowledge a
-		// merely decoded batch.
-		writeSafe(w, http.StatusServiceUnavailable)
+		writeBatch := NewWriteBatch(batch, requestID(r), server.ID)
+		if err := h.queue.Enqueue(writeBatch); err != nil {
+			writeSafe(w, statusFor(err))
+			return
+		}
+		select {
+		case err := <-writeBatch.Result:
+			if err != nil {
+				writeSafe(w, statusFor(err))
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+		case <-ctx.Done():
+			// Queue ownership survives a disconnected or timed-out request.
+			// The buffered result lets the writer finish without blocking.
+			return
+		}
 		return
 	}
 	writeSafe(w, statusFor(err))
@@ -157,6 +181,9 @@ func statusFor(err error) int {
 	var maxBytes *http.MaxBytesError
 	if errors.As(err, &maxBytes) {
 		return http.StatusRequestEntityTooLarge
+	}
+	if errors.Is(err, ErrAdmissionClosed) || errors.Is(err, ErrQueueClosed) {
+		return http.StatusServiceUnavailable
 	}
 	if errors.Is(err, context.DeadlineExceeded) {
 		return http.StatusServiceUnavailable

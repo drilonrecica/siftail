@@ -516,10 +516,15 @@ transaction duration, index cost, memory, and safe SQLite error classification.
 
 ### SFT-013 — Complete commit-before-acknowledgement and shutdown integration
 
-**Status:** Planned  
+**Status:** Done
 **Milestone:** 0.1.0  
 **Depends on:** SFT-004, SFT-009, SFT-010, SFT-011, SFT-012  
-**Issue/PR:** —
+**Issue/PR:** — (direct maintainer implementation)
+**Completed:** 2026-07-28
+**Completion evidence:** Real-database HTTP tests prove commit-backed `204`,
+last-record conflict rollback, retryable saturation/shutdown responses,
+post-admission cancellation durability, bounded result delivery, and closed-queue
+draining; application lifecycle tests cover listener and database shutdown.
 
 **Authoritative references:** `ARCHITECTURE.md` §§7–8, 11.6–11.8, 13.4;
 ADR 0002.

@@ -28,6 +28,9 @@ type App struct {
 	logger       *slog.Logger
 	db           *database.DB
 	coordinator  *database.Coordinator
+	admission    *ingest.Admission
+	queue        *ingest.Queue
+	ingestHTTP   http.Handler
 	shuttingDown atomic.Bool
 }
 
@@ -40,12 +43,12 @@ func New(cfg config.Config, logger *slog.Logger) *App {
 // or a critical component fails. The first critical error cancels the
 // application context.
 func (a *App) Run(ctx context.Context) error {
-	g, ctx := errgroup.WithContext(ctx)
+	g, serverCtx := errgroup.WithContext(ctx)
 
 	if err := a.ensureDataDir(); err != nil {
 		return err
 	}
-	db, err := database.Open(ctx, a.cfg.DatabasePath)
+	db, err := database.Open(serverCtx, a.cfg.DatabasePath)
 	if err != nil {
 		return fmt.Errorf("database startup: %w", err)
 	}
@@ -69,14 +72,49 @@ func (a *App) Run(ctx context.Context) error {
 	coordinator := database.NewCoordinator(db.Writer())
 	a.coordinator = coordinator
 	defer func() { a.coordinator = nil }()
-	g.Go(func() error { return coordinator.Run(ctx) })
+	coordinatorCtx, cancelCoordinator := context.WithCancel(context.Background())
+	coordinatorDone := make(chan error, 1)
+	go func() { coordinatorDone <- coordinator.Run(coordinatorCtx) }()
 	<-coordinator.Ready()
 
-	g.Go(func() error { return a.runControlServer(ctx, controlListener) })
-	g.Go(func() error { return a.runUIServer(ctx) })
-	g.Go(func() error { return a.runIngestServer(ctx) })
+	if err := a.initializeIngestion(); err != nil {
+		coordinator.Close()
+		cancelCoordinator()
+		<-coordinatorDone
+		return err
+	}
+	defer func() {
+		a.admission = nil
+		a.queue = nil
+		a.ingestHTTP = nil
+	}()
+	writerDone := make(chan error, 1)
+	writerCtx, cancelWriter := context.WithCancel(context.Background())
+	go func() {
+		writerDone <- ingest.NewWriterWorker(a.queue, ingest.NewBatchWriter(coordinator, nil)).Run(writerCtx)
+	}()
 
-	return g.Wait()
+	g.Go(func() error { return a.runControlServer(serverCtx, controlListener) })
+	g.Go(func() error { return a.runUIServer(serverCtx) })
+	g.Go(func() error { return a.runIngestServer(serverCtx) })
+
+	serverErr := g.Wait()
+	a.shuttingDown.Store(true)
+	a.admission.Close()
+	a.queue.Close()
+	var writerErr error
+	select {
+	case writerErr = <-writerDone:
+	case <-time.After(a.cfg.ShutdownTimeout):
+		cancelWriter()
+		writerErr = <-writerDone
+	}
+	cancelWriter()
+	coordinator.Close()
+	cancelCoordinator()
+	coordinatorErr := <-coordinatorDone
+	checkpointErr := db.Checkpoint(context.Background())
+	return errors.Join(serverErr, writerErr, coordinatorErr, checkpointErr)
 }
 
 func (a *App) ensureDataDir() error {
@@ -170,6 +208,11 @@ func (a *App) uiMux() *http.ServeMux {
 
 func (a *App) ingestMux() *http.ServeMux {
 	mux := http.NewServeMux()
+	mux.Handle("/api/v1/ingest", a.ingestHTTP)
+	return mux
+}
+
+func (a *App) initializeIngestion() error {
 	store := sources.NewStore(a.db.Reader())
 	admission := ingest.NewAdmission(ingest.AdmissionLimits{
 		MaxDecoders:       int(a.cfg.IngestMaxDecoders),
@@ -185,12 +228,15 @@ func (a *App) ingestMux() *http.ServeMux {
 		MaxEvents:            int(a.cfg.MaxEventsPerRequest),
 		MaxJSONDepth:         32,
 	}).WithAdmission(admission)
+	queue := ingest.NewQueue(admission)
 	handler := ingest.NewHandler(store, decoder, ingest.Limits{
 		MaxCompressedBytes: a.cfg.MaxCompressedRequestBytes,
 		RequestTimeout:     30 * time.Second,
-	})
-	mux.Handle("/api/v1/ingest", handler)
-	return mux
+	}).WithQueue(queue)
+	a.admission = admission
+	a.queue = queue
+	a.ingestHTTP = handler
+	return nil
 }
 
 func (a *App) newServer(handler http.Handler, name string) *http.Server {

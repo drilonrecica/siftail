@@ -1,0 +1,264 @@
+package ingest
+
+import (
+	"context"
+	"database/sql"
+	"net/http"
+	"net/http/httptest"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/drilonrecica/siftail/internal/database"
+	"github.com/drilonrecica/siftail/internal/sources"
+)
+
+type ingestionIntegration struct {
+	db              *database.DB
+	coordinator     *database.Coordinator
+	admission       *Admission
+	queue           *Queue
+	handler         *Handler
+	token           string
+	coordinatorStop context.CancelFunc
+	coordinatorDone chan error
+	writerDone      chan error
+}
+
+func newIngestionIntegration(t *testing.T, queueEvents, queueBytes int64) *ingestionIntegration {
+	t.Helper()
+	db, err := database.Open(context.Background(), filepath.Join(t.TempDir(), "siftail.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	adminStore := sources.NewStore(db.Writer())
+	server, err := adminStore.CreateServer(context.Background(), "Integration", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	token, err := adminStore.CreateToken(context.Background(), server.ID, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	coordinatorCtx, coordinatorStop := context.WithCancel(context.Background())
+	coordinator := database.NewCoordinator(db.Writer())
+	coordinatorDone := make(chan error, 1)
+	go func() { coordinatorDone <- coordinator.Run(coordinatorCtx) }()
+	<-coordinator.Ready()
+
+	admission := NewAdmission(AdmissionLimits{
+		MaxDecoders: 2, ResidentMaxEvents: 100, ResidentMaxBytes: 4 << 20,
+		QueueMaxEvents: queueEvents, QueueMaxBytes: queueBytes,
+	})
+	queue := NewQueue(admission)
+	decoder := NewJSONDecoder(DecoderLimits{
+		MaxCompressedBytes: 1 << 20, MaxDecompressedBytes: 2 << 20,
+		MaxEventBytes: 1 << 20, MaxEvents: 100, MaxJSONDepth: 32,
+	}).WithAdmission(admission)
+	handler := NewHandler(sources.NewStore(db.Reader()), decoder, Limits{
+		MaxCompressedBytes: 1 << 20, RequestTimeout: time.Second,
+	}).WithQueue(queue)
+	writerDone := make(chan error, 1)
+	go func() {
+		writerDone <- NewWriterWorker(queue, NewBatchWriter(coordinator, nil)).Run(context.Background())
+	}()
+
+	fixture := &ingestionIntegration{
+		db: db, coordinator: coordinator, admission: admission, queue: queue,
+		handler: handler, token: token.Token, coordinatorStop: coordinatorStop,
+		coordinatorDone: coordinatorDone, writerDone: writerDone,
+	}
+	t.Cleanup(func() {
+		admission.Close()
+		queue.Close()
+		<-writerDone
+		coordinator.Close()
+		coordinatorStop()
+		<-coordinatorDone
+		_ = db.Close()
+	})
+	return fixture
+}
+
+func (f *ingestionIntegration) request(ctx context.Context, body string) (*httptest.ResponseRecorder, chan struct{}) {
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/ingest", strings.NewReader(body)).WithContext(ctx)
+	request.Header.Set("Authorization", "Bearer "+f.token)
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		f.handler.ServeHTTP(response, request)
+	}()
+	return response, done
+}
+
+func (f *ingestionIntegration) blockCoordinator(t *testing.T) chan struct{} {
+	t.Helper()
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	go func() {
+		_ = f.coordinator.Do(context.Background(), func(*sql.Tx) error {
+			close(entered)
+			<-release
+			return nil
+		})
+	}()
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("coordinator blocker did not start")
+	}
+	return release
+}
+
+func TestIngestionAcknowledgesOnlyAfterCommit(t *testing.T) {
+	fixture := newIngestionIntegration(t, 10, 1<<20)
+	release := fixture.blockCoordinator(t)
+	response, done := fixture.request(context.Background(), testEventJSON("commit-1", "committed"))
+
+	select {
+	case <-done:
+		t.Fatalf("handler returned before commit with status %d", response.Code)
+	case <-time.After(20 * time.Millisecond):
+	}
+	close(release)
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("handler did not return after commit")
+	}
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, body=%q", response.Code, response.Body.String())
+	}
+	assertEventCount(t, fixture.db.Reader(), 1)
+	if stats := fixture.admission.Stats(); stats.ResidentEvents != 0 || stats.QueuedEvents != 0 {
+		t.Fatalf("capacity not released before acknowledgement: %#v", stats)
+	}
+}
+
+func TestIngestionLastRecordConflictRollsBackRequest(t *testing.T) {
+	fixture := newIngestionIntegration(t, 10, 1<<20)
+	first, done := fixture.request(context.Background(), testEventJSON("stable", "original"))
+	<-done
+	if first.Code != http.StatusNoContent {
+		t.Fatalf("initial status = %d", first.Code)
+	}
+
+	body := `[` + testEventJSON("new", "must roll back") + `,` + testEventJSON("stable", "conflict") + `]`
+	response, done := fixture.request(context.Background(), body)
+	<-done
+	if response.Code != http.StatusConflict {
+		t.Fatalf("status = %d, body=%q", response.Code, response.Body.String())
+	}
+	assertEventCount(t, fixture.db.Reader(), 1)
+}
+
+func TestIngestionCancellationAfterAdmissionStillCommits(t *testing.T) {
+	fixture := newIngestionIntegration(t, 10, 1<<20)
+	release := fixture.blockCoordinator(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	_, done := fixture.request(ctx, testEventJSON("", "ambiguous"))
+	waitForQueuedEvents(t, fixture.admission, 1)
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("cancelled handler did not leave")
+	}
+	close(release)
+	waitForEventCount(t, fixture.db.Reader(), 1)
+	waitForQueuedEvents(t, fixture.admission, 0)
+}
+
+func TestIngestionQueueSaturationIsRetryable(t *testing.T) {
+	fixture := newIngestionIntegration(t, 1, 1<<20)
+	release := fixture.blockCoordinator(t)
+	_, firstDone := fixture.request(context.Background(), testEventJSON("", "first"))
+	waitForQueuedEvents(t, fixture.admission, 1)
+
+	second, secondDone := fixture.request(context.Background(), testEventJSON("", "second"))
+	<-secondDone
+	if second.Code != http.StatusServiceUnavailable {
+		t.Fatalf("saturation status = %d", second.Code)
+	}
+	close(release)
+	<-firstDone
+	assertEventCount(t, fixture.db.Reader(), 1)
+}
+
+func TestIngestionClosedAdmissionIsRetryable(t *testing.T) {
+	fixture := newIngestionIntegration(t, 10, 1<<20)
+	fixture.admission.Close()
+	response, done := fixture.request(context.Background(), testEventJSON("", "shutdown"))
+	<-done
+	if response.Code != http.StatusServiceUnavailable {
+		t.Fatalf("closed admission status = %d", response.Code)
+	}
+	assertEventCount(t, fixture.db.Reader(), 0)
+}
+
+func TestWriterWorkerDrainsClosedQueue(t *testing.T) {
+	fixture := newIngestionIntegration(t, 10, 1<<20)
+	release := fixture.blockCoordinator(t)
+	first, firstDone := fixture.request(context.Background(), testEventJSON("", "first"))
+	second, secondDone := fixture.request(context.Background(), testEventJSON("", "second"))
+	waitForQueuedEvents(t, fixture.admission, 2)
+	fixture.admission.Close()
+	fixture.queue.Close()
+	close(release)
+	<-firstDone
+	<-secondDone
+	if first.Code != http.StatusNoContent || second.Code != http.StatusNoContent {
+		t.Fatalf("drained statuses = %d/%d", first.Code, second.Code)
+	}
+	assertEventCount(t, fixture.db.Reader(), 2)
+}
+
+func testEventJSON(sourceEventID, message string) string {
+	id := ""
+	if sourceEventID != "" {
+		id = `,"source_event_id":"` + sourceEventID + `"`
+	}
+	return `{"timestamp":"2026-07-28T00:00:00Z","project":"p","environment":"e",` +
+		`"application":"a","service":"api","container_id":"container-1",` +
+		`"stream":"stdout","level":"info","log":"` + message + `"` + id + `}`
+}
+
+func assertEventCount(t *testing.T, db *sql.DB, want int) {
+	t.Helper()
+	var got int
+	if err := db.QueryRow("SELECT count(*) FROM log_events").Scan(&got); err != nil {
+		t.Fatal(err)
+	}
+	if got != want {
+		t.Fatalf("event count = %d, want %d", got, want)
+	}
+}
+
+func waitForEventCount(t *testing.T, db *sql.DB, want int) {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		var got int
+		if err := db.QueryRow("SELECT count(*) FROM log_events").Scan(&got); err == nil && got == want {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	assertEventCount(t, db, want)
+}
+
+func waitForQueuedEvents(t *testing.T, admission *Admission, want int64) {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if admission.Stats().QueuedEvents == want {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("queued events = %d, want %d", admission.Stats().QueuedEvents, want)
+}
