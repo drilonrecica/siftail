@@ -1168,6 +1168,7 @@ Required:
 - database checks;
 - operational diagnostics;
 - audit log;
+- bounded text and NDJSON History export with audit recording;
 - disk-full degraded mode;
 - migration fixtures;
 - failure-path tests;

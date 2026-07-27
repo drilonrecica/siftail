@@ -2293,7 +2293,8 @@ Recommended sequence:
 15. Coolify config generator and guided test;
 16. backup/verify/restore;
 17. audit and hardening;
-18. public documentation and packaging.
+18. bounded History export;
+19. public documentation and packaging.
 
 Do not begin visual polish before ingestion correctness is demonstrated.
 

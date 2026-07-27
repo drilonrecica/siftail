@@ -34,9 +34,13 @@ Before making a meaningful change, read:
 3. `PRODUCT.md`
 4. `ARCHITECTURE.md`
 5. `DESIGN.md` when changing UI or copy
-6. relevant tests, migrations, and ADRs
+6. the relevant `TASKS.md` entry for tracked implementation work
+7. relevant tests, migrations, and ADRs
 
 Do not rely on issue text, chat history, or assumptions instead of these documents.
+
+`TASKS.md` tracks execution and status only. It cannot redefine behavior from
+the authoritative specifications, accepted tests, migrations, or ADRs.
 
 For a small localized change, reread the relevant sections rather than mechanically rereading every line. For architectural or domain changes, review all five documents.
 
@@ -52,8 +56,9 @@ When sources conflict:
 4. `ARCHITECTURE.md` for technical decisions.
 5. `DESIGN.md` for presentation and interactions.
 6. Accepted ADRs for the reasoning behind decisions already reflected in the authoritative documents.
-7. Issue or PR description.
-8. Historical discussion.
+7. `TASKS.md` for accepted execution scope, dependency order, and status only.
+8. Issue or PR description.
+9. Historical discussion.
 
 `AGENTS.md` governs repository process and implementation discipline. It does not
 override the behavior defined by the four product specifications.
@@ -943,8 +948,14 @@ Examples:
 - component/protocol/storage change → `ARCHITECTURE.md`;
 - interaction/visual/copy change → `DESIGN.md`;
 - implementation-process rule → `AGENTS.md`.
+- execution dependency or status change → `TASKS.md`.
 
 Operator-facing behavior also updates README/operator docs and release notes.
+
+Update the relevant task status and issue/PR link in the implementation change.
+Never mark a task `Done` until its acceptance and required verification are
+complete. If implementation reveals a behavioral change, update the
+authoritative document rather than encoding the change only in `TASKS.md`.
 
 Do not leave stale examples with old environment prefix, old routes, or old names.
 
@@ -1169,6 +1180,7 @@ At the end of a coding task, report concisely:
 - benchmarks run and results if applicable;
 - migrations added;
 - documentation updated;
+- tracked task status updated where applicable;
 - known limitations or follow-ups;
 - anything not completed.
 
