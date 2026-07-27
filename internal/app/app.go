@@ -164,13 +164,20 @@ func (a *App) uiMux() *http.ServeMux {
 func (a *App) ingestMux() *http.ServeMux {
 	mux := http.NewServeMux()
 	store := sources.NewStore(a.db.Reader())
+	admission := ingest.NewAdmission(ingest.AdmissionLimits{
+		MaxDecoders:       int(a.cfg.IngestMaxDecoders),
+		ResidentMaxEvents: a.cfg.IngestResidentMaxEvents,
+		ResidentMaxBytes:  a.cfg.IngestResidentMaxBytes,
+		QueueMaxEvents:    a.cfg.QueueMaxEvents,
+		QueueMaxBytes:     a.cfg.QueueMaxBytes,
+	})
 	decoder := ingest.NewJSONDecoder(ingest.DecoderLimits{
 		MaxCompressedBytes:   a.cfg.MaxCompressedRequestBytes,
 		MaxDecompressedBytes: a.cfg.MaxDecompressedRequestBytes,
 		MaxEventBytes:        a.cfg.MaxEventBytes,
 		MaxEvents:            int(a.cfg.MaxEventsPerRequest),
 		MaxJSONDepth:         32,
-	})
+	}).WithAdmission(admission)
 	handler := ingest.NewHandler(store, decoder, ingest.Limits{
 		MaxCompressedBytes: a.cfg.MaxCompressedRequestBytes,
 		RequestTimeout:     30 * time.Second,

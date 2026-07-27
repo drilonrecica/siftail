@@ -436,10 +436,16 @@ peak allocation and ensure errors never include payload bytes.
 
 ### SFT-011 — Implement resident admission and the bounded queue
 
-**Status:** Planned  
+**Status:** Done
 **Milestone:** 0.1.0  
 **Depends on:** SFT-007  
-**Issue/PR:** —
+**Issue/PR:** — (direct maintainer implementation)
+**Completed:** 2026-07-28
+**Completion evidence:** Deterministic decoder/resident/queue boundary and
+saturation tests, decode failure and cancellation ownership tests,
+close/drain and exactly-once completion tests, concurrent accounting stress
+under the race detector, and linux/amd64 admission accounting benchmark
+(148.9 ns/op, 48 B/op, 1 alloc/op on an Intel i5-7500).
 
 **Authoritative references:** `ARCHITECTURE.md` §§11.3, 13; `AGENTS.md` §9.5;
 ADR 0002.

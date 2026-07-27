@@ -22,7 +22,8 @@ type DecoderLimits struct {
 }
 
 type JSONDecoder struct {
-	limits DecoderLimits
+	limits    DecoderLimits
+	admission *Admission
 }
 
 func NewJSONDecoder(limits DecoderLimits) *JSONDecoder {
@@ -32,7 +33,26 @@ func NewJSONDecoder(limits DecoderLimits) *JSONDecoder {
 	return &JSONDecoder{limits: limits}
 }
 
+func (d *JSONDecoder) WithAdmission(admission *Admission) *JSONDecoder {
+	d.admission = admission
+	return d
+}
+
 func (d *JSONDecoder) Decode(ctx context.Context, request DecodeRequest) (DecodedBatch, error) {
+	var lease *residentLease
+	if d.admission != nil {
+		var err error
+		lease, err = d.admission.beginDecode(ctx)
+		if err != nil {
+			return DecodedBatch{}, err
+		}
+	}
+	keepLease := false
+	defer func() {
+		if lease != nil && !keepLease {
+			lease.release()
+		}
+	}()
 	compressed := &capReader{reader: request.Body, remaining: d.limits.MaxCompressedBytes}
 	var source io.Reader = compressed
 	var gzipReader *gzip.Reader
@@ -46,37 +66,23 @@ func (d *JSONDecoder) Decode(ctx context.Context, request DecodeRequest) (Decode
 		source = gzipReader
 	}
 	decompressed := &capReader{reader: source, remaining: d.limits.MaxDecompressedBytes}
-	var records []json.RawMessage
-	var err error
-	switch request.MediaType {
-	case "application/x-ndjson":
-		records, err = d.decodeNDJSON(ctx, decompressed)
-	case "application/json":
-		records, err = d.decodeJSON(ctx, decompressed)
-	default:
-		return DecodedBatch{}, &Error{Category: CategoryBadRequest}
-	}
-	if err != nil {
-		return DecodedBatch{}, safeDecodeError(err)
-	}
-	if len(records) == 0 {
-		return DecodedBatch{}, &Error{Category: CategoryBadRequest}
-	}
-
-	batch := DecodedBatch{Events: make([]logs.CanonicalEvent, 0, len(records))}
-	for index, raw := range records {
+	batch := DecodedBatch{Events: make([]logs.CanonicalEvent, 0)}
+	process := func(raw json.RawMessage) error {
 		if err := ctx.Err(); err != nil {
-			return DecodedBatch{}, err
+			return err
+		}
+		if len(batch.Events) >= d.limits.MaxEvents {
+			return &Error{Category: CategoryTooLarge}
 		}
 		if int64(len(raw)) > d.limits.MaxEventBytes {
-			return DecodedBatch{}, &Error{Category: CategoryTooLarge}
+			return &Error{Category: CategoryTooLarge}
 		}
 		if err := logs.ValidateJSON(raw, d.limits.MaxJSONDepth); err != nil {
-			return DecodedBatch{}, &Error{Category: CategoryBadRequest}
+			return &Error{Category: CategoryBadRequest}
 		}
 		var fields map[string]json.RawMessage
 		if err := json.Unmarshal(raw, &fields); err != nil || fields == nil {
-			return DecodedBatch{}, &Error{Category: CategoryBadRequest}
+			return &Error{Category: CategoryBadRequest}
 		}
 		record := logs.ReceivedRecord{Fields: fields, Raw: append([]byte(nil), raw...)}
 		if timestamp, ok := fields["date"]; ok {
@@ -87,108 +93,131 @@ func (d *JSONDecoder) Decode(ctx context.Context, request DecodeRequest) (Decode
 		}
 		event, err := logs.Normalize(record, request.Server, request.ReceivedAt)
 		if err != nil {
-			_ = index // index is intentionally not included with payload data.
 			if errors.Is(err, logs.ErrLimit) {
-				return DecodedBatch{}, &Error{Category: CategoryTooLarge}
+				return &Error{Category: CategoryTooLarge}
 			}
-			return DecodedBatch{}, &Error{Category: CategoryBadRequest}
+			return &Error{Category: CategoryBadRequest}
 		}
-		batch.ApproxBytes += event.RetainedBytes()
+		retained := event.RetainedBytes()
+		if lease != nil {
+			if err := lease.add(1, retained); err != nil {
+				return err
+			}
+		}
+		batch.ApproxBytes += retained
 		batch.Events = append(batch.Events, event)
+		return nil
+	}
+
+	var err error
+	switch request.MediaType {
+	case "application/x-ndjson":
+		err = d.decodeNDJSON(ctx, decompressed, process)
+	case "application/json":
+		err = d.decodeJSON(ctx, decompressed, process)
+	default:
+		return DecodedBatch{}, &Error{Category: CategoryBadRequest}
+	}
+	if err != nil {
+		return DecodedBatch{}, safeDecodeError(err)
+	}
+	if len(batch.Events) == 0 {
+		return DecodedBatch{}, &Error{Category: CategoryBadRequest}
+	}
+	if lease != nil {
+		lease.decodingDone()
+		batch.lease = lease
+		keepLease = true
 	}
 	return batch, nil
 }
 
-func (d *JSONDecoder) decodeNDJSON(ctx context.Context, reader io.Reader) ([]json.RawMessage, error) {
+func (d *JSONDecoder) decodeNDJSON(ctx context.Context, reader io.Reader, process func(json.RawMessage) error) error {
 	scanner := bufio.NewScanner(reader)
 	bufferSize := int(d.limits.MaxEventBytes + 1)
 	if bufferSize < 64*1024 {
 		bufferSize = 64 * 1024
 	}
 	scanner.Buffer(make([]byte, 64*1024), bufferSize)
-	var records []json.RawMessage
 	for scanner.Scan() {
 		if err := ctx.Err(); err != nil {
-			return nil, err
+			return err
 		}
 		line := bytes.TrimSpace(scanner.Bytes())
 		if len(line) == 0 {
 			continue
 		}
 		if int64(len(line)) > d.limits.MaxEventBytes {
-			return nil, &Error{Category: CategoryTooLarge}
+			return &Error{Category: CategoryTooLarge}
 		}
-		records = append(records, append([]byte(nil), line...))
-		if len(records) > d.limits.MaxEvents {
-			return nil, &Error{Category: CategoryTooLarge}
+		if err := process(append([]byte(nil), line...)); err != nil {
+			return err
 		}
 	}
 	if err := scanner.Err(); err != nil {
 		if strings.Contains(err.Error(), "token too long") {
-			return nil, &Error{Category: CategoryTooLarge}
+			return &Error{Category: CategoryTooLarge}
 		}
-		return nil, err
+		return err
 	}
-	return records, nil
+	return nil
 }
 
-func (d *JSONDecoder) decodeJSON(ctx context.Context, reader io.Reader) ([]json.RawMessage, error) {
+func (d *JSONDecoder) decodeJSON(ctx context.Context, reader io.Reader, process func(json.RawMessage) error) error {
 	buffered := bufio.NewReaderSize(reader, 64*1024)
 	first, err := readNonspace(buffered)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if first == '{' {
 		raw, err := readJSONObject(buffered, first, d.limits.MaxEventBytes)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		if err := requireWhitespaceEOF(buffered); err != nil {
-			return nil, err
+			return err
 		}
-		return []json.RawMessage{raw}, nil
+		return process(raw)
 	}
 	if first != '[' {
-		return nil, &Error{Category: CategoryBadRequest}
+		return &Error{Category: CategoryBadRequest}
 	}
 	if err := buffered.UnreadByte(); err != nil {
-		return nil, err
+		return err
 	}
 	decoder := json.NewDecoder(buffered)
 	decoder.UseNumber()
 	token, err := decoder.Token()
 	if err != nil || token != json.Delim('[') {
-		return nil, &Error{Category: CategoryBadRequest}
+		return &Error{Category: CategoryBadRequest}
 	}
-	var records []json.RawMessage
 	for decoder.More() {
 		if err := ctx.Err(); err != nil {
-			return nil, err
+			return err
 		}
 		var raw json.RawMessage
 		if err := decoder.Decode(&raw); err != nil {
-			return nil, err
+			return err
 		}
 		if int64(len(raw)) > d.limits.MaxEventBytes {
-			return nil, &Error{Category: CategoryTooLarge}
+			return &Error{Category: CategoryTooLarge}
 		}
 		if len(bytes.TrimSpace(raw)) == 0 || bytes.TrimSpace(raw)[0] != '{' {
-			return nil, &Error{Category: CategoryBadRequest}
+			return &Error{Category: CategoryBadRequest}
 		}
-		records = append(records, raw)
-		if len(records) > d.limits.MaxEvents {
-			return nil, &Error{Category: CategoryTooLarge}
+		if err := process(raw); err != nil {
+			return err
 		}
 	}
 	end, err := decoder.Token()
 	if err != nil || end != json.Delim(']') {
-		return nil, &Error{Category: CategoryBadRequest}
+		return &Error{Category: CategoryBadRequest}
 	}
 	var trailing any
 	if err := decoder.Decode(&trailing); err != io.EOF {
-		return nil, &Error{Category: CategoryBadRequest}
+		return &Error{Category: CategoryBadRequest}
 	}
-	return records, nil
+	return nil
 }
 
 type capReader struct {

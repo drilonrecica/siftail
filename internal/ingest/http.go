@@ -28,6 +28,7 @@ type DecodeRequest struct {
 type DecodedBatch struct {
 	Events      []logs.CanonicalEvent
 	ApproxBytes int64
+	lease       *residentLease
 }
 
 // Decoder is the hostile-input boundary owned by the ingestion consumer.
@@ -108,12 +109,15 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	body := http.MaxBytesReader(w, r.Body, h.limits.MaxCompressedBytes)
 	defer body.Close()
-	_, err = h.decoder.Decode(ctx, DecodeRequest{
+	batch, err := h.decoder.Decode(ctx, DecodeRequest{
 		Body: body, MediaType: mediaType, Gzip: encoding == "gzip",
 		ReceivedAt: h.now(), Server: logs.TrustedServer{ID: server.ID},
 		RequestID: requestID(r),
 	})
 	if err == nil {
+		if batch.lease != nil {
+			batch.lease.release()
+		}
 		// Persistence is introduced by SFT-012/SFT-013. Never acknowledge a
 		// merely decoded batch.
 		writeSafe(w, http.StatusServiceUnavailable)
