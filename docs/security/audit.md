@@ -106,11 +106,13 @@ only typed identifiers and validated safe metadata through `html/template`.
 
 ## Migration and compatibility
 
-Fresh creation and schema-1, schema-2, and schema-3 upgrade tests reach schema
-4. Representative Server, administrator, source, and application-event data
-survive; integrity checks and critical reads pass. Migration failure rolls back,
-and binaries supporting only schema 3 refuse schema 4 rather than deleting or
-recreating the database.
+Fresh creation and immutable schema-1, schema-2, schema-3, and schema-4
+fixture tests reach schema 4. Representative Server, administrator, session,
+source, application-event, settings, and version-applicable audit data survive;
+integrity and production critical reads/writes pass. Migration failure rolls
+back its version, and older binaries refuse a newer schema rather than deleting,
+recreating, or down-migrating the database. See
+[`../operations/upgrade-compatibility.md`](../operations/upgrade-compatibility.md).
 
 The migration is additive and does not rewrite existing rows. It adds bounded
 future disk growth: at most 100,000 audit rows, each with at most 2 KiB of

@@ -260,6 +260,14 @@ bounded security-audit storage. Upgrades apply them transactionally and
 preserve ingestion, administrator, session, source, and event data. Older
 binaries refuse databases with newer schema versions.
 
+Immutable synthetic SQLite fixtures cover schemas 1 through 4. The production
+open matrix preserves version-applicable settings, identity, administrator,
+session, event, and audit state; then exercises History, controlled ingestion,
+retention/audit writes, integrity, failed-migration rollback, newer-schema
+refusal, and both backup/restore types. Released migration and fixture hashes
+are pinned so historical inputs cannot drift silently. See
+[`docs/operations/upgrade-compatibility.md`](docs/operations/upgrade-compatibility.md).
+
 All browser sessions can be invalidated locally:
 
 ```bash

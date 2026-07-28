@@ -2220,7 +2220,11 @@ Tests should configure WAL and production-relevant pragmas.
 
 ### 32.3 Migration fixtures
 
-Maintain a fixture for every released schema version.
+Maintain an immutable synthetic SQLite fixture for every released schema
+version. Existing fixtures and released migration files are append-only and
+have pinned SHA-256 digests. Adding a migration adds one new current-schema
+fixture rather than rebuilding older snapshots. A correction requires explicit
+overwrite, reviewed provenance/digest changes, and release notes.
 
 For each:
 
@@ -2231,7 +2235,19 @@ open historical fixture
 → verify representative data
 → run quick/integrity check
 → execute critical queries
+→ commit through the production writer/store boundary
+→ create, verify, and restore full/configuration backups
 ```
+
+Fixtures contain only recognizable synthetic settings, identities, hashes,
+events, and audit metadata. Schema-specific state is present only once its
+migration introduced the table. Ordinary forward upgrade preserves sessions;
+every backup type excludes them and restore requires a new login.
+
+Before `1.0`, retain every historical schema fixture. A later removal requires
+an authoritative minimum-upgrade window, release notes, and a documented
+intermediate path where required. The current binary never down-migrates, and
+the schema is not a public third-party database API.
 
 ### 32.4 HTTP ingestion tests
 
