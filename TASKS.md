@@ -43,11 +43,11 @@ task does not tag, publish, or otherwise release a version.
 | `0.1.0` | SFT-001–SFT-015 | Complete | Unreleased | [`docs/tasks/0.1.0.md`](docs/tasks/0.1.0.md) |
 | `0.2.0` | SFT-016–SFT-024 | Complete | Unreleased | [`docs/tasks/0.2.0.md`](docs/tasks/0.2.0.md) |
 | `0.3.0` | SFT-025–SFT-037 | Implementation gate complete | Unreleased | [`docs/tasks/0.3.0.md`](docs/tasks/0.3.0.md) |
-| `0.4.0` | SFT-038–SFT-049 | In progress; SFT-038–SFT-047 are Done, SFT-048 is Ready | Unreleased | [`docs/tasks/0.4.0.md`](docs/tasks/0.4.0.md) |
+| `0.4.0` | SFT-038–SFT-049 | In progress; SFT-038–SFT-048 are Done, SFT-049 is Ready | Unreleased | [`docs/tasks/0.4.0.md`](docs/tasks/0.4.0.md) |
 | `0.5.0` | SFT-050–SFT-058 | Planned | Unreleased | [`docs/tasks/0.5.0.md`](docs/tasks/0.5.0.md) |
 | `1.0.0` | SFT-059–SFT-063 | Planned evidence gates | Unreleased | [`docs/tasks/1.0.0.md`](docs/tasks/1.0.0.md) |
 
-**Next implementable task:** SFT-048 — Harden recovery, failure, concurrency, and security paths.
+**Next implementable task:** SFT-049 — Close the `0.4.0` pre-public hardening gate.
 
 The completed requirement matrices and browser/security evidence are in
 [`docs/release/0.2.0-gate.md`](docs/release/0.2.0-gate.md) and

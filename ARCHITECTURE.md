@@ -1093,6 +1093,15 @@ staging artifact is also deleted after delivery. A failed response write adds
 a sanitized canceled-delivery audit without changing the earlier mandatory
 success audit.
 
+A hard process or host interruption may prevent the handler defer from
+running. While holding the owner-private maintenance lock and before SQLite is
+opened, startup scans `/data` in bounded directory chunks and removes only
+strict `.siftail-export-<numeric-random>` regular files whose permission bits
+grant no group or other access. It synchronizes the directory after removal.
+An otherwise matching symlink, directory, device, or broadly readable file
+fails startup with a closed recovery error; startup never follows it or
+silently removes it. Names outside the exact reserved pattern are untouched.
+
 Requirements:
 
 - enforce max rows and/or bytes;

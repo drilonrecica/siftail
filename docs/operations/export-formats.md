@@ -28,6 +28,15 @@ range, and `.txt` or `.ndjson`. Responses are `text/plain; charset=utf-8` or
 `application/x-ndjson`, with `Cache-Control: no-store` and
 `X-Content-Type-Options: nosniff`.
 
+If the process or host stops before request cleanup runs, the next server
+startup removes interrupted export staging files before opening SQLite. The
+recovery scan recognizes only the exact numeric staging-name pattern, reads the
+data directory in bounded chunks, accepts only regular owner-private files,
+and synchronizes the directory after removal. A matching symlink, non-regular
+entry, or file readable by group/other causes startup to stop for inspection;
+Siftail does not follow or silently delete it. Other files and similar names
+remain untouched.
+
 ## Scope and limits
 
 Export uses the current typed History range and every source, container, level,

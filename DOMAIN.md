@@ -1296,6 +1296,11 @@ generation, synchronization, validation, and the mandatory success audit
 commit have completed. Limit, cancellation, deadline, storage, and audit
 failure delete the staging file and never expose a partial artifact. The
 artifact is deleted after delivery, including an interrupted delivery.
+If the process or host stops before ordinary cleanup, the next server startup
+removes only strictly named, regular, owner-private export staging files while
+holding the database maintenance lock and before opening SQLite. A matching
+symlink, non-regular file, or broadly readable file stops startup for operator
+inspection instead of being followed or silently removed.
 
 Audit records contain only the closed result category, format, emitted event
 count when applicable, optional trusted Server ID, administrator attribution,

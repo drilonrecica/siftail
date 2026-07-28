@@ -18,6 +18,7 @@ import (
 )
 
 const historyExportConfirmation = "export matching history"
+const historyExportStagingPrefix = ".siftail-export-"
 
 func (b *Browser) historyExport(w http.ResponseWriter, r *http.Request) {
 	session, _ := BrowserSessionFromContext(r.Context())
@@ -56,7 +57,9 @@ func (b *Browser) historyExport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	artifact, err := os.CreateTemp(b.exportDataDir, ".siftail-export-*")
+	artifact, err := os.CreateTemp(
+		b.exportDataDir, historyExportStagingPrefix+"*",
+	)
 	if err != nil {
 		b.failHistoryExport(w, r, session.CSRFToken, query, format,
 			"staging_failed")
@@ -274,5 +277,63 @@ func historyExportContentType(format string) string {
 }
 
 func historyExportStagingFiles(dataDir string) ([]string, error) {
-	return filepath.Glob(filepath.Join(dataDir, ".siftail-export-*"))
+	return filepath.Glob(filepath.Join(dataDir, historyExportStagingPrefix+"*"))
+}
+
+// CleanupHistoryExportStaging removes private artifacts left by a hard process
+// interruption before the database is opened. The reserved pattern is strict,
+// directory reads are chunked, and symlinks or broadly readable matches stop
+// startup rather than being followed or silently removed.
+func CleanupHistoryExportStaging(dataDir string) error {
+	if dataDir == "" {
+		return errors.New("History export recovery directory is unavailable")
+	}
+	directory, err := os.Open(dataDir)
+	if err != nil {
+		return errors.New("open History export recovery directory")
+	}
+	defer directory.Close()
+	removed := false
+	for {
+		entries, readErr := directory.ReadDir(128)
+		for _, entry := range entries {
+			if !validHistoryExportStagingName(entry.Name()) {
+				continue
+			}
+			info, err := entry.Info()
+			if err != nil || !info.Mode().IsRegular() ||
+				info.Mode().Perm()&0077 != 0 {
+				return errors.New("unsafe History export recovery artifact")
+			}
+			if err := os.Remove(filepath.Join(dataDir, entry.Name())); err != nil {
+				return errors.New("remove History export recovery artifact")
+			}
+			removed = true
+		}
+		if errors.Is(readErr, io.EOF) {
+			break
+		}
+		if readErr != nil {
+			return errors.New("read History export recovery directory")
+		}
+	}
+	if removed {
+		if err := directory.Sync(); err != nil {
+			return errors.New("synchronize History export recovery directory")
+		}
+	}
+	return nil
+}
+
+func validHistoryExportStagingName(name string) bool {
+	suffix, ok := strings.CutPrefix(name, historyExportStagingPrefix)
+	if !ok || len(suffix) < 1 || len(suffix) > 20 {
+		return false
+	}
+	for _, character := range suffix {
+		if character < '0' || character > '9' {
+			return false
+		}
+	}
+	return true
 }

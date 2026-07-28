@@ -75,6 +75,9 @@ func (a *App) Run(ctx context.Context) error {
 	if err := backup.RestoreRecoveryRequired(a.cfg.DataDir); err != nil {
 		return fmt.Errorf("restore recovery: %w", err)
 	}
+	if err := auth.CleanupHistoryExportStaging(a.cfg.DataDir); err != nil {
+		return fmt.Errorf("History export recovery: %w", err)
+	}
 	db, err := database.Open(serverCtx, a.cfg.DatabasePath)
 	if err != nil {
 		return fmt.Errorf("database startup: %w", err)

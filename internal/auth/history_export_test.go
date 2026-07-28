@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -216,6 +218,75 @@ func TestHistoryExportDeliveryDisconnectIsAuditedAfterMandatorySuccess(t *testin
 		t.Fatalf("mandatory pre-delivery audit missing: %#v", page.Events)
 	}
 	assertNoHistoryExportStaging(t, fixture)
+}
+
+func TestHistoryExportStartupCleanupIsBoundedAndRefusesUnsafeMatches(t *testing.T) {
+	directory := t.TempDir()
+	for index := range 300 {
+		path := filepath.Join(
+			directory, historyExportStagingPrefix+strconv.Itoa(index),
+		)
+		if err := os.WriteFile(path, []byte("synthetic partial"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, name := range []string{
+		".siftail-export-not-numeric",
+		".siftail-export-123-extra",
+		"operator-file",
+	} {
+		if err := os.WriteFile(
+			filepath.Join(directory, name), []byte("preserve"), 0600,
+		); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := CleanupHistoryExportStaging(directory); err != nil {
+		t.Fatal(err)
+	}
+	files, err := historyExportStagingFiles(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 2 {
+		t.Fatalf("strict non-staging matches = %#v", files)
+	}
+	for _, name := range []string{
+		".siftail-export-not-numeric",
+		".siftail-export-123-extra",
+		"operator-file",
+	} {
+		if contents, err := os.ReadFile(filepath.Join(directory, name)); err != nil ||
+			string(contents) != "preserve" {
+			t.Fatalf("preserved file %q = %q %v", name, contents, err)
+		}
+	}
+
+	target := filepath.Join(directory, "operator-file")
+	symlink := filepath.Join(directory, historyExportStagingPrefix+"999")
+	if err := os.Symlink(target, symlink); err != nil {
+		t.Fatal(err)
+	}
+	if err := CleanupHistoryExportStaging(directory); err == nil {
+		t.Fatal("History export cleanup followed or accepted a symlink")
+	}
+	if contents, err := os.ReadFile(target); err != nil ||
+		string(contents) != "preserve" {
+		t.Fatalf("symlink cleanup changed target = %q %v", contents, err)
+	}
+	if err := os.Remove(symlink); err != nil {
+		t.Fatal(err)
+	}
+	broad := filepath.Join(directory, historyExportStagingPrefix+"1000")
+	if err := os.WriteFile(broad, []byte("private"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := CleanupHistoryExportStaging(directory); err == nil {
+		t.Fatal("History export cleanup accepted broadly readable staging")
+	}
+	if _, err := os.Lstat(broad); err != nil {
+		t.Fatalf("unsafe staging was silently removed: %v", err)
+	}
 }
 
 func newExportRequest(

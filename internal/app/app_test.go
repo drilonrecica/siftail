@@ -153,6 +153,47 @@ func TestAppPreservesAndRefusesIncompleteRestoreStaging(t *testing.T) {
 	}
 }
 
+func TestAppRecoversInterruptedPrivateHistoryExportBeforeStartup(t *testing.T) {
+	cfg := testConfig(t)
+	staging := filepath.Join(cfg.DataDir, ".siftail-export-123456")
+	if err := os.WriteFile(staging, []byte("synthetic partial"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- New(cfg, testLogger(t)).Run(ctx) }()
+	waitForServer(t, "http://"+cfg.UIAddr+"/health/live")
+	if _, err := os.Lstat(staging); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("interrupted History export remains after startup: %v", err)
+	}
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+
+	unsafe := testConfig(t)
+	target := filepath.Join(unsafe.DataDir, "operator-file")
+	if err := os.WriteFile(target, []byte("preserve"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(
+		target, filepath.Join(unsafe.DataDir, ".siftail-export-999"),
+	); err != nil {
+		t.Fatal(err)
+	}
+	err := New(unsafe, testLogger(t)).Run(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "unsafe History export") {
+		t.Fatalf("unsafe History export recovery = %v", err)
+	}
+	if _, err := os.Lstat(unsafe.DatabasePath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("unsafe recovery opened the database: %v", err)
+	}
+	if contents, err := os.ReadFile(target); err != nil ||
+		string(contents) != "preserve" {
+		t.Fatalf("unsafe recovery changed symlink target = %q %v", contents, err)
+	}
+}
+
 func TestHealthLivenessAndReadinessTransitionsStayMinimal(t *testing.T) {
 	state := statusstate.NewState(time.Now())
 	state.SetWriterReady(true)
