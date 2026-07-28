@@ -16,13 +16,14 @@ import (
 
 type recordingPublisher struct {
 	mu     sync.Mutex
-	events []CommittedEvent
+	events []logs.CommittedEvent
 }
 
-func (p *recordingPublisher) TryPublish(events []CommittedEvent) {
+func (p *recordingPublisher) TryPublish(events []logs.CommittedEvent) bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.events = append(p.events, events...)
+	return true
 }
 
 func TestBatchWriterAtomicPersistenceOrderingAndIdempotency(t *testing.T) {
@@ -40,6 +41,11 @@ func TestBatchWriterAtomicPersistenceOrderingAndIdempotency(t *testing.T) {
 	assertCounts(t, db.Reader(), 1, 1, 2)
 	if len(publisher.events) != 2 || publisher.events[0].ID >= publisher.events[1].ID {
 		t.Fatalf("published events = %#v", publisher.events)
+	}
+	for _, event := range publisher.events {
+		if event.SourceID <= 0 || event.ContainerInstanceID <= 0 {
+			t.Fatalf("published database identities = %#v", event)
+		}
 	}
 
 	retry := first

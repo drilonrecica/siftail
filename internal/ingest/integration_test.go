@@ -3,6 +3,7 @@ package ingest
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/drilonrecica/siftail/internal/database"
+	"github.com/drilonrecica/siftail/internal/logs"
 	"github.com/drilonrecica/siftail/internal/sources"
 )
 
@@ -27,6 +29,14 @@ type ingestionIntegration struct {
 }
 
 func newIngestionIntegration(t *testing.T, queueEvents, queueBytes int64) *ingestionIntegration {
+	return newIngestionIntegrationWithPublisher(t, queueEvents, queueBytes, nil)
+}
+
+func newIngestionIntegrationWithPublisher(
+	t *testing.T,
+	queueEvents, queueBytes int64,
+	publisher Publisher,
+) *ingestionIntegration {
 	t.Helper()
 	db, err := database.Open(context.Background(), filepath.Join(t.TempDir(), "siftail.db"))
 	if err != nil {
@@ -62,7 +72,7 @@ func newIngestionIntegration(t *testing.T, queueEvents, queueBytes int64) *inges
 	}).WithQueue(queue)
 	writerDone := make(chan error, 1)
 	go func() {
-		writerDone <- NewWriterWorker(queue, NewBatchWriter(coordinator, nil)).Run(context.Background())
+		writerDone <- NewWriterWorker(queue, NewBatchWriter(coordinator, publisher)).Run(context.Background())
 	}()
 
 	fixture := &ingestionIntegration{
@@ -80,6 +90,79 @@ func newIngestionIntegration(t *testing.T, queueEvents, queueBytes int64) *inges
 		_ = db.Close()
 	})
 	return fixture
+}
+
+func TestIngestionPublishesOnlyAfterCommit(t *testing.T) {
+	broker := logs.NewLiveBroker(logs.LiveBrokerOptions{})
+	brokerDone := make(chan error, 1)
+	go func() { brokerDone <- broker.Run(context.Background()) }()
+	<-broker.Ready()
+	t.Cleanup(func() {
+		broker.Stop()
+		<-brokerDone
+	})
+
+	fixture := newIngestionIntegrationWithPublisher(t, 10, 1<<20, broker)
+	subscription, err := broker.Subscribe(context.Background(), logs.LiveFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	release := fixture.blockCoordinator(t)
+	response, requestDone := fixture.request(context.Background(), testEventJSON("live-commit", "committed"))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	if _, err := subscription.Next(ctx); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("event published before commit: %v", err)
+	}
+	close(release)
+	<-requestDone
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, body=%q", response.Code, response.Body.String())
+	}
+	message := nextIntegrationLive(t, subscription)
+	if message.Event.ID <= 0 || message.Event.SourceID <= 0 ||
+		message.Event.ContainerInstanceID <= 0 ||
+		message.Event.Event.MessageText != "committed" {
+		t.Fatalf("published event = %#v", message.Event)
+	}
+}
+
+func TestIngestionDoesNotPublishRolledBackBatch(t *testing.T) {
+	broker := logs.NewLiveBroker(logs.LiveBrokerOptions{})
+	brokerDone := make(chan error, 1)
+	go func() { brokerDone <- broker.Run(context.Background()) }()
+	<-broker.Ready()
+	t.Cleanup(func() {
+		broker.Stop()
+		<-brokerDone
+	})
+
+	fixture := newIngestionIntegrationWithPublisher(t, 10, 1<<20, broker)
+	subscription, err := broker.Subscribe(context.Background(), logs.LiveFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, firstDone := fixture.request(context.Background(), testEventJSON("stable-live", "original"))
+	<-firstDone
+	if first.Code != http.StatusNoContent {
+		t.Fatalf("initial status = %d", first.Code)
+	}
+	_ = nextIntegrationLive(t, subscription)
+
+	body := `[` + testEventJSON("new-live", "must roll back") + `,` +
+		testEventJSON("stable-live", "conflict") + `]`
+	response, requestDone := fixture.request(context.Background(), body)
+	<-requestDone
+	if response.Code != http.StatusConflict {
+		t.Fatalf("status = %d, body=%q", response.Code, response.Body.String())
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	if _, err := subscription.Next(ctx); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("rolled-back event was published: %v", err)
+	}
+	assertEventCount(t, fixture.db.Reader(), 1)
 }
 
 func (f *ingestionIntegration) request(ctx context.Context, body string) (*httptest.ResponseRecorder, chan struct{}) {
@@ -261,4 +344,15 @@ func waitForQueuedEvents(t *testing.T, admission *Admission, want int64) {
 		time.Sleep(time.Millisecond)
 	}
 	t.Fatalf("queued events = %d, want %d", admission.Stats().QueuedEvents, want)
+}
+
+func nextIntegrationLive(t *testing.T, subscription *logs.LiveSubscription) logs.LiveMessage {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	message, err := subscription.Next(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return message
 }

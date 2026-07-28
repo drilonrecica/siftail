@@ -22,17 +22,10 @@ const (
 
 var errCanonicalConflict = errors.New("stable source event ID conflicts with persisted content")
 
-// CommittedEvent is the post-commit publication boundary. ID is assigned by
-// SQLite and Event contains the immutable canonical content.
-type CommittedEvent struct {
-	ID    int64
-	Event logs.CanonicalEvent
-}
-
-// Publisher must enqueue without waiting for consumers. SFT-012 deliberately
-// defines only this hook; the Live broker belongs to a later milestone.
+// Publisher must enqueue without waiting for consumers. False indicates that
+// Live delivery was truncated; durable persistence remains successful.
 type Publisher interface {
-	TryPublish([]CommittedEvent)
+	TryPublish([]logs.CommittedEvent) bool
 }
 
 type WriterOptions struct {
@@ -101,7 +94,7 @@ func (w *BatchWriter) Persist(ctx context.Context, batch *WriteBatch) error {
 	if w == nil || w.coordinator == nil || batch == nil || len(batch.Events) == 0 {
 		return &Error{Category: CategoryUnavailable}
 	}
-	var committed []CommittedEvent
+	var committed []logs.CommittedEvent
 	var sourceUpdates []cacheUpdate[sourceKey]
 	var containerUpdates []cacheUpdate[containerKey]
 	err := w.coordinator.Do(ctx, func(tx *sql.Tx) error {
@@ -133,7 +126,7 @@ func (w *BatchWriter) persistTransaction(
 	ctx context.Context,
 	tx *sql.Tx,
 	batch *WriteBatch,
-) ([]CommittedEvent, []cacheUpdate[sourceKey], []cacheUpdate[containerKey], error) {
+) ([]logs.CommittedEvent, []cacheUpdate[sourceKey], []cacheUpdate[containerKey], error) {
 	for _, event := range batch.Events {
 		if batch.AuthenticatedServerID <= 0 || event.Source.ServerID != batch.AuthenticatedServerID {
 			return nil, nil, nil, &Error{Category: CategoryForbidden}
@@ -202,12 +195,14 @@ func (w *BatchWriter) persistTransaction(
 		containerUpdates = append(containerUpdates, cacheUpdate[containerKey]{key: key, id: id})
 	}
 
-	var committed []CommittedEvent
+	var committed []logs.CommittedEvent
 	for _, event := range batch.Events {
 		sourceID := sourceIDs[sourceCacheKey(event.Source)]
-		var containerID any
+		var containerID int64
+		var databaseContainerID any
 		if event.Container != nil {
 			containerID = containerIDs[containerKey{sourceID: sourceID, id: event.Container.ID, name: event.Container.Name}]
+			databaseContainerID = containerID
 		}
 		if event.SourceEventID != "" {
 			existing, found, err := loadCanonicalEvent(ctx, tx, sourceID, event.SourceEventID, event.Source)
@@ -229,7 +224,7 @@ func (w *BatchWriter) persistTransaction(
 		) VALUES (?, ?, ?, ?, ?, ?, nullif(?, ''), ?, ?, nullif(?, ''),
 			nullif(?, ''), nullif(?, ''), nullif(?, ''), nullif(?, ''), nullif(?, ''),
 			nullif(?, ''), ?, ?)`,
-			event.EventAtUS, event.ReceivedAtUS, sourceID, containerID, event.Stream,
+			event.EventAtUS, event.ReceivedAtUS, sourceID, databaseContainerID, event.Stream,
 			event.Level, event.OriginalLevel, event.MessageRaw, event.MessageText, string(event.Attributes),
 			event.SourceEventID, event.Common.Logger, event.Common.RequestID, event.Common.ErrorType,
 			event.Common.HTTPMethod, event.Common.HTTPPath, event.Common.HTTPStatus, event.Common.DurationMS)
@@ -240,7 +235,9 @@ func (w *BatchWriter) persistTransaction(
 		if err != nil {
 			return nil, nil, nil, database.Classify("read log event ID", err)
 		}
-		committed = append(committed, CommittedEvent{ID: id, Event: event})
+		committed = append(committed, logs.CommittedEvent{
+			ID: id, SourceID: sourceID, ContainerInstanceID: containerID, Event: event,
+		})
 	}
 
 	if err := updateLastSeen(ctx, tx, batch.Events, sourceIDs, containerIDs); err != nil {

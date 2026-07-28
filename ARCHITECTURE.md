@@ -1091,6 +1091,14 @@ payload. The process accepts at most 16 concurrent live subscriptions.
 
 The broker must not block when a subscriber is slow.
 
+The broker command ingress is bounded to 256 commands and the queued publication
+subset is bounded to 10,000 events and 16 MiB of retained canonical payload.
+Whichever publication bound is reached first rejects that Live publication
+without affecting its already committed database transaction. Because a dropped
+broker publication would otherwise create a silent gap, the broker marks all
+current subscribers truncated and closes them. Filter value lists are bounded to
+256 entries before they enter broker-owned state.
+
 When full:
 
 1. mark subscriber truncated;

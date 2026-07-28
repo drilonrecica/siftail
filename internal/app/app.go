@@ -36,6 +36,7 @@ type App struct {
 	ingestHTTP   http.Handler
 	browser      *auth.Browser
 	cursorCodec  *logs.CursorCodec
+	liveBroker   *logs.LiveBroker
 	shuttingDown atomic.Bool
 }
 
@@ -109,10 +110,17 @@ func (a *App) Run(ctx context.Context) error {
 		a.queue = nil
 		a.ingestHTTP = nil
 	}()
+	liveBroker := logs.NewLiveBroker(logs.LiveBrokerOptions{})
+	brokerDone := make(chan error, 1)
+	go func() { brokerDone <- liveBroker.Run(context.Background()) }()
+	<-liveBroker.Ready()
+	a.liveBroker = liveBroker
+	defer func() { a.liveBroker = nil }()
+
 	writerDone := make(chan error, 1)
 	writerCtx, cancelWriter := context.WithCancel(context.Background())
 	go func() {
-		writerDone <- ingest.NewWriterWorker(a.queue, ingest.NewBatchWriter(coordinator, nil)).Run(writerCtx)
+		writerDone <- ingest.NewWriterWorker(a.queue, ingest.NewBatchWriter(coordinator, liveBroker)).Run(writerCtx)
 	}()
 
 	g.Go(func() error { return a.runControlServer(serverCtx, controlListener) })
@@ -139,11 +147,13 @@ func (a *App) Run(ctx context.Context) error {
 		writerErr = <-writerDone
 	}
 	cancelWriter()
+	liveBroker.Stop()
+	brokerErr := <-brokerDone
 	coordinator.Close()
 	cancelCoordinator()
 	coordinatorErr := <-coordinatorDone
 	checkpointErr := db.Checkpoint(context.Background())
-	return errors.Join(serverErr, writerErr, coordinatorErr, checkpointErr)
+	return errors.Join(serverErr, writerErr, brokerErr, coordinatorErr, checkpointErr)
 }
 
 func (a *App) ensureDataDir() error {
