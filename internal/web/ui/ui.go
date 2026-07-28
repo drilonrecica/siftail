@@ -247,13 +247,22 @@ type TokenRowView struct {
 }
 
 type OneTimeTokenView struct {
-	CSRFToken   string
-	ServerID    int64
-	ServerName  string
-	TokenName   string
-	Fingerprint string
-	Token       string
-	DoneURL     string
+	CSRFToken        string
+	ServerID         int64
+	ServerName       string
+	TokenName        string
+	Fingerprint      string
+	Token            string
+	DoneURL          string
+	TestURL          string
+	TokenPlaceholder string
+	GuideAvailable   bool
+	GuideError       string
+	Endpoint         string
+	CoolifyConfig    string
+	GenericConfig    string
+	CurlCommand      string
+	SourcePreview    string
 }
 
 type SettingsView struct {

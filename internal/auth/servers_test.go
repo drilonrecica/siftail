@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/drilonrecica/siftail/internal/ingest"
 	"github.com/drilonrecica/siftail/internal/web"
 )
 
@@ -55,6 +56,10 @@ func TestBrowserServerAndOneTimeTokenLifecycle(t *testing.T) {
 		createTokenResponse.Header().Get("Cache-Control") != "no-store" ||
 		!strings.Contains(body, "Siftail stores only a hash and cannot show it again") ||
 		!strings.Contains(body, `data-one-time-token`) ||
+		!strings.Contains(body, "Coolify custom Fluent Bit configuration") ||
+		!strings.Contains(body, "Guided committed-receipt test") ||
+		!strings.Contains(body, ingest.GuideTokenPlaceholder) ||
+		strings.Count(body, plaintext) != 1 ||
 		strings.Contains(createTokenResponse.Header().Get("Location"), plaintext) ||
 		strings.Contains(processLogs.String(), plaintext) {
 		t.Fatalf("one-time token response = %d %#v %q logs=%q",
@@ -72,6 +77,48 @@ func TestBrowserServerAndOneTimeTokenLifecycle(t *testing.T) {
 		context.Background(), plaintext,
 	); err != nil {
 		t.Fatalf("created token did not authenticate: %v", err)
+	}
+
+	var delivered bool
+	ingestion := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		delivered = true
+		if r.URL.Path != "/api/v1/ingest" ||
+			r.Header.Get("Authorization") != "Bearer "+plaintext ||
+			r.Header.Get("Content-Type") != "application/json" {
+			t.Errorf("guided request = %s %#v", r.URL.Path, r.Header)
+		}
+		w.Header().Set("X-Siftail-Ingest-Outcome", "committed")
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer ingestion.Close()
+	tester, err := ingest.NewGuideTester(
+		ingestion.URL+"/api/v1/ingest", fixture.browser.sources,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixture.browser.guideTester = tester
+	guided := httptest.NewRecorder()
+	handler.ServeHTTP(guided, managementRequest(
+		t, fixture, cookie, "/servers/1/test-ingestion",
+		url.Values{"token": {plaintext}}, true,
+	))
+	if guided.Code != http.StatusOK || !delivered ||
+		!strings.Contains(guided.Body.String(), `"outcome":"committed"`) ||
+		strings.Contains(guided.Body.String(), plaintext) ||
+		strings.Contains(processLogs.String(), plaintext) {
+		t.Fatalf("guided response = %d %q logs=%q",
+			guided.Code, guided.Body.String(), processLogs.String())
+	}
+
+	wrongToken := httptest.NewRecorder()
+	handler.ServeHTTP(wrongToken, managementRequest(
+		t, fixture, cookie, "/servers/1/test-ingestion",
+		url.Values{"token": {"sft_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"}}, true,
+	))
+	if wrongToken.Code != http.StatusOK ||
+		!strings.Contains(wrongToken.Body.String(), `"outcome":"authentication-rejected"`) {
+		t.Fatalf("wrong-token result = %d %q", wrongToken.Code, wrongToken.Body.String())
 	}
 
 	detailRequest := httptest.NewRequest(http.MethodGet, "/servers/1", nil)

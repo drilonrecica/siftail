@@ -189,6 +189,10 @@ func (c Config) Validate() error {
 		if err := validateURL(c.IngestPublicURL, "SIFTAIL_INGEST_PUBLIC_URL"); err != nil {
 			return err
 		}
+		u, _ := url.Parse(c.IngestPublicURL)
+		if u.Path != "/api/v1/ingest" || u.RawQuery != "" || u.Fragment != "" {
+			return fmt.Errorf("SIFTAIL_INGEST_PUBLIC_URL must be the complete /api/v1/ingest URL without query or fragment")
+		}
 	}
 
 	switch c.LogLevel {

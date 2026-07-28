@@ -14,6 +14,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/drilonrecica/siftail/internal/ingest"
 	"github.com/drilonrecica/siftail/internal/logs"
 	"github.com/drilonrecica/siftail/internal/retention"
 	"github.com/drilonrecica/siftail/internal/sessions"
@@ -26,6 +27,7 @@ const csrfPurpose = "siftail-browser-csrf-v1"
 
 type BrowserConfig struct {
 	PublicURL         string
+	IngestPublicURL   string
 	TrustedProxyCIDRs []string
 	HistoryStore      *logs.Store
 	SourceStore       *sources.Store
@@ -35,12 +37,14 @@ type BrowserConfig struct {
 	LiveHeartbeat     time.Duration
 	LiveSessionCheck  time.Duration
 	LiveWriteTimeout  time.Duration
+	GuideTester       *ingest.GuideTester
 }
 
 type Browser struct {
 	administrators   *Store
 	sessions         *sessions.Store
 	publicURL        string
+	ingestPublicURL  string
 	proxies          proxyTrust
 	throttle         *loginThrottle
 	ui               *webui.Renderer
@@ -52,6 +56,7 @@ type Browser struct {
 	liveHeartbeat    time.Duration
 	liveSessionCheck time.Duration
 	liveWriteTimeout time.Duration
+	guideTester      *ingest.GuideTester
 	now              func() time.Time
 }
 
@@ -69,6 +74,7 @@ func NewBrowser(administrators *Store, sessionStore *sessions.Store, config Brow
 		administrators:   administrators,
 		sessions:         sessionStore,
 		publicURL:        strings.TrimSuffix(config.PublicURL, "/"),
+		ingestPublicURL:  config.IngestPublicURL,
 		proxies:          newProxyTrust(config.TrustedProxyCIDRs),
 		throttle:         newLoginThrottle(),
 		ui:               webui.New(),
@@ -80,6 +86,7 @@ func NewBrowser(administrators *Store, sessionStore *sessions.Store, config Brow
 		liveHeartbeat:    config.LiveHeartbeat,
 		liveSessionCheck: config.LiveSessionCheck,
 		liveWriteTimeout: config.LiveWriteTimeout,
+		guideTester:      config.GuideTester,
 		now:              time.Now,
 	}
 }
@@ -121,6 +128,7 @@ func (b *Browser) Register(mux *http.ServeMux) {
 	mux.Handle("POST /servers", b.Protect(http.HandlerFunc(b.serverCreate)))
 	mux.Handle("GET /servers/{id}", b.Protect(http.HandlerFunc(b.serverDetailPage)))
 	mux.Handle("POST /servers/{id}/tokens", b.Protect(http.HandlerFunc(b.tokenCreate)))
+	mux.Handle("POST /servers/{id}/test-ingestion", b.Protect(http.HandlerFunc(b.guidedIngestionTest)))
 	mux.Handle("POST /tokens/{id}/revoke", b.Protect(http.HandlerFunc(b.tokenRevoke)))
 	mux.Handle("GET /settings", b.Protect(http.HandlerFunc(b.settingsPage)))
 	mux.Handle("POST /settings/retention", b.Protect(http.HandlerFunc(b.retentionSettingsSave)))

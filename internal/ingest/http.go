@@ -158,6 +158,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				writeSafe(w, statusFor(err))
 				return
 			}
+			w.Header().Set("X-Siftail-Ingest-Outcome", "committed")
 			w.WriteHeader(http.StatusNoContent)
 		case <-ctx.Done():
 			// Queue ownership survives a disconnected or timed-out request.

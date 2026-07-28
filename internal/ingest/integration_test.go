@@ -180,6 +180,9 @@ func TestIngestionPublishesOnlyAfterCommit(t *testing.T) {
 	if response.Code != http.StatusNoContent {
 		t.Fatalf("status = %d, body=%q", response.Code, response.Body.String())
 	}
+	if response.Header().Get("X-Siftail-Ingest-Outcome") != "committed" {
+		t.Fatalf("commit marker = %q", response.Header().Get("X-Siftail-Ingest-Outcome"))
+	}
 	message := nextIntegrationLive(t, subscription)
 	if message.Event.ID <= 0 || message.Event.SourceID <= 0 ||
 		message.Event.ContainerInstanceID <= 0 ||

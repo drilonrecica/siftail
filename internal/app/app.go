@@ -104,13 +104,24 @@ func (a *App) Run(ctx context.Context) error {
 	statusStore := statusstate.NewStore(
 		db.Reader(), a.cfg.DatabasePath, nil, retentionStore, operationalState,
 	)
+	sourceStore := sources.NewCoordinatedStore(db.Reader(), coordinator)
+	guideTester, err := ingest.NewGuideTester(a.cfg.IngestPublicURL, sourceStore)
+	if err != nil {
+		coordinator.Close()
+		cancelCoordinator()
+		<-coordinatorDone
+		return fmt.Errorf("guided ingestion setup: %w", err)
+	}
 	a.browser = auth.NewBrowser(administratorStore, sessionStore, auth.BrowserConfig{
-		PublicURL: a.cfg.PublicURL, TrustedProxyCIDRs: a.cfg.TrustedProxyCIDRs,
-		HistoryStore:   logs.NewHistoryStore(db.Reader(), cursorCodec),
-		SourceStore:    sources.NewCoordinatedStore(db.Reader(), coordinator),
-		RetentionStore: retentionStore,
-		StatusStore:    statusStore,
-		LiveBroker:     liveBroker,
+		PublicURL:         a.cfg.PublicURL,
+		IngestPublicURL:   a.cfg.IngestPublicURL,
+		GuideTester:       guideTester,
+		TrustedProxyCIDRs: a.cfg.TrustedProxyCIDRs,
+		HistoryStore:      logs.NewHistoryStore(db.Reader(), cursorCodec),
+		SourceStore:       sourceStore,
+		RetentionStore:    retentionStore,
+		StatusStore:       statusStore,
+		LiveBroker:        liveBroker,
 	})
 	defer func() { a.browser = nil }()
 

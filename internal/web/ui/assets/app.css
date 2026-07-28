@@ -371,6 +371,7 @@ code {
 
 .workspace {
   width: min(100%, 112rem);
+  min-width: 0;
   margin: 0 auto;
   padding: var(--space-6);
 }
@@ -388,6 +389,7 @@ code {
 }
 
 .workspace-panel {
+  min-width: 0;
   min-height: 24rem;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
@@ -1274,7 +1276,11 @@ code {
 
 .one-time-token-content {
   display: grid;
+  width: 100%;
+  min-width: 0;
   max-width: 64rem;
+  overflow: hidden;
+  box-sizing: border-box;
   gap: var(--space-4);
   padding: var(--space-4);
 }
@@ -1302,6 +1308,70 @@ code {
 
 .token-secret-control input {
   font-family: ui-monospace, "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+}
+
+.ingestion-guide {
+  display: grid;
+  min-width: 0;
+  gap: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border-subtle);
+}
+
+.ingestion-guide h3,
+.ingestion-guide p {
+  margin: 0;
+}
+
+.ingestion-guide details {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.ingestion-guide details > * + * {
+  margin-top: var(--space-2);
+}
+
+.ingestion-guide summary {
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.copy-material {
+  width: 100%;
+  min-width: 0;
+  max-height: 24rem;
+  box-sizing: border-box;
+  margin: 0;
+  padding: var(--space-3);
+  overflow: auto;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--surface-raised);
+  white-space: pre;
+}
+
+.guide-stages {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding-left: var(--space-6);
+}
+
+.guide-stages li span {
+  margin-left: var(--space-2);
+  color: var(--text-secondary);
+}
+
+.guide-stages li[data-state="passed"] span {
+  color: var(--status-success);
+}
+
+.guide-stages li[data-state="failed"] span {
+  color: var(--status-error);
 }
 
 :root[data-density="comfortable"] {
@@ -1486,6 +1556,10 @@ code {
   .diagnostic-list li {
     grid-template-columns: minmax(0, 1fr);
     gap: 0;
+  }
+
+  .token-secret-control {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 

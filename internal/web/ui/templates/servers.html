@@ -72,7 +72,7 @@
 {{end}}
 
 {{define "token-created.html"}}
-<section class="workspace-panel one-time-token" data-one-time-token data-done-url="{{.DoneURL}}" aria-labelledby="token-created-title">
+<section class="workspace-panel one-time-token" data-one-time-token data-done-url="{{.DoneURL}}" data-token-placeholder="{{.TokenPlaceholder}}" aria-labelledby="token-created-title">
   <header class="catalog-heading"><div><h2 id="token-created-title">Copy this token now</h2><p>Siftail stores only a hash and cannot show it again.</p></div></header>
   <div class="one-time-token-content">
     <dl><div><dt>Server</dt><dd>{{.ServerName}}</dd></div><div><dt>Name</dt><dd>{{.TokenName}}</dd></div><div><dt>Fingerprint</dt><dd><code>{{.Fingerprint}}</code></dd></div></dl>
@@ -84,6 +84,49 @@
     </div>
     <p data-token-status role="status" aria-live="polite"></p>
     <div class="notice notice-warning"><p>Leaving this screen permanently removes the plaintext from Siftail. Creating this replacement did not revoke another token.</p></div>
+    {{if .GuideAvailable}}
+    <section class="ingestion-guide" aria-labelledby="configuration-title">
+      <h3 id="configuration-title">Connect this Server</h3>
+      <p>Endpoint: <code>{{.Endpoint}}</code></p>
+      <div class="notice notice-warning"><p>Copied configuration contains this token. Protect the Coolify configuration, set <code>COOLIFY_APP_NAME=siftail-self</code> on Siftail, keep Drain Logs disabled for Siftail itself, and restart affected resources.</p></div>
+      <details open>
+        <summary>Coolify custom Fluent Bit configuration</summary>
+        <p>The exact self marker is excluded before metadata is renamed. Coolify's <code>/tmp</code> retry buffer does not survive replacement of the log-drain container.</p>
+        <pre class="copy-material" tabindex="0" aria-label="Coolify configuration"><code data-token-material data-material-name="coolify">{{.CoolifyConfig}}</code></pre>
+        <button class="button" data-material-copy="coolify" type="button">Copy Coolify config</button>
+      </details>
+      <details>
+        <summary>Generic Fluent Bit configuration</summary>
+        <p>Mount <code>/var/lib/fluent-bit/siftail</code> on durable local storage if retry buffering must survive Fluent Bit restarts.</p>
+        <pre class="copy-material" tabindex="0" aria-label="Generic Fluent Bit configuration"><code data-token-material data-material-name="generic">{{.GenericConfig}}</code></pre>
+        <button class="button" data-material-copy="generic" type="button">Copy generic config</button>
+      </details>
+      <details>
+        <summary>External curl delivery test</summary>
+        <p>Run this outside Siftail to verify the real proxy/network path. A <code>204</code> means committed; retry <code>429</code>, <code>503</code>, or <code>507</code> only after addressing the reported pressure.</p>
+        <pre class="copy-material" tabindex="0" aria-label="Curl delivery test"><code data-token-material data-material-name="curl">{{.CurlCommand}}</code></pre>
+        <button class="button" data-material-copy="curl" type="button">Copy curl test</button>
+      </details>
+    </section>
+    <section class="ingestion-guide" aria-labelledby="guided-test-title">
+      <h3 id="guided-test-title">Guided committed-receipt test</h3>
+      <p>This explicit action sends one bounded synthetic event through the configured public ingestion URL. It stores that event under <code>{{.SourcePreview}}</code>.</p>
+      <ol class="guide-stages" data-guide-stages>
+        <li data-guide-stage="delivery">Endpoint delivery <span>Not tested</span></li>
+        <li data-guide-stage="authentication">Token authentication <span>Not tested</span></li>
+        <li data-guide-stage="normalization">Event normalization <span>Not tested</span></li>
+        <li data-guide-stage="commit">Durable commit <span>Not tested</span></li>
+        <li data-guide-stage="source">Source discovery <span>Not tested</span></li>
+      </ol>
+      <form action="{{.TestURL}}" method="post" data-guide-test>
+        <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+        <button class="button button-primary" type="button" data-guide-test-button>Send guided test</button>
+      </form>
+      <div data-guide-result role="status" aria-live="polite"></div>
+    </section>
+    {{else}}
+    <div class="notice notice-warning"><p>{{.GuideError}}</p></div>
+    {{end}}
     <a class="button button-primary" href="{{.DoneURL}}">Done</a>
   </div>
 </section>

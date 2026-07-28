@@ -530,6 +530,40 @@ test("Server token creation, one-time copy, rotation, navigation loss, and revoc
   await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
   await page.getByRole("button", { name: "Copy token" }).click();
   await expect(page.getByText("Token copied.")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Connect this Server" })).toBeVisible();
+  await expect(page.getByText("COOLIFY_APP_NAME=siftail-self")).toBeVisible();
+  await page.getByRole("button", { name: "Copy Coolify config" }).click();
+  const copiedConfig = await page.evaluate(() => navigator.clipboard.readText());
+  expect(copiedConfig).toContain(`Authorization Bearer ${primary}`);
+  expect(copiedConfig).toContain("Exclude COOLIFY_APP_NAME ^siftail-self$");
+  expect(copiedConfig.indexOf("Exclude COOLIFY_APP_NAME"))
+    .toBeLessThan(copiedConfig.indexOf("Rename COOLIFY_APP_NAME"));
+  expect(copiedConfig).not.toContain("__SIFTAIL_INGEST_TOKEN__");
+
+  await page.getByRole("button", { name: "Send guided test" }).click();
+  await expect(page.getByText("Test event committed.")).toBeVisible();
+  await expect(page.locator("[data-guide-stage] span").filter({ hasText: "Passed" }))
+    .toHaveCount(5);
+  await expect(page.getByText("siftail-test / setup / guided-ingestion / probe"))
+    .toBeVisible();
+  await page.locator("[data-theme-select]").selectOption("dark");
+  let guideA11y = await new AxeBuilder({ page })
+    .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"])
+    .analyze();
+  expect(guideA11y.violations.map((violation) => violation.id)).toEqual([]);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.locator("[data-theme-select]").selectOption("light");
+  expect(await page.evaluate(
+    () => document.documentElement.scrollWidth > window.innerWidth,
+  )).toBe(false);
+  guideA11y = await new AxeBuilder({ page })
+    .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"])
+    .analyze();
+  expect(guideA11y.violations.map((violation) => violation.id)).toEqual([]);
+  await page.screenshot({
+    path: ".playwright-artifacts/generated-guide-mobile-light.png",
+    fullPage: true,
+  });
 
   await page.getByRole("link", { name: "Done" }).click();
   await expect(page.getByRole("heading", { name: "Browser managed" })).toBeVisible();
@@ -719,6 +753,25 @@ test("keyboard, themes, reduced motion, mobile inspection, and axe smoke", async
     .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"])
     .analyze();
   expect(results.violations.map((violation) => violation.id)).toEqual([]);
+});
+
+test("guided ingestion handles session expiry without retaining one-time material", async ({
+  page,
+}) => {
+  await login(page);
+  await page.getByRole("link", { name: "Servers", exact: true }).click();
+  await page.getByRole("link", { name: "Browser managed" }).click();
+  await page.locator("#token-name").fill("expired-guide");
+  await page.getByRole("button", { name: "Create token" }).click();
+  const token = await page.locator("[data-token-secret]").inputValue();
+  const state = readState();
+  execFileSync(state.binary, ["sessions", "revoke-all"], {
+    env: siftailEnvironment({ SIFTAIL_DATA_DIR: state.dataDirectory }),
+    encoding: "utf8",
+  });
+  await page.getByRole("button", { name: "Send guided test" }).click();
+  await expect(page).toHaveURL(/\/login\?.*expired=1/);
+  expect(await page.content()).not.toContain(token);
 });
 
 test("server-side session invalidation redirects the active browser", async ({ page }) => {

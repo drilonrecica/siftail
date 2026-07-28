@@ -18,6 +18,7 @@ import (
 	"github.com/drilonrecica/siftail/internal/app"
 	"github.com/drilonrecica/siftail/internal/config"
 	"github.com/drilonrecica/siftail/internal/database"
+	"github.com/drilonrecica/siftail/internal/ingest"
 	"github.com/drilonrecica/siftail/internal/logs"
 )
 
@@ -48,6 +49,46 @@ func TestAdministrativeCLIOffline(t *testing.T) {
 	}
 	if strings.Contains(stdout.String()+stderr.String(), "sft_") {
 		t.Fatal("later command leaked plaintext token")
+	}
+
+	t.Setenv("SIFTAIL_INGEST_PUBLIC_URL", "https://ingest.example.test:8443/api/v1/ingest")
+	for _, outputKind := range []string{"coolify", "generic", "curl"} {
+		stdout.Reset()
+		stderr.Reset()
+		if code := run([]string{
+			"token", "create", "--server", "1", "--name", "generated-" + outputKind,
+			"--output", outputKind,
+		}, &stdout, &stderr); code != 0 {
+			t.Fatalf("%s output: %s", outputKind, stderr.String())
+		}
+		output := stdout.String()
+		if strings.Count(output, "sft_") != 1 ||
+			strings.Contains(output, ingest.GuideTokenPlaceholder) ||
+			!strings.Contains(output, "ingest.example.test") {
+			t.Fatalf("%s generated output = %q", outputKind, output)
+		}
+		if outputKind == "coolify" &&
+			(!strings.Contains(output, "Exclude COOLIFY_APP_NAME ^siftail-self$") ||
+				!strings.Contains(output, "tls                      On")) {
+			t.Fatalf("unsafe Coolify output = %q", output)
+		}
+	}
+	t.Setenv("SIFTAIL_INGEST_PUBLIC_URL", "")
+	stdout.Reset()
+	stderr.Reset()
+	if code := run([]string{
+		"token", "create", "--server", "1", "--name", "not-created",
+		"--output", "coolify",
+	}, &stdout, &stderr); code == 0 ||
+		!strings.Contains(stderr.String(), "SIFTAIL_INGEST_PUBLIC_URL") {
+		t.Fatalf("missing endpoint output = code %d, %q", code, stderr.String())
+	}
+	stdout.Reset()
+	stderr.Reset()
+	if code := run([]string{
+		"token", "create", "--server", "1", "--name", "not-created",
+	}, &stdout, &stderr); code != 0 {
+		t.Fatalf("failed generated output created an unseen token: %s", stderr.String())
 	}
 }
 
@@ -200,6 +241,7 @@ func TestDurableIngestionSubprocessSmoke(t *testing.T) {
 		"SIFTAIL_DATA_DIR="+dataDir,
 		"SIFTAIL_UI_ADDR="+uiAddr,
 		"SIFTAIL_INGEST_ADDR="+ingestAddr,
+		"SIFTAIL_INGEST_PUBLIC_URL=http://"+ingestAddr+"/api/v1/ingest",
 		"SIFTAIL_LOG_LEVEL=error",
 	)
 	serve := exec.Command(binary, "serve")
@@ -262,6 +304,19 @@ func TestDurableIngestionSubprocessSmoke(t *testing.T) {
 	token := oneTimeToken(tokenOutput)
 	if token == "" {
 		t.Fatal("token CLI did not return one one-time token")
+	}
+	generatedCommand := exec.Command(
+		binary, "token", "create", "--server", "1", "--name", "generated",
+		"--output", "coolify",
+	)
+	generatedCommand.Env = environment
+	generatedOutput, err := generatedCommand.Output()
+	if err != nil ||
+		bytes.Count(generatedOutput, []byte("sft_")) != 1 ||
+		bytes.Contains(generatedOutput, []byte(ingest.GuideTokenPlaceholder)) ||
+		!bytes.Contains(generatedOutput, []byte("Exclude COOLIFY_APP_NAME ^siftail-self$")) ||
+		!bytes.Contains(generatedOutput, []byte("tls                      Off")) {
+		t.Fatalf("generated subprocess output: %v %q", err, generatedOutput)
 	}
 
 	plain, err := os.ReadFile(filepath.Join(root, "cmd/siftail/testdata/ingest/canonical.ndjson"))

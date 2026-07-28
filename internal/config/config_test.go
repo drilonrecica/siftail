@@ -114,6 +114,25 @@ func TestParseURLRejectsCredentials(t *testing.T) {
 	}
 }
 
+func TestParseRejectsIncompleteIngestionPublicURL(t *testing.T) {
+	for _, value := range []string{
+		"https://logs.example.com",
+		"https://logs.example.com/other",
+		"https://logs.example.com/api/v1/ingest?token=secret",
+		"https://logs.example.com/api/v1/ingest#fragment",
+	} {
+		t.Run(value, func(t *testing.T) {
+			clearEnv(t)
+			setEnv(t, "SIFTAIL_INGEST_PUBLIC_URL", value)
+			_, err := Parse()
+			if err == nil ||
+				!strings.Contains(err.Error(), "complete /api/v1/ingest URL") {
+				t.Fatalf("error = %v", err)
+			}
+		})
+	}
+}
+
 func TestParseInvalidLogLevel(t *testing.T) {
 	clearEnv(t)
 	setEnv(t, "SIFTAIL_LOG_LEVEL", "verbose")

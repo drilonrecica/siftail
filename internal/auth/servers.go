@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -8,6 +9,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/drilonrecica/siftail/internal/ingest"
 	"github.com/drilonrecica/siftail/internal/sources"
 	"github.com/drilonrecica/siftail/internal/web"
 	webui "github.com/drilonrecica/siftail/internal/web/ui"
@@ -139,19 +141,66 @@ func (b *Browser) tokenCreate(w http.ResponseWriter, r *http.Request) {
 			web.RequestIDFromContext(r.Context()))
 		return
 	}
+	tokenView := webui.OneTimeTokenView{
+		CSRFToken: session.CSRFToken, ServerID: serverID,
+		ServerName: detail.Server.Name, TokenName: created.Name,
+		Fingerprint: created.Fingerprint, Token: created.Token,
+		DoneURL:          fmt.Sprintf("/servers/%d", serverID),
+		TestURL:          fmt.Sprintf("/servers/%d/test-ingestion", serverID),
+		TokenPlaceholder: ingest.GuideTokenPlaceholder,
+	}
+	eventID, guideErr := ingest.NewGuideEventID()
+	if guideErr == nil && b.ingestPublicURL != "" {
+		guide, err := ingest.GenerateGuide(b.ingestPublicURL, eventID, time.Now())
+		if err == nil {
+			tokenView.GuideAvailable = true
+			tokenView.Endpoint = guide.Endpoint
+			tokenView.CoolifyConfig = guide.CoolifyTemplate
+			tokenView.GenericConfig = guide.GenericTemplate
+			tokenView.CurlCommand = guide.CurlTemplate
+			tokenView.SourcePreview = ingest.GuideSourcePreview
+		}
+	}
+	if !tokenView.GuideAvailable {
+		tokenView.GuideError = "Set SIFTAIL_INGEST_PUBLIC_URL to the complete /api/v1/ingest URL and restart Siftail to generate and test configuration."
+	}
 	if err := b.ui.Shell(w, http.StatusCreated, webui.ShellView{
 		CSRFToken: session.CSRFToken,
 		Mode:      "token-created",
-		Token: webui.OneTimeTokenView{
-			CSRFToken: session.CSRFToken, ServerID: serverID,
-			ServerName: detail.Server.Name, TokenName: created.Name,
-			Fingerprint: created.Fingerprint, Token: created.Token,
-			DoneURL: fmt.Sprintf("/servers/%d", serverID),
-		},
+		Token:     tokenView,
 	}); err != nil {
 		http.Error(w, "The token display page is unavailable. Create a replacement token.",
 			http.StatusInternalServerError)
 	}
+}
+
+func (b *Browser) guidedIngestionTest(w http.ResponseWriter, r *http.Request) {
+	session, _ := BrowserSessionFromContext(r.Context())
+	serverID, idErr := serverPathID(r)
+	values, formErr := exactManagementForm(r, "token")
+	if idErr != nil || formErr != nil {
+		b.writeGuidedTestJSON(w, http.StatusBadRequest, ingest.TestResult{
+			Outcome: ingest.TestRejected, Title: "Guided test request was invalid",
+			Detail: "Reload the one-time token page and try again.",
+		})
+		return
+	}
+	if session.CSRFToken == "" {
+		b.writeGuidedTestJSON(w, http.StatusForbidden, ingest.TestResult{
+			Outcome: ingest.TestRejected, Title: "Guided test request was forbidden",
+			Detail: "Sign in again and create a replacement token.",
+		})
+		return
+	}
+	result := b.guideTester.Test(r.Context(), serverID, values.Get("token"))
+	b.writeGuidedTestJSON(w, http.StatusOK, result)
+}
+
+func (b *Browser) writeGuidedTestJSON(w http.ResponseWriter, status int, result ingest.TestResult) {
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(result)
 }
 
 func (b *Browser) tokenRevoke(w http.ResponseWriter, r *http.Request) {

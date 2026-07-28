@@ -116,7 +116,8 @@ optional `Content-Encoding: gzip`. The application independently caps compressed
 and decompressed input, record count and size, JSON depth, and retained bytes.
 Malformed final records, duplicate keys, trailing data, and non-object records
 reject the complete request. A `204 No Content` response means the complete
-request committed durably to SQLite. Capacity and temporary database failures
+request committed durably to SQLite and includes
+`X-Siftail-Ingest-Outcome: committed`. Capacity and temporary database failures
 return `503`; storage-full failures return `507`; a conflicting reuse of a
 stable source event ID returns `409`.
 
@@ -127,6 +128,57 @@ and Docker's `source` stream field are compile-time compatibility rules. The
 tested configuration, upstream evidence, retry/buffering limits, and mandatory
 Siftail self-exclusion are recorded in
 [`docs/integrations/coolify-fluent-bit-compatibility.md`](docs/integrations/coolify-fluent-bit-compatibility.md).
+
+### Generated source configuration and guided test
+
+Set `SIFTAIL_INGEST_PUBLIC_URL` to the complete operator-reachable endpoint,
+including `/api/v1/ingest`, for example:
+
+```env
+SIFTAIL_PUBLIC_URL=https://logs.example.com
+SIFTAIL_INGEST_PUBLIC_URL=https://ingest.logs.example.com/api/v1/ingest
+```
+
+The value must use HTTP or HTTPS, contain no credentials, query, or fragment,
+and identify exactly the ingestion path. It is never derived from request or
+forwarded headers.
+
+After creating a token in the authenticated Server page, the same no-store
+one-time screen offers:
+
+- pinned Coolify and generic Fluent Bit configuration;
+- an external curl command;
+- exact `COOLIFY_APP_NAME=siftail-self` recursive-ingestion prevention;
+- bounded 256 MiB source-side retry storage and its data-loss warning; and
+- an explicit guided committed-receipt test.
+
+The plaintext exists in one password field. Configuration and curl previews
+contain a nonsecret placeholder; their copy buttons substitute the token only
+into the clipboard. Page exit clears the field and previews, browser history is
+replaced with the nonsecret Server detail URL, and later pages cannot recover
+the token.
+
+The guided button sends one bounded synthetic event to the configured public
+ingestion URL. It bypasses environment proxy variables, refuses redirects, and
+never logs or returns the token. Only `204 No Content` with Siftail's
+`X-Siftail-Ingest-Outcome: committed` marker is shown as committed.
+Connection failure, authentication rejection, retryable `429`/`503`/`507`, and
+other rejection remain distinct. A committed test creates one event under
+`siftail-test / setup / guided-ingestion / probe`; it is an application event
+and follows ordinary retention.
+
+The focused CLI can instead emit exactly one complete artifact:
+
+```bash
+./siftail token create --server 1 --name coolify --output coolify
+./siftail token create --server 1 --name generic --output generic
+./siftail token create --server 1 --name delivery-test --output curl
+```
+
+Each generated stdout stream contains the new token exactly once and is
+therefore one-time secret material. Avoid shell history, logs, and
+world-readable files. The default `--output token` preserves the ordinary
+one-time token response.
 
 ### Command-line ingestion smoke test
 

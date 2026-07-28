@@ -27,6 +27,7 @@ var (
 	ErrInvalidServerInput = errors.New("invalid Server input")
 	ErrServerNameInUse    = errors.New("Server name is already in use")
 	ErrInvalidTokenInput  = errors.New("invalid ingestion-token input")
+	ErrInvalidToken       = errors.New("invalid ingestion token")
 	ErrTokenNameInUse     = errors.New("ingestion-token name is already in use")
 )
 
@@ -260,7 +261,7 @@ func (s *Store) VerifyToken(ctx context.Context, plaintext string) (Authenticate
 		_ = subtle.ConstantTimeCompare(hash[:], dummy[:])
 	}
 	if !matched || !strings.HasPrefix(plaintext, "sft_") {
-		return AuthenticatedServer{}, errors.New("invalid token")
+		return AuthenticatedServer{}, ErrInvalidToken
 	}
 	return authenticated, nil
 }

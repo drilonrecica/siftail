@@ -84,6 +84,7 @@ export default async function globalSetup(): Promise<void> {
     SIFTAIL_UI_ADDR: uiAddress,
     SIFTAIL_INGEST_ADDR: ingestAddress,
     SIFTAIL_PUBLIC_URL: `http://${uiAddress}`,
+    SIFTAIL_INGEST_PUBLIC_URL: `http://${ingestAddress}/api/v1/ingest`,
   });
   let pid = 0;
   try {

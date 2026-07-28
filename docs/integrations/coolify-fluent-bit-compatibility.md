@@ -73,8 +73,11 @@ The evidence was re-read from official sources on the date above:
   generic JSON-array variant with stable source event IDs.
 
 The configuration files are compatibility fixtures, not ready-to-paste
-operator output. SFT-036 owns safe deployment-specific generation and one-time
-token presentation.
+operator output. Siftail generates deployment-specific Coolify and generic
+Fluent Bit configuration in the one-time browser token workflow or through
+`siftail token create --output coolify|generic`; the generated variants retain
+the pinned fixture's bounded buffering, retry, authentication, and
+self-exclusion requirements.
 
 ## Recursive-ingestion prevention
 

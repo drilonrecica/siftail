@@ -308,6 +308,14 @@ func TestOneTimeTokenTemplateContainsNoSecretURLOrUnsafeMarkup(t *testing.T) {
 		Token: OneTimeTokenView{
 			ServerID: 3, ServerName: `Production <unsafe>`, TokenName: "rotation",
 			Fingerprint: "abcdef123456", Token: secret, DoneURL: "/servers/3",
+			TestURL:          "/servers/3/test-ingestion",
+			TokenPlaceholder: "__SIFTAIL_INGEST_TOKEN__",
+			GuideAvailable:   true,
+			Endpoint:         "https://ingest.example.test/api/v1/ingest",
+			CoolifyConfig:    "Header Authorization Bearer __SIFTAIL_INGEST_TOKEN__",
+			GenericConfig:    "Header Authorization Bearer __SIFTAIL_INGEST_TOKEN__",
+			CurlCommand:      "curl __SIFTAIL_INGEST_TOKEN__",
+			SourcePreview:    "siftail-test / setup / guided-ingestion / probe",
 		},
 	}); err != nil {
 		t.Fatal(err)
@@ -317,6 +325,12 @@ func TestOneTimeTokenTemplateContainsNoSecretURLOrUnsafeMarkup(t *testing.T) {
 		`data-one-time-token`, `data-done-url="/servers/3"`,
 		`data-token-secret type="password"`,
 		`data-token-toggle`, `data-token-copy`,
+		`data-material-copy="coolify"`, `data-material-copy="generic"`,
+		`data-material-copy="curl"`, `data-guide-test`,
+		`action="/servers/3/test-ingestion"`,
+		`tabindex="0" aria-label="Coolify configuration"`,
+		`__SIFTAIL_INGEST_TOKEN__`,
+		`Guided committed-receipt test`,
 		`stores only a hash and cannot show it again`,
 		`href="/servers/3">Done</a>`,
 		`Production &lt;unsafe&gt;`,
@@ -326,7 +340,8 @@ func TestOneTimeTokenTemplateContainsNoSecretURLOrUnsafeMarkup(t *testing.T) {
 		}
 	}
 	if strings.Contains(body, `<script>alert`) ||
-		strings.Contains(body, `/servers/3?`) {
+		strings.Contains(body, `/servers/3?`) ||
+		strings.Count(body, `sft_secret`) != 1 {
 		t.Fatal("one-time token shell emitted unsafe markup or secret-bearing URL")
 	}
 }
@@ -513,6 +528,10 @@ func TestEmbeddedAssetsTypesIntegrityAndSafety(t *testing.T) {
 	for _, required := range []string{
 		`history.replaceState(null, "", doneURL)`,
 		`navigator.clipboard.writeText(secret.value)`,
+		`material.textContent.split(placeholder).join(secret.value)`,
+		`values.set("token", secret.value)`,
+		`result.outcome === "committed"`,
+		`response.redirected`,
 		`window.addEventListener("pagehide"`,
 		`secret.value = ""`,
 	} {

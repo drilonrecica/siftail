@@ -18,6 +18,7 @@ import (
 	"github.com/drilonrecica/siftail/internal/auth"
 	"github.com/drilonrecica/siftail/internal/config"
 	"github.com/drilonrecica/siftail/internal/database"
+	"github.com/drilonrecica/siftail/internal/ingest"
 	"github.com/drilonrecica/siftail/internal/sessions"
 	"github.com/drilonrecica/siftail/internal/sources"
 )
@@ -70,8 +71,32 @@ func runTokenCommand(args []string, stdout io.Writer) error {
 		flags.SetOutput(io.Discard)
 		serverID := flags.Int64("server", 0, "")
 		name := flags.String("name", "", "")
+		output := flags.String("output", "token", "")
 		if err := flags.Parse(args[1:]); err != nil || flags.NArg() != 0 {
-			return errors.New("usage: siftail token create --server <id> --name <name>")
+			return errors.New("usage: siftail token create --server <id> --name <name> [--output token|coolify|generic|curl]")
+		}
+		switch *output {
+		case "token", "coolify", "generic", "curl":
+		default:
+			return errors.New("token create output must be token, coolify, generic, or curl")
+		}
+		var guide ingest.Guide
+		if *output != "token" {
+			cfg, err := config.Parse()
+			if err != nil {
+				return fmt.Errorf("configuration invalid: %w", err)
+			}
+			if cfg.IngestPublicURL == "" {
+				return errors.New("SIFTAIL_INGEST_PUBLIC_URL must be configured for generated token output")
+			}
+			eventID, err := ingest.NewGuideEventID()
+			if err != nil {
+				return errors.New("prepare guided token output")
+			}
+			guide, err = ingest.GenerateGuide(cfg.IngestPublicURL, eventID, time.Now())
+			if err != nil {
+				return errors.New("prepare guided token output")
+			}
 		}
 		var token sources.CreatedToken
 		if err := runAdminOperation(http.MethodPost, "/tokens", map[string]any{
@@ -79,9 +104,25 @@ func runTokenCommand(args []string, stdout io.Writer) error {
 		}, &token); err != nil {
 			return err
 		}
-		fmt.Fprintf(stdout, "token %d created for server %d\n", token.ID, token.ServerID)
-		fmt.Fprintf(stdout, "fingerprint: %s\n", token.Fingerprint)
-		fmt.Fprintf(stdout, "token (shown once): %s\n", token.Token)
+		if *output == "token" {
+			fmt.Fprintf(stdout, "token %d created for server %d\n", token.ID, token.ServerID)
+			fmt.Fprintf(stdout, "fingerprint: %s\n", token.Fingerprint)
+			fmt.Fprintf(stdout, "token (shown once): %s\n", token.Token)
+			return nil
+		}
+		var err error
+		guide, err = guide.Materialize(token.Token)
+		if err != nil {
+			return errors.New("token created but guided output could not be prepared; create a replacement token")
+		}
+		switch *output {
+		case "coolify":
+			fmt.Fprint(stdout, guide.CoolifyTemplate)
+		case "generic":
+			fmt.Fprint(stdout, guide.GenericTemplate)
+		case "curl":
+			fmt.Fprintln(stdout, guide.CurlTemplate)
+		}
 		return nil
 	case "revoke":
 		flags := flag.NewFlagSet("token revoke", flag.ContinueOnError)

@@ -142,7 +142,7 @@ func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "  config validate Validate process configuration without opening the database")
 	fmt.Fprintln(w, "  server create    Create a trusted Server")
 	fmt.Fprintln(w, "  server list      List trusted Servers")
-	fmt.Fprintln(w, "  token create     Create a one-time ingestion token")
+	fmt.Fprintln(w, "  token create     Create a one-time token or generated ingestion material")
 	fmt.Fprintln(w, "  token revoke     Revoke an ingestion token")
 	fmt.Fprintln(w, "  admin create      Create the single administrator")
 	fmt.Fprintln(w, "  admin reset-password Reset the administrator password")

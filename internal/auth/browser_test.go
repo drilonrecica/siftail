@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/drilonrecica/siftail/internal/database"
+	"github.com/drilonrecica/siftail/internal/ingest"
 	"github.com/drilonrecica/siftail/internal/logs"
 	"github.com/drilonrecica/siftail/internal/retention"
 	"github.com/drilonrecica/siftail/internal/sessions"
@@ -59,9 +60,17 @@ func newBrowserFixture(t *testing.T, publicURL string, administrator bool) *brow
 	retentionStore := retention.NewStore(db.Reader(), coordinator)
 	operationalState := statusstate.NewState(time.Now())
 	operationalState.SetWriterReady(true)
+	sourceStore := sources.NewCoordinatedStore(db.Reader(), coordinator)
+	ingestPublicURL := "https://ingest.example.test/api/v1/ingest"
+	guideTester, err := ingest.NewGuideTester(ingestPublicURL, sourceStore)
+	if err != nil {
+		t.Fatal(err)
+	}
 	browser := NewBrowser(adminStore, sessionStore, BrowserConfig{
-		PublicURL: publicURL, HistoryStore: logs.NewHistoryStore(db.Reader(), codec),
-		SourceStore:    sources.NewCoordinatedStore(db.Reader(), coordinator),
+		PublicURL: publicURL, IngestPublicURL: ingestPublicURL,
+		GuideTester:    guideTester,
+		HistoryStore:   logs.NewHistoryStore(db.Reader(), codec),
+		SourceStore:    sourceStore,
 		RetentionStore: retentionStore,
 		StatusStore: statusstate.NewStore(
 			db.Reader(), databasePath, nil, retentionStore, operationalState,

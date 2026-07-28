@@ -1860,6 +1860,25 @@ After token creation, UI provides:
 
 Do not build a general API console.
 
+The generated artifacts use only the explicit
+`SIFTAIL_INGEST_PUBLIC_URL`; they never trust request or forwarded host data.
+The URL is a complete HTTP(S) `/api/v1/ingest` URL without credentials, query,
+or fragment. Browser previews retain a nonsecret placeholder and substitute
+the token only for an explicit clipboard action, keeping token plaintext in
+one one-time DOM field.
+
+The guided action is an administrator-triggered bounded POST from the UI
+process to that configured URL. Its client bypasses environment proxies and
+refuses redirects so the Authorization header cannot be redirected or routed
+through an ambient proxy. It reports a commit only for Siftail's `204`
+contract plus its `X-Siftail-Ingest-Outcome: committed` response marker;
+delivery failure, authentication rejection, retryable capacity or storage
+failure, and other rejection remain distinct. The synthetic committed
+event uses a random stable event ID and the fixed source
+`siftail-test/setup/guided-ingestion/probe`, then follows ordinary application
+retention. No token, response body, or authorization header enters process
+logs, diagnostics, browser URLs, or persistent configuration.
+
 ### 28.7 External references
 
 Implementation should verify current official documentation during development:
