@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/drilonrecica/siftail/internal/auth"
 	"github.com/drilonrecica/siftail/internal/config"
 	"github.com/drilonrecica/siftail/internal/database"
 	"github.com/drilonrecica/siftail/internal/sources"
@@ -126,6 +127,17 @@ func runAdminOperation(method, path string, input, output any) error {
 	}
 	store := sources.NewStore(db.Writer())
 	switch path {
+	case "/administrator":
+		value := input.(map[string]any)
+		administrator, err := auth.NewStore(db.Writer()).Create(
+			context.Background(), value["username"].(string), []byte(value["password"].(string)),
+		)
+		return assignJSON(administrator, output, err)
+	case "/administrator/reset-password":
+		value := input.(map[string]any)
+		return auth.NewStore(db.Writer()).ResetPassword(
+			context.Background(), []byte(value["password"].(string)),
+		)
 	case "/servers":
 		if method == http.MethodGet {
 			servers, err := store.ListServers(context.Background())

@@ -156,6 +156,33 @@ unset SIFTAIL_SMOKE_TOKEN SIFTAIL_SMOKE_PID
 Both ingestion calls must return HTTP `204`; that status is the commit
 confirmation. Remove the disposable data directory after the process exits.
 
+### Administrator recovery CLI
+
+Siftail has exactly one case-sensitive local administrator. Create it locally:
+
+```bash
+./siftail admin create --username Admin
+```
+
+Reset a lost password with:
+
+```bash
+./siftail admin reset-password
+```
+
+On a terminal, both commands read and confirm the password without echo. For
+deliberate automation they accept exactly two standard-input lines: password
+then confirmation. Passwords are never accepted as command arguments. When
+Siftail is active the commands use the owner-only control socket; when it is
+stopped they open the local database directly. Usernames are 3–64
+case-sensitive ASCII letters, digits, `.`, `_`, or `-`. Passwords are 12–1024
+valid UTF-8 bytes and are not trimmed or normalized; CR/LF line terminators from
+the two-line input are removed.
+
+Schema migration `0002` adds the single administrator record. Upgrades apply it
+transactionally and preserve ingestion data. A binary that supports only schema
+1 refuses a schema-2 database.
+
 ### Current dependency rationale
 
 - `github.com/mattn/go-sqlite3` v1.14.48 is the accepted SQLite driver. It
@@ -173,6 +200,20 @@ confirmation. Remove the disposable data directory after the process exits.
   group/cancellation implementation is linked; binary-size impact has not yet
   been measured. It is maintained by the Go project under the BSD 3-Clause
   license.
+- `golang.org/x/crypto` v0.54.0 provides the reviewed Argon2id implementation;
+  the standard library has no Argon2 password hash. `golang.org/x/term` v0.45.0
+  provides no-echo terminal password input. Both are maintained by the Go
+  project under BSD 3-Clause licenses. `x/term` brings `golang.org/x/sys`
+  v0.47.0 as its only module dependency; these packages add no runtime service,
+  outbound call, or public network API. On this linux/amd64 Go 1.26.5
+  development build, linking the administrator implementation increased the
+  unstripped binary from 14,523,440 to 14,757,904 bytes (+234,464 bytes,
+  about 1.6%). An Argon2id operation deliberately uses 32 MiB for three
+  iterations with parallelism one; a process-wide two-operation semaphore caps
+  concurrent configured hash memory at 64 MiB plus implementation overhead.
+  Password hashing is request-driven and adds no persistent idle allocation.
+  Security updates to these modules require ordinary dependency and release
+  review.
 
 ## Important note
 

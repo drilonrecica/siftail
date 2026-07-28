@@ -220,6 +220,18 @@ func TestDurableIngestionSubprocessSmoke(t *testing.T) {
 	}()
 	waitForHTTP(t, "http://"+uiAddr+"/health/live", serve, &processOutput)
 
+	const administratorPassword = "subprocess-admin-password"
+	adminCommand := exec.Command(binary, "admin", "create", "--username", "SmokeAdmin")
+	adminCommand.Env = environment
+	adminCommand.Stdin = strings.NewReader(administratorPassword + "\n" + administratorPassword + "\n")
+	adminOutput, err := adminCommand.CombinedOutput()
+	if err != nil {
+		t.Fatalf("create smoke administrator through CLI: %v", err)
+	}
+	if bytes.Contains(adminOutput, []byte(administratorPassword)) {
+		t.Fatal("subprocess administrator output leaked password")
+	}
+
 	var serverOutput []byte
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {

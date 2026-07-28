@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/drilonrecica/siftail/internal/auth"
 	"github.com/drilonrecica/siftail/internal/config"
 	"github.com/drilonrecica/siftail/internal/database"
 	"github.com/drilonrecica/siftail/internal/ingest"
@@ -144,6 +145,27 @@ func (a *App) controlMux() *http.ServeMux {
 		_, _ = w.Write([]byte("pong"))
 	})
 	store := sources.NewCoordinatedStore(a.db.Reader(), a.coordinator)
+	administratorStore := auth.NewCoordinatedStore(a.db.Reader(), a.coordinator)
+	mux.HandleFunc("POST /administrator", func(w http.ResponseWriter, r *http.Request) {
+		var input struct {
+			Username string `json:"username"`
+			Password string `json:"password"`
+		}
+		if !decodeControlJSON(w, r, &input) {
+			return
+		}
+		administrator, err := administratorStore.Create(r.Context(), input.Username, []byte(input.Password))
+		writeControlJSON(w, administrator, err)
+	})
+	mux.HandleFunc("POST /administrator/reset-password", func(w http.ResponseWriter, r *http.Request) {
+		var input struct {
+			Password string `json:"password"`
+		}
+		if !decodeControlJSON(w, r, &input) {
+			return
+		}
+		writeControlJSON(w, struct{}{}, administratorStore.ResetPassword(r.Context(), []byte(input.Password)))
+	})
 	mux.HandleFunc("POST /servers", func(w http.ResponseWriter, r *http.Request) {
 		var input struct {
 			Name     string `json:"name"`

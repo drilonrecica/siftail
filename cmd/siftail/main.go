@@ -65,6 +65,12 @@ func run(args []string, stdout, stderr io.Writer) int {
 			return 1
 		}
 		return 0
+	case "admin":
+		if err := runAdministratorCommand(args[1:], os.Stdin, stdout, stderr); err != nil {
+			fmt.Fprintf(stderr, "siftail: %v\n", err)
+			return 1
+		}
+		return 0
 	case "help", "-h", "--help":
 		printUsage(stdout)
 		return 0
@@ -132,4 +138,6 @@ func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "  server list      List trusted Servers")
 	fmt.Fprintln(w, "  token create     Create a one-time ingestion token")
 	fmt.Fprintln(w, "  token revoke     Revoke an ingestion token")
+	fmt.Fprintln(w, "  admin create      Create the single administrator")
+	fmt.Fprintln(w, "  admin reset-password Reset the administrator password")
 }

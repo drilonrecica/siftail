@@ -4,14 +4,15 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"path/filepath"
 	"testing"
 	"testing/fstest"
 )
 
 func TestInitialMigrationAndNoOpReopen(t *testing.T) {
 	db := openTestDB(t)
-	assertSchemaVersion(t, db.Writer(), 1)
-	for _, table := range []string{"settings", "servers", "ingestion_tokens", "sources", "container_instances", "log_events"} {
+	assertSchemaVersion(t, db.Writer(), 2)
+	for _, table := range []string{"settings", "servers", "ingestion_tokens", "sources", "container_instances", "log_events", "administrators"} {
 		var found int
 		if err := db.Writer().QueryRow("SELECT count(*) FROM sqlite_schema WHERE type='table' AND name=?", table).Scan(&found); err != nil {
 			t.Fatal(err)
@@ -23,7 +24,49 @@ func TestInitialMigrationAndNoOpReopen(t *testing.T) {
 	if err := Migrate(context.Background(), db.Writer()); err != nil {
 		t.Fatal(err)
 	}
-	assertSchemaVersion(t, db.Writer(), 1)
+	assertSchemaVersion(t, db.Writer(), 2)
+}
+
+func TestAdministratorMigrationPreservesPreviousSchemaData(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "previous.db")
+	db, err := sql.Open("sqlite3", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.Exec("PRAGMA foreign_keys=ON"); err != nil {
+		t.Fatal(err)
+	}
+	migrations, err := loadMigrations(migrationFiles)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := applyMigrations(context.Background(), db, migrations[:1]); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec("INSERT INTO servers(id,name,created_at_us) VALUES(7,'preserved',1)"); err != nil {
+		t.Fatal(err)
+	}
+	if err := applyMigrations(context.Background(), db, migrations); err != nil {
+		t.Fatal(err)
+	}
+	assertSchemaVersion(t, db, 2)
+	var name string
+	if err := db.QueryRow("SELECT name FROM servers WHERE id=7").Scan(&name); err != nil || name != "preserved" {
+		t.Fatalf("preserved server = %q, err=%v", name, err)
+	}
+	var found int
+	if err := db.QueryRow("SELECT count(*) FROM sqlite_schema WHERE type='table' AND name='administrators'").Scan(&found); err != nil || found != 1 {
+		t.Fatalf("administrator table = %d, err=%v", found, err)
+	}
+	if err := IntegrityCheck(context.Background(), db); err != nil {
+		t.Fatal(err)
+	}
+	var tooNew *SchemaTooNewError
+	if err := checkSchemaCompatible(context.Background(), db, 1); !errors.As(err, &tooNew) ||
+		tooNew.Actual != 2 || tooNew.Supported != 1 {
+		t.Fatalf("older compatibility error = %#v", err)
+	}
 }
 
 func TestMigrationRollback(t *testing.T) {

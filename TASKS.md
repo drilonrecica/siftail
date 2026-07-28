@@ -641,10 +641,15 @@ SFT-015 is `Done`.
 
 ### SFT-016 — Implement administrator storage and secure CLI recovery
 
-**Status:** Planned  
+**Status:** Done
 **Milestone:** 0.2.0  
 **Depends on:** SFT-015  
-**Issue/PR:** —
+**Issue/PR:** — (direct maintainer implementation)
+**Completed:** 2026-07-28
+**Completion evidence:** Schema-1 preservation and schema-2 compatibility tests,
+real-SQLite single-account/create/reset/rollback tests, Argon2id parameter and
+two-operation concurrency tests, and offline plus production-subprocess
+control-socket CLI tests pass without sensitive output.
 
 **Authoritative references:** `DOMAIN.md` §§18–19; `ARCHITECTURE.md` §§19.1–19.2;
 ADR 0003.
