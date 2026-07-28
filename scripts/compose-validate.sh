@@ -37,6 +37,16 @@ run_config -f "$repository_root/compose.yaml" config >"$base_config"
 run_config -f "$repository_root/compose.yaml" \
   -f "$repository_root/compose.local.yaml" config >"$local_config"
 
+if ! grep --fixed-strings --quiet \
+  "SIFTAIL_PUBLIC_URL: \"\${SIFTAIL_PUBLIC_URL:?}\"" \
+  "$repository_root/compose.yaml" ||
+  ! grep --fixed-strings --quiet \
+    "SIFTAIL_INGEST_PUBLIC_URL: \"\${SIFTAIL_INGEST_PUBLIC_URL:?}\"" \
+    "$repository_root/compose.yaml"; then
+  echo "required URLs must use Coolify-compatible empty :? expressions" >&2
+  exit 1
+fi
+
 if grep --quiet '^    ports:' "$base_config"; then
   echo "base Compose file must not publish host ports" >&2
   exit 1
