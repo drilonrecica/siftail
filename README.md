@@ -14,7 +14,9 @@ The documents are written to be standalone. Coding agents should not need access
 4. [`ARCHITECTURE.md`](ARCHITECTURE.md) — technical implementation and operations
 5. [`DESIGN.md`](DESIGN.md) — interaction, visual, responsive, and accessibility specification
 6. [`docs/decisions/`](docs/decisions/) — accepted reasoning for hard-to-reverse decisions
-7. [`TASKS.md`](TASKS.md) — non-authoritative implementation dependencies and status
+7. [`TASKS.md`](TASKS.md) — non-authoritative milestone dashboard and permanent
+   task-ID registry; follow its link to the relevant
+   [`docs/tasks/`](docs/tasks/) milestone record
 
 ## Document responsibilities
 
@@ -26,11 +28,13 @@ The documents are written to be standalone. Coding agents should not need access
 | `DESIGN.md` | Screens, interactions, visual system, copy, keyboard behavior, mobile, and accessibility |
 | `AGENTS.md` | Mandatory working rules for coding agents and contributors |
 | Accepted ADRs | Why consequential technical and domain decisions were approved |
-| `TASKS.md` | What implementation work is ready, active, blocked, or complete |
+| `TASKS.md` | Milestone rollup, release state, permanent task-ID ranges, and links to detailed task records |
+| `docs/tasks/<milestone>.md` | Individual task scope, dependencies, status, acceptance criteria, and evidence |
 
 `PRODUCT.md` §19 remains the canonical roadmap and `ARCHITECTURE.md` §40
-remains the canonical technical sequence. `TASKS.md` turns those decisions into
-reviewable work; it does not override them.
+remains the canonical technical sequence. `TASKS.md` indexes the detailed
+milestone records under `docs/tasks/`; together they turn those decisions into
+reviewable work without overriding them.
 
 ## Fixed project identity
 

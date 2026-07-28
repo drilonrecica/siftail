@@ -34,13 +34,15 @@ Before making a meaningful change, read:
 3. `PRODUCT.md`
 4. `ARCHITECTURE.md`
 5. `DESIGN.md` when changing UI or copy
-6. the relevant `TASKS.md` entry for tracked implementation work
+6. `TASKS.md`, then the linked `docs/tasks/<milestone>.md` entry for tracked
+   implementation work
 7. relevant tests, migrations, and ADRs
 
 Do not rely on issue text, chat history, or assumptions instead of these documents.
 
-`TASKS.md` tracks execution and status only. It cannot redefine behavior from
-the authoritative specifications, accepted tests, migrations, or ADRs.
+`TASKS.md` and its linked milestone files track execution and status only. They
+cannot redefine behavior from the authoritative specifications, accepted tests,
+migrations, or ADRs.
 
 For a small localized change, reread the relevant sections rather than mechanically rereading every line. For architectural or domain changes, review all five documents.
 
@@ -56,7 +58,8 @@ When sources conflict:
 4. `ARCHITECTURE.md` for technical decisions.
 5. `DESIGN.md` for presentation and interactions.
 6. Accepted ADRs for the reasoning behind decisions already reflected in the authoritative documents.
-7. `TASKS.md` for accepted execution scope, dependency order, and status only.
+7. `TASKS.md` and its linked milestone file for accepted execution scope,
+   dependency order, and status only.
 8. Issue or PR description.
 9. Historical discussion.
 
@@ -948,14 +951,18 @@ Examples:
 - component/protocol/storage change → `ARCHITECTURE.md`;
 - interaction/visual/copy change → `DESIGN.md`;
 - implementation-process rule → `AGENTS.md`.
-- execution dependency or status change → `TASKS.md`.
+- milestone registry change → `TASKS.md`;
+- execution dependency or task status change → the relevant
+  `docs/tasks/<milestone>.md`.
 
 Operator-facing behavior also updates README/operator docs and release notes.
 
-Update the relevant task status and issue/PR link in the implementation change.
+Update the relevant milestone task status and issue/PR link in the
+implementation change.
 Never mark a task `Done` until its acceptance and required verification are
 complete. If implementation reveals a behavioral change, update the
-authoritative document rather than encoding the change only in `TASKS.md`.
+authoritative document rather than encoding the change only in the task
+tracker.
 
 Do not leave stale examples with old environment prefix, old routes, or old names.
 
@@ -1154,6 +1161,10 @@ Do not publish `latest` from an unreviewed main-branch build. Use `edge` for dev
 Implementation order follows `PRODUCT.md`.
 
 Do not pull future milestone features into current milestone unless they are required for correctness or avoid rework in a hard-to-change schema.
+
+Detailed planning may cover every accepted milestone in `PRODUCT.md`, while
+implementation remains in numeric and dependency order. A task plan cannot
+promote a post-roadmap candidate into accepted scope.
 
 Priority:
 
