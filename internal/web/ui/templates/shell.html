@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="dark light">
+  <meta name="htmx-config" content='{"historyCacheSize":0,"responseHandling":[{"code":"204","swap":false},{"code":"[23]..","swap":true},{"code":"[45]..","swap":true,"error":true}]}'>
   <title>Logs · Siftail</title>
   <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/assets/app.css">
@@ -44,18 +45,9 @@
         <p class="eyebrow">History</p>
         <h1>Logs</h1>
       </div>
-      <p class="workspace-context">All retained sources · Last hour</p>
+      <p class="workspace-context">{{.History.SourceSummary}} · {{.History.RangeSummary}}</p>
     </header>
-    <section class="workspace-panel" aria-labelledby="history-heading">
-      <div class="mode-tabs" role="tablist" aria-label="Log mode">
-        <a id="history-heading" role="tab" aria-selected="true" href="/logs">History</a>
-        <span role="tab" aria-selected="false" aria-disabled="true">Live</span>
-      </div>
-      <div class="empty-state">
-        <h2>Historical browsing is ready for filters</h2>
-        <p>Select a source or keep the all-source scope to inspect the last hour.</p>
-      </div>
-    </section>
+    {{template "history-region.html" .History}}
   </main>
 </body>
 </html>{{end}}

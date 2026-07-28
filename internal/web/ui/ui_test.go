@@ -80,6 +80,8 @@ func TestShellTemplateUsesLocalCSPCompatibleAssets(t *testing.T) {
 		`src="/assets/htmx-2.0.10.min.js"`,
 		`src="/assets/app.js"`,
 		`hx-history="false"`,
+		`name="htmx-config"`,
+		`"[45].."`,
 		`class="skip-link"`,
 		`aria-label="Primary"`,
 	} {
@@ -93,6 +95,66 @@ func TestShellTemplateUsesLocalCSPCompatibleAssets(t *testing.T) {
 		if strings.Contains(body, forbidden) {
 			t.Errorf("shell contains CSP-incompatible or unsafe %q", forbidden)
 		}
+	}
+}
+
+func TestHistoryFragmentsRenderFocusedEscapedState(t *testing.T) {
+	renderer := New()
+	view := HistoryView{
+		CanonicalURL:  `/logs?contains=%3Cscript%3E`,
+		From:          "2026-07-28T00:00:00Z",
+		To:            "2026-07-28T01:00:00Z",
+		RangeSummary:  "28 Jul 2026 00:00–01:00 UTC",
+		SourceSummary: `API <unsafe>`,
+		Servers:       []SelectOption{{Value: "1", Label: `Server <one>`, Selected: true}},
+		Levels:        []FilterChoice{{ID: "level-error", Value: "error", Label: "error", Checked: true}},
+		Streams:       []FilterChoice{{ID: "stream-stderr", Value: "stderr", Label: "stderr", Checked: true}},
+		LevelsValue:   "error",
+		StreamsValue:  "stderr",
+		Contains:      `<script>alert(1)</script>`,
+		Rows: []HistoryRowView{{
+			ID: 7, TimestampUTC: "2026-07-28T00:30:00Z",
+			Timestamp: "00:30:00.000 UTC", Level: "error", Stream: "stderr",
+			Source: `API <unsafe>`, Message: `<img src=x onerror=alert(1)>`,
+		}},
+		LoadedCount: 1,
+		HasMore:     true,
+		NextURL:     "/logs/rows?cursor=opaque&amp;append=1",
+	}
+	response := httptest.NewRecorder()
+	if err := renderer.HistoryRegion(response, http.StatusOK, view); err != nil {
+		t.Fatal(err)
+	}
+	body := response.Body.String()
+	for _, want := range []string{
+		`id="history-region"`,
+		`hx-target="#history-region"`,
+		`delay:400ms`,
+		`data-list-filter="levels" checked`,
+		`API &lt;unsafe&gt;`,
+		`&lt;img src=x onerror=alert(1)&gt;`,
+		`id="load-older"`,
+		`hx-disabled-elt="this"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("History fragment missing %q", want)
+		}
+	}
+	if strings.Contains(body, `<img src=x`) || strings.Contains(body, `<script>alert`) {
+		t.Fatal("History fragment emitted unescaped event/filter data")
+	}
+
+	view.Rows[0].OOB = true
+	view.Announcement = "1 additional event loaded."
+	appendResponse := httptest.NewRecorder()
+	if err := renderer.HistoryAppend(appendResponse, http.StatusOK, view); err != nil {
+		t.Fatal(err)
+	}
+	appendBody := appendResponse.Body.String()
+	if strings.Contains(appendBody, "<form") ||
+		!strings.Contains(appendBody, `hx-swap-oob="beforeend:#history-rows"`) ||
+		!strings.Contains(appendBody, `id="history-pagination"`) {
+		t.Fatalf("append fragment replaced the wrong boundary: %s", appendBody)
 	}
 }
 
@@ -110,9 +172,15 @@ func TestEmbeddedAssetsTypesIntegrityAndSafety(t *testing.T) {
 			response := httptest.NewRecorder()
 			renderer.Asset(response, request)
 			if response.Code != http.StatusOK ||
-				response.Header().Get("Content-Type") != contentType ||
-				!strings.Contains(response.Header().Get("Cache-Control"), "immutable") {
+				response.Header().Get("Content-Type") != contentType {
 				t.Fatalf("asset response = %d %#v", response.Code, response.Header())
+			}
+			cache := response.Header().Get("Cache-Control")
+			if name == "htmx-2.0.10.min.js" && !strings.Contains(cache, "immutable") {
+				t.Fatalf("versioned asset cache = %q", cache)
+			}
+			if name != "htmx-2.0.10.min.js" && cache != "no-cache" {
+				t.Fatalf("mutable asset cache = %q", cache)
 			}
 			if response.Body.Len() == 0 {
 				t.Fatal("asset body is empty")
@@ -138,7 +206,8 @@ func TestEmbeddedAssetsTypesIntegrityAndSafety(t *testing.T) {
 		t.Fatal(err)
 	}
 	if strings.Contains(string(appJS), "innerHTML") ||
-		!strings.Contains(string(appJS), "historyCacheSize = 0") {
+		!strings.Contains(string(appJS), "historyCacheSize = 0") ||
+		!strings.Contains(string(appJS), "rows.length > 1000") {
 		t.Fatal("application JavaScript violates DOM/history constraints")
 	}
 	css, err := files.ReadFile("assets/app.css")

@@ -265,6 +265,22 @@ include inactive retained sources and are capped at 10,000 options per level.
 The measured 100k/1M development baseline and query-plan review are recorded in
 [`docs/performance/history-queries.md`](docs/performance/history-queries.md).
 
+`/logs` redirects relative/default requests to an absolute canonical last-hour
+URL, then renders the URL-owned History workspace. `/logs/rows` updates only
+the focused History region and pushes the canonical URL; HTMX snapshots remain
+disabled, so Back and Forward refetch authenticated state. Filters cover the
+source hierarchy, presets/custom UTC range, canonical levels, independent
+streams, 400 ms literal contains/excludes search, exact common fields, and
+container instance.
+
+“Load older” uses the protected cursor to append rows out-of-band while
+replacing only its pagination control. Duplicate requests are disabled, search
+focus and scroll context are preserved, and summaries never issue a total
+count. List rows select at most a 2,048-character message preview and omit raw
+payload, attributes, and detail-only fields. The browser keeps at most 1,000
+History rows and announces when its presentation cap requires refinement;
+stored events remain unchanged.
+
 ### Current dependency rationale
 
 - `github.com/mattn/go-sqlite3` v1.14.48 is the accepted SQLite driver. It

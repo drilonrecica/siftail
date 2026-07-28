@@ -18,9 +18,11 @@
   Half use each source, one in ten is `error`, one in three is `stderr`, and one
   in 1,000 contains the literal `needle`. Event timestamps are increasing
   microseconds. Setup occurs in one transaction outside benchmark timing.
-- Each measured operation reads a 200-row page through the production scanner.
-  The literal case scans until it finds 200 matching rows, or reaches the end
-  of the bounded range.
+- Each measured operation reads a 200-row page through the production list
+  scanner. List rows select a maximum 2,048-character message preview and omit
+  raw payload, attributes, and detail-only common fields; complete bounded
+  payloads use the separate event lookup. The literal case scans until it finds
+  200 matching rows, or reaches the end of the bounded range.
 - Measurement command:
 
   ```bash
@@ -41,12 +43,12 @@ These are development-machine measurements:
 
 | Rows | Query | Time/op | Allocated bytes/op | Allocations/op |
 |---:|---|---:|---:|---:|
-| 100,000 | unfiltered | 1.272 ms | 465,092 | 12,015 |
-| 100,000 | exact source + level | 1.548 ms | 468,636 | 12,052 |
-| 100,000 | literal `needle` | 39.718 ms | 274,216 | 6,029 |
-| 1,000,000 | unfiltered | 1.284 ms | 465,080 | 12,015 |
-| 1,000,000 | exact source + level | 1.556 ms | 468,576 | 12,052 |
-| 1,000,000 | literal `needle` | 82.259 ms | 465,320 | 12,020 |
+| 100,000 | unfiltered | 1.023 ms | 342,004 | 7,559 |
+| 100,000 | exact source + level | 1.168 ms | 345,475 | 7,596 |
+| 100,000 | literal `needle` | 39.864 ms | 212,520 | 3,795 |
+| 1,000,000 | unfiltered | 0.993 ms | 341,976 | 7,559 |
+| 1,000,000 | exact source + level | 1.142 ms | 345,472 | 7,596 |
+| 1,000,000 | literal `needle` | 81.847 ms | 342,216 | 7,564 |
 
 `EXPLAIN QUERY PLAN` selected `log_events_time_idx` for the unfiltered and
 literal cases at both sizes. Exact full-source scope first used the unique

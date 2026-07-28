@@ -1,0 +1,179 @@
+{{define "history-region.html"}}
+<section id="history-region" class="workspace-panel history-region" aria-labelledby="history-tab" aria-busy="false">
+  <div class="mode-tabs" role="tablist" aria-label="Log mode">
+    <a id="history-tab" role="tab" aria-selected="true" href="{{.CanonicalURL}}">History</a>
+    <span role="tab" aria-selected="false" aria-disabled="true">Live</span>
+  </div>
+  {{if .Error}}
+  <div class="history-error" role="alert">
+    <h2>Logs could not be loaded</h2>
+    <p>{{.Error}}</p>
+    {{if .ErrorRequestID}}<p>Request ID: <code>{{.ErrorRequestID}}</code></p>{{end}}
+  </div>
+  {{else}}
+  <details class="history-filter-disclosure" open>
+  <summary>Filters</summary>
+  <form id="history-filter-form" class="history-form" method="get" action="/logs"
+        hx-get="/logs/rows" hx-target="#history-region" hx-swap="outerHTML show:none"
+        hx-trigger="change, input changed delay:400ms from:input[data-text-filter], submit"
+        hx-disabled-elt="find button[type='submit']">
+    <input type="hidden" name="mode" value="history">
+    <input type="hidden" name="direction" value="older">
+    <input type="hidden" name="limit" value="200">
+    <input type="hidden" name="levels" value="{{.LevelsValue}}" data-list-value="levels">
+    <input type="hidden" name="streams" value="{{.StreamsValue}}" data-list-value="streams">
+    <fieldset class="filter-group source-filters">
+      <legend>Source</legend>
+      <label>Server
+        <select id="server-filter" name="server" data-source-level="0">
+          <option value="">All servers</option>
+          {{range .Servers}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}
+        </select>
+      </label>
+      <label>Project
+        <select id="project-filter" name="project" data-source-level="1">
+          <option value="">All projects</option>
+          {{range .Projects}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}
+        </select>
+      </label>
+      <label>Environment
+        <select id="environment-filter" name="environment" data-source-level="2">
+          <option value="">All environments</option>
+          {{range .Environments}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}
+        </select>
+      </label>
+      <label>Application
+        <select id="application-filter" name="application" data-source-level="3">
+          <option value="">All applications</option>
+          {{range .Applications}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}
+        </select>
+      </label>
+      <label>Service
+        <select id="service-filter" name="service" data-source-level="4">
+          <option value="">All services</option>
+          {{range .Services}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}
+        </select>
+      </label>
+    </fieldset>
+    <fieldset class="filter-group time-filters">
+      <legend>Time range</legend>
+      <div class="preset-links" aria-label="Quick time ranges">
+        {{range .Presets}}<a href="{{.URL}}"{{if .Active}} aria-current="true"{{end}}>{{.Label}}</a>{{end}}
+        <button type="button" data-focus-range>Custom</button>
+      </div>
+      <label>From (UTC)
+        <input id="from-filter" name="from" value="{{.From}}" inputmode="text" required aria-describedby="range-help">
+      </label>
+      <label>To (UTC)
+        <input id="to-filter" name="to" value="{{.To}}" inputmode="text" required aria-describedby="range-help">
+      </label>
+      <p id="range-help" class="field-help">Absolute UTC range, inclusive From and exclusive To; maximum 31 days.</p>
+    </fieldset>
+    <fieldset class="filter-group choice-filters">
+      <legend>Levels</legend>
+      <div class="filter-shortcuts" aria-label="Level shortcuts">
+        <button type="button" data-choice-preset="levels" data-values="error,fatal">Errors</button>
+        <button type="button" data-choice-preset="levels" data-values="warn,error,fatal">Problems</button>
+        <button type="button" data-choice-preset="levels" data-values="*">All</button>
+      </div>
+      <div class="choice-list">
+        {{range .Levels}}<label for="{{.ID}}"><input id="{{.ID}}" type="checkbox" value="{{.Value}}" data-list-filter="levels"{{if .Checked}} checked{{end}}> <span class="severity severity-{{.Value}}">{{.Label}}</span></label>{{end}}
+      </div>
+    </fieldset>
+    <fieldset class="filter-group choice-filters">
+      <legend>Streams</legend>
+      <div class="choice-list">
+        {{range .Streams}}<label for="{{.ID}}"><input id="{{.ID}}" type="checkbox" value="{{.Value}}" data-list-filter="streams"{{if .Checked}} checked{{end}}> {{.Label}}</label>{{end}}
+      </div>
+    </fieldset>
+    <fieldset class="filter-group text-filters">
+      <legend>Message text</legend>
+      <label>Contains
+        <input id="contains-filter" name="contains" value="{{.Contains}}" maxlength="512" placeholder="Contains message text" data-text-filter>
+      </label>
+      <label>Does not contain
+        <input id="excludes-filter" name="excludes" value="{{.Excludes}}" maxlength="512" placeholder="Exclude message text" data-text-filter>
+      </label>
+    </fieldset>
+    <details class="more-filters">
+      <summary>More filters</summary>
+      <div class="filter-group structured-filters">
+        <label>Container instance
+          <select id="container-filter" name="container">
+            <option value="">All containers</option>
+            {{range .Containers}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}
+          </select>
+        </label>
+        <label>Request ID<input id="request-id-filter" name="request_id" value="{{.RequestID}}" maxlength="255"></label>
+        <label>Logger<input id="logger-filter" name="logger" value="{{.Logger}}" maxlength="255"></label>
+        <label>HTTP method<input id="http-method-filter" name="http_method" value="{{.HTTPMethod}}" maxlength="32"></label>
+        <label>HTTP status<input id="http-status-filter" name="http_status" value="{{.HTTPStatus}}" inputmode="numeric"></label>
+        <label>Error type<input id="error-type-filter" name="error_type" value="{{.ErrorType}}" maxlength="255"></label>
+      </div>
+    </details>
+    <button class="button button-primary apply-filters" type="submit">Apply filters</button>
+    <span class="history-loading htmx-indicator" role="status">Loading…</span>
+  </form>
+  </details>
+  <div class="result-summary" role="status" aria-live="polite" tabindex="-1">
+    <span><strong data-loaded-count>{{.LoadedCount}}</strong> <span data-loaded-label>{{.LoadedLabel}}</span> loaded</span>
+    <span>{{.RangeSummary}}</span>
+    <span>{{.SourceSummary}}</span>
+    {{if .Contains}}<span>Contains “{{.Contains}}”</span>{{end}}
+    {{if .Excludes}}<span>Excludes “{{.Excludes}}”</span>{{end}}
+    {{if .HasMore}}<span data-more-summary>More older events available</span>{{end}}
+  </div>
+  <div id="history-rows" class="log-list" tabindex="-1">
+    {{if .Rows}}
+      {{range .Rows}}{{template "history-row" .}}{{end}}
+    {{else}}
+      <div class="empty-state">
+        <h2>{{.EmptyTitle}}</h2>
+        <p>{{.EmptyMessage}}</p>
+      </div>
+    {{end}}
+  </div>
+  {{template "history-pagination" .}}
+  <p id="history-update-status" class="visually-hidden" role="status" aria-live="polite"></p>
+  {{end}}
+</section>
+{{end}}
+
+{{define "history-row"}}
+<article class="log-row level-{{.Level}}" data-event-id="{{.ID}}"{{if .OOB}} hx-swap-oob="beforeend:#history-rows"{{end}}>
+  <time datetime="{{.TimestampUTC}}" data-local-time{{if .ShowDate}} data-show-date{{end}}>{{.Timestamp}}</time>
+  <span class="severity severity-{{.Level}}">{{.Level}}</span>
+  <span class="row-source">{{.Source}}</span>
+  <span class="row-message">{{.Message}}</span>
+  <span class="row-stream">{{.Stream}}</span>
+</article>
+{{end}}
+
+{{define "history-pagination"}}
+<div id="history-pagination" class="history-pagination">
+  {{if .HasMore}}
+  <button id="load-older" class="button button-quiet" type="button"
+          hx-get="{{.NextURL}}" hx-target="#history-pagination"
+          hx-swap="outerHTML show:none" hx-disabled-elt="this">
+    Load older
+  </button>
+  <span class="htmx-indicator" role="status">Loading…</span>
+  {{else if .Rows}}
+  <span class="pagination-end">End of matching events</span>
+  {{end}}
+</div>
+{{end}}
+
+{{define "history-append.html"}}
+{{range .Rows}}{{template "history-row" .}}{{end}}
+{{template "history-pagination" .}}
+<p id="history-update-status" hx-swap-oob="outerHTML" class="visually-hidden" role="status" aria-live="polite">{{.Announcement}}</p>
+{{end}}
+
+{{define "history-error.html"}}
+<div id="history-update-status" class="history-error history-inline-error" role="alert">
+  <strong>Logs could not be loaded.</strong>
+  <span>{{.Error}}</span>
+  {{if .ErrorRequestID}}<span>Request ID: <code>{{.ErrorRequestID}}</code></span>{{end}}
+</div>
+{{end}}

@@ -38,6 +38,7 @@ type HistoryEvent struct {
 	OriginalLevel       *string
 	MessageRaw          []byte
 	MessageText         string
+	MessageBytes        int64
 	AttributesJSON      []byte
 	SourceEventID       *string
 	Logger              *string
@@ -104,6 +105,19 @@ const historyEventColumns = `SELECT
 	JOIN servers AS server ON server.id = s.server_id
 	LEFT JOIN container_instances AS container ON container.id = e.container_instance_id`
 
+const historyPageColumns = `SELECT
+	e.id, e.event_at_us, e.received_at_us,
+	e.source_id, s.server_id, server.name,
+	s.project_key, s.environment_key, s.application_key, s.service_key,
+	s.project_label, s.environment_label, s.application_label, s.service_label, s.alias,
+	e.container_instance_id, container.container_id, container.container_name,
+	e.stream, e.level_normalized,
+	substr(e.message_text, 1, 2048), length(cast(e.message_text AS BLOB))
+	FROM log_events AS e
+	JOIN sources AS s ON s.id = e.source_id
+	JOIN servers AS server ON server.id = s.server_id
+	LEFT JOIN container_instances AS container ON container.id = e.container_instance_id`
+
 // NewHistoryStore adds authenticated cursor support to the read-only log
 // store. The ordinary NewStore constructor remains suitable for bounded
 // cursor-free verification reads.
@@ -143,7 +157,7 @@ func (s *Store) History(ctx context.Context, query HistoryQuery) (HistoryPage, e
 
 	events := make([]HistoryEvent, 0, query.Limit+1)
 	for rows.Next() {
-		event, err := scanHistoryEvent(rows)
+		event, err := scanHistoryPageEvent(rows)
 		if err != nil {
 			return HistoryPage{}, fmt.Errorf("scan historical event: %w", err)
 		}
@@ -242,8 +256,29 @@ func buildHistorySQL(query HistoryQuery, cursor *HistoryCursor) (string, []any) 
 		order = "ASC"
 	}
 	arguments = append(arguments, query.Limit+1)
-	return historyEventColumns + "\nWHERE " + strings.Join(clauses, "\nAND ") +
+	return historyPageColumns + "\nWHERE " + strings.Join(clauses, "\nAND ") +
 		"\nORDER BY e.event_at_us " + order + ", e.id " + order + "\nLIMIT ?", arguments
+}
+
+func scanHistoryPageEvent(row rowScanner) (HistoryEvent, error) {
+	var event HistoryEvent
+	var alias, containerID, containerName sql.NullString
+	var containerInstanceID sql.NullInt64
+	if err := row.Scan(
+		&event.ID, &event.EventAtUS, &event.ReceivedAtUS,
+		&event.SourceID, &event.ServerID, &event.ServerName,
+		&event.ProjectKey, &event.EnvironmentKey, &event.ApplicationKey, &event.ServiceKey,
+		&event.ProjectLabel, &event.EnvironmentLabel, &event.ApplicationLabel, &event.ServiceLabel, &alias,
+		&containerInstanceID, &containerID, &containerName,
+		&event.Stream, &event.Level, &event.MessageText, &event.MessageBytes,
+	); err != nil {
+		return HistoryEvent{}, err
+	}
+	event.SourceAlias = nullableString(alias)
+	event.ContainerInstanceID = nullableInt64(containerInstanceID)
+	event.ContainerID = nullableString(containerID)
+	event.ContainerName = nullableString(containerName)
+	return event, nil
 }
 
 // Event returns one retained event with its complete bounded payload and source

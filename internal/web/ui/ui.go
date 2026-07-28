@@ -27,6 +27,74 @@ type LoginView struct {
 
 type ShellView struct {
 	CSRFToken string
+	History   HistoryView
+}
+
+type SelectOption struct {
+	Value    string
+	Label    string
+	Selected bool
+}
+
+type FilterChoice struct {
+	ID      string
+	Value   string
+	Label   string
+	Checked bool
+}
+
+type PresetLink struct {
+	Label  string
+	URL    string
+	Active bool
+}
+
+type HistoryRowView struct {
+	ID           int64
+	TimestampUTC string
+	Timestamp    string
+	ShowDate     bool
+	Level        string
+	Stream       string
+	Source       string
+	Message      string
+	OOB          bool
+}
+
+type HistoryView struct {
+	CanonicalURL   string
+	From           string
+	To             string
+	RangeSummary   string
+	SourceSummary  string
+	Presets        []PresetLink
+	Servers        []SelectOption
+	Projects       []SelectOption
+	Environments   []SelectOption
+	Applications   []SelectOption
+	Services       []SelectOption
+	Containers     []SelectOption
+	Levels         []FilterChoice
+	Streams        []FilterChoice
+	LevelsValue    string
+	StreamsValue   string
+	Contains       string
+	Excludes       string
+	RequestID      string
+	Logger         string
+	HTTPMethod     string
+	HTTPStatus     string
+	ErrorType      string
+	Rows           []HistoryRowView
+	EmptyTitle     string
+	EmptyMessage   string
+	LoadedCount    int
+	LoadedLabel    string
+	HasMore        bool
+	NextURL        string
+	Error          string
+	ErrorRequestID string
+	Announcement   string
 }
 
 func New() *Renderer {
@@ -39,6 +107,18 @@ func (r *Renderer) Login(w http.ResponseWriter, status int, view LoginView) erro
 
 func (r *Renderer) Shell(w http.ResponseWriter, status int, view ShellView) error {
 	return r.render(w, status, "shell.html", view)
+}
+
+func (r *Renderer) HistoryRegion(w http.ResponseWriter, status int, view HistoryView) error {
+	return r.render(w, status, "history-region.html", view)
+}
+
+func (r *Renderer) HistoryAppend(w http.ResponseWriter, status int, view HistoryView) error {
+	return r.render(w, status, "history-append.html", view)
+}
+
+func (r *Renderer) HistoryError(w http.ResponseWriter, status int, view HistoryView) error {
+	return r.render(w, status, "history-error.html", view)
 }
 
 func (r *Renderer) render(w http.ResponseWriter, status int, name string, view any) error {
@@ -76,7 +156,11 @@ func (r *Renderer) Asset(w http.ResponseWriter, request *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", contentType)
-	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	if name == "htmx-2.0.10.min.js" {
+		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	} else {
+		w.Header().Set("Cache-Control", "no-cache")
+	}
 	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(content)))
 	w.WriteHeader(http.StatusOK)
 	if request.Method == http.MethodGet {

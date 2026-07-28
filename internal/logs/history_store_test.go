@@ -91,7 +91,10 @@ func TestHistoryComposesEveryFilter(t *testing.T) {
 	if got := historyIDs(page.Events); !reflect.DeepEqual(got, []int64{1}) {
 		t.Fatalf("filtered IDs = %v", got)
 	}
-	event := page.Events[0]
+	event, err := fixture.store.Event(context.Background(), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if event.ContainerID == nil || *event.ContainerID != "container-1" ||
 		event.OriginalLevel == nil || *event.OriginalLevel != "ERROR" ||
 		string(event.AttributesJSON) != `{"nested":{"safe":true}}` ||
@@ -151,6 +154,48 @@ func TestHistoryOptionalFieldsAndEventLookup(t *testing.T) {
 	}
 	if _, err := fixture.store.Event(context.Background(), 999); !errors.Is(err, sql.ErrNoRows) {
 		t.Fatalf("missing event error = %v", err)
+	}
+}
+
+func TestHistoryBoundsRowMessagePreview(t *testing.T) {
+	db, coordinator := cursorTestDatabase(t)
+	codec, err := LoadCursorCodec(context.Background(), db.Reader(), coordinator)
+	if err != nil {
+		t.Fatal(err)
+	}
+	message := strings.Repeat("é", 3000)
+	if err := coordinator.Do(context.Background(), func(tx *sql.Tx) error {
+		if _, err := tx.Exec(`INSERT INTO servers(id,name,created_at_us)
+			VALUES (1,'Preview',1)`); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`INSERT INTO sources(
+			id,server_id,project_key,environment_key,application_key,service_key,
+			project_label,environment_label,application_label,service_label,
+			first_seen_at_us,last_seen_at_us
+		) VALUES (1,1,'p','e','a','s','p','e','a','s',1,1)`); err != nil {
+			return err
+		}
+		_, err := tx.Exec(`INSERT INTO log_events(
+			event_at_us,received_at_us,source_id,stream,level_normalized,message_raw,message_text
+		) VALUES (1,1,1,'stdout','info',?,?)`, []byte(message), message)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	store := NewHistoryStore(db.Reader(), codec)
+	page, err := store.History(context.Background(), HistoryQuery{
+		FromUS: 0, ToUS: 2, Direction: DirectionOlder, Limit: 200,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Events) != 1 ||
+		page.Events[0].MessageBytes != int64(len([]byte(message))) ||
+		len([]rune(page.Events[0].MessageText)) != 2048 ||
+		page.Events[0].MessageRaw != nil ||
+		page.Events[0].AttributesJSON != nil {
+		t.Fatalf("bounded preview event = %#v", page.Events)
 	}
 }
 

@@ -14,6 +14,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/drilonrecica/siftail/internal/logs"
 	"github.com/drilonrecica/siftail/internal/sessions"
 	webui "github.com/drilonrecica/siftail/internal/web/ui"
 )
@@ -23,6 +24,7 @@ const csrfPurpose = "siftail-browser-csrf-v1"
 type BrowserConfig struct {
 	PublicURL         string
 	TrustedProxyCIDRs []string
+	HistoryStore      *logs.Store
 }
 
 type Browser struct {
@@ -32,6 +34,8 @@ type Browser struct {
 	proxies        proxyTrust
 	throttle       *loginThrottle
 	ui             *webui.Renderer
+	history        *logs.Store
+	now            func() time.Time
 }
 
 func NewBrowser(administrators *Store, sessionStore *sessions.Store, config BrowserConfig) *Browser {
@@ -42,6 +46,8 @@ func NewBrowser(administrators *Store, sessionStore *sessions.Store, config Brow
 		proxies:        newProxyTrust(config.TrustedProxyCIDRs),
 		throttle:       newLoginThrottle(),
 		ui:             webui.New(),
+		history:        config.HistoryStore,
+		now:            time.Now,
 	}
 }
 
@@ -69,7 +75,8 @@ func (b *Browser) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /session", b.login)
 	mux.HandleFunc("/assets/", b.ui.Asset)
 	mux.Handle("POST /session/logout", b.Protect(http.HandlerFunc(b.logout)))
-	mux.Handle("GET /logs", b.Protect(http.HandlerFunc(b.logsPlaceholder)))
+	mux.Handle("GET /logs", b.Protect(http.HandlerFunc(b.historyPage)))
+	mux.Handle("GET /logs/rows", b.Protect(http.HandlerFunc(b.historyRows)))
 }
 
 func (b *Browser) loginPage(w http.ResponseWriter, r *http.Request) {
@@ -202,13 +209,6 @@ func (b *Browser) logout(w http.ResponseWriter, r *http.Request) {
 	cookie.MaxAge = -1
 	http.SetCookie(w, cookie)
 	http.Redirect(w, r, "/login", http.StatusSeeOther)
-}
-
-func (b *Browser) logsPlaceholder(w http.ResponseWriter, r *http.Request) {
-	session, _ := BrowserSessionFromContext(r.Context())
-	if err := b.ui.Shell(w, http.StatusOK, webui.ShellView{CSRFToken: session.CSRFToken}); err != nil {
-		http.Error(w, "Logs are temporarily unavailable.", http.StatusInternalServerError)
-	}
 }
 
 func (b *Browser) requireLogin(w http.ResponseWriter, r *http.Request, expired bool) {

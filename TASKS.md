@@ -889,10 +889,19 @@ frontend tooling must remain absent from the production image.
 
 ### SFT-022 — Implement the History workspace and URL-owned filtering
 
-**Status:** Planned  
+**Status:** Done
 **Milestone:** 0.2.0  
 **Depends on:** SFT-020, SFT-021  
-**Issue/PR:** —
+**Issue/PR:** — (direct maintainer implementation)
+**Completed:** 2026-07-28
+**Completion evidence:** Authenticated handler/template tests cover canonical
+last-hour and preset redirects, every source/text/level/stream/common/container
+filter, invalid ranges, safe query failures, hostile escaping, session expiry,
+URL push state, and equal-time cursor append fragments. Headless Chromium
+checks cover real ingestion, debounced filtering with focus preservation,
+Back restoration, keyboard shortcuts, reduced motion, dark/light, desktop and
+390px responsive layouts without page overflow. Store tests bound list message
+previews and the updated documented 100k/1M benchmarks retain existing plans.
 
 **Authoritative references:** `DESIGN.md` §§8–10, 23, 38; `PRODUCT.md` §§10.4,
 13.

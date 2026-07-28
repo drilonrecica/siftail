@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/drilonrecica/siftail/internal/database"
+	"github.com/drilonrecica/siftail/internal/logs"
 	"github.com/drilonrecica/siftail/internal/sessions"
 	"github.com/drilonrecica/siftail/internal/web"
 )
@@ -46,7 +47,13 @@ func newBrowserFixture(t *testing.T, publicURL string, administrator bool) *brow
 	<-coordinator.Ready()
 	adminStore := NewCoordinatedStore(db.Reader(), coordinator)
 	sessionStore := sessions.NewCoordinatedStore(db.Reader(), coordinator)
-	browser := NewBrowser(adminStore, sessionStore, BrowserConfig{PublicURL: publicURL})
+	codec, err := logs.LoadCursorCodec(context.Background(), db.Reader(), coordinator)
+	if err != nil {
+		t.Fatal(err)
+	}
+	browser := NewBrowser(adminStore, sessionStore, BrowserConfig{
+		PublicURL: publicURL, HistoryStore: logs.NewHistoryStore(db.Reader(), codec),
+	})
 	fixture := &browserFixture{
 		db: db, browser: browser, sessions: sessionStore,
 		coordinator: coordinator, cancel: cancel, done: done,
@@ -109,7 +116,10 @@ func TestLoginSessionProtectedPageAndLogoutSecurity(t *testing.T) {
 		t.Fatalf("session cookie = %#v", cookie)
 	}
 
-	logsRequest := httptest.NewRequest(http.MethodGet, "/logs", nil)
+	logsRequest := httptest.NewRequest(http.MethodGet,
+		"/logs?mode=history&from=2026-07-28T00%3A00%3A00Z&to=2026-07-28T01%3A00%3A00Z&direction=older&limit=200",
+		nil,
+	)
 	logsRequest.AddCookie(cookie)
 	logsResponse := httptest.NewRecorder()
 	fixture.handler().ServeHTTP(logsResponse, logsRequest)
