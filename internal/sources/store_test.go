@@ -43,7 +43,7 @@ func TestServerAndTokenLifecycle(t *testing.T) {
 	}
 	for _, plaintext := range []string{first.Token, second.Token} {
 		authenticated, err := store.VerifyToken(context.Background(), plaintext)
-		if err != nil || authenticated.ID != server.ID {
+		if err != nil || authenticated.ID != server.ID || authenticated.TokenID <= 0 {
 			t.Fatalf("verify = %#v, %v", authenticated, err)
 		}
 	}

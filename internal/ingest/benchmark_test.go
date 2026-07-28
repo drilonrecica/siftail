@@ -241,7 +241,7 @@ type benchmarkHTTP struct {
 func benchmarkHTTPFixture(b *testing.B) benchmarkHTTP {
 	b.Helper()
 	db, coordinator, writer, serverID := benchmarkWriter(b, WriterOptions{})
-	store := sources.NewStore(db.Reader())
+	store := sources.NewCoordinatedStore(db.Reader(), coordinator)
 	token, err := sources.NewCoordinatedStore(db.Reader(), coordinator).CreateToken(
 		context.Background(), serverID, "benchmark",
 	)

@@ -1,0 +1,90 @@
+{{define "servers.html"}}
+<section class="workspace-panel server-management" aria-labelledby="servers-title">
+  <header class="catalog-heading">
+    <div><h2 id="servers-title">Servers</h2><p>A token binds every accepted event to exactly one trusted Server.</p></div>
+  </header>
+  {{if .Notice}}<div class="notice notice-info source-notice" role="status"><p>{{.Notice}}</p></div>{{end}}
+  {{if .Error}}<div class="history-error" role="alert"><strong>{{.Error}}</strong>{{if .ErrorRequestID}}<span>Request ID: <code>{{.ErrorRequestID}}</code></span>{{end}}</div>{{end}}
+  <div class="server-management-grid">
+    <section>
+      <h3>Configured Servers</h3>
+      {{if .Rows}}<div class="source-table-scroll" tabindex="0" aria-label="Server table">
+        <table class="source-table"><thead><tr><th scope="col">Server</th><th scope="col">Sources</th><th scope="col">Active tokens</th><th scope="col">Last event</th></tr></thead>
+        <tbody>{{range .Rows}}<tr>
+          <th scope="row"><a href="{{.DetailURL}}">{{.Name}}</a>{{if .Hostname}}<span class="source-path">{{.Hostname}}</span>{{end}}</th>
+          <td>{{.SourceCount}}</td><td>{{.TokenCount}}</td><td>{{.LastEvent}}</td>
+        </tr>{{end}}</tbody></table>
+      </div>
+      <nav class="history-pagination" aria-label="Server pagination">{{if .NextURL}}<a class="button" href="{{.NextURL}}">Next Servers</a>{{else}}<span class="pagination-end">End of Server list</span>{{end}}</nav>
+      {{else}}<p>No Servers are configured.</p>{{end}}
+    </section>
+    <section>
+      <h3>Create Server</h3>
+      <form method="post" action="/servers" class="source-action-form">
+        <label for="server-name">Display name<input id="server-name" name="name" value="{{.Name}}" maxlength="128" required{{if .ServerError}} aria-describedby="server-error" autofocus{{end}}></label>
+        <label for="server-hostname">Descriptive hostname, optional<input id="server-hostname" name="hostname" value="{{.Hostname}}" maxlength="255"></label>
+        {{if .ServerError}}<p id="server-error" class="form-error" role="alert">{{.ServerError}}</p>{{end}}
+        <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+        <button class="button button-primary" type="submit">Create Server</button>
+      </form>
+    </section>
+  </div>
+</section>
+{{end}}
+
+{{define "server-detail.html"}}
+<section class="workspace-panel server-management" aria-labelledby="server-title">
+  <header class="catalog-heading">
+    <div><a href="/servers">← All Servers</a><h2 id="server-title">{{.Name}}</h2>{{if .Hostname}}<p>{{.Hostname}}</p>{{end}}</div>
+  </header>
+  {{if .Notice}}<div class="notice notice-info source-notice" role="status"><p>{{.Notice}}</p></div>{{end}}
+  <div class="server-management-grid">
+    <section>
+      <h3>Ingestion tokens</h3>
+      <p>Token plaintext is never stored and cannot be shown again.</p>
+      {{if .Tokens}}<div class="source-table-scroll" tabindex="0" aria-label="Ingestion token table">
+        <table class="source-table"><thead><tr><th scope="col">Token</th><th scope="col">Fingerprint</th><th scope="col">Created</th><th scope="col">Last used</th><th scope="col">State</th><th scope="col">Action</th></tr></thead>
+        <tbody>{{range .Tokens}}<tr>
+          <th scope="row">{{.Name}}</th><td><code>{{.Fingerprint}}</code></td><td>{{.Created}}</td><td>{{.LastUsed}}</td>
+          <td>{{if .Active}}Active{{else}}Revoked {{.Revoked}}{{end}}</td>
+          <td>{{if .Active}}<form method="post" action="/tokens/{{.ID}}/revoke" class="inline-confirmation">
+            <label>Type <strong>{{.Name}}</strong> to revoke<input name="confirmation" autocomplete="off"></label>
+            <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+            <button class="button button-danger" type="submit">Revoke</button>
+          </form>{{else}}—{{end}}</td>
+        </tr>{{end}}</tbody></table>
+      </div>{{else}}<p>No ingestion tokens have been created for this Server.</p>{{end}}
+      {{if .TokensTruncated}}<p class="notice notice-info">Showing the 1,000 newest token records.</p>{{end}}
+      {{if .RevokeError}}<p class="form-error" role="alert">{{.RevokeError}}</p>{{end}}
+    </section>
+    <section>
+      <h3>Create or rotate token</h3>
+      <p>Creating a replacement does not revoke existing tokens. Update the sender, test the new token, then revoke the old one.</p>
+      <form method="post" action="/servers/{{.ID}}/tokens" class="source-action-form">
+        <label for="token-name">Token name<input id="token-name" name="name" value="{{.TokenName}}" maxlength="128" required{{if .TokenError}} aria-describedby="token-error" autofocus{{end}}></label>
+        {{if .TokenError}}<p id="token-error" class="form-error" role="alert">{{.TokenError}}</p>{{end}}
+        <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+        <button class="button button-primary" type="submit">Create token</button>
+      </form>
+    </section>
+  </div>
+</section>
+{{end}}
+
+{{define "token-created.html"}}
+<section class="workspace-panel one-time-token" data-one-time-token data-done-url="{{.DoneURL}}" aria-labelledby="token-created-title">
+  <header class="catalog-heading"><div><h2 id="token-created-title">Copy this token now</h2><p>Siftail stores only a hash and cannot show it again.</p></div></header>
+  <div class="one-time-token-content">
+    <dl><div><dt>Server</dt><dd>{{.ServerName}}</dd></div><div><dt>Name</dt><dd>{{.TokenName}}</dd></div><div><dt>Fingerprint</dt><dd><code>{{.Fingerprint}}</code></dd></div></dl>
+    <label for="created-token">Token</label>
+    <div class="token-secret-control">
+      <input id="created-token" data-token-secret type="password" value="{{.Token}}" readonly autocomplete="off" spellcheck="false">
+      <button class="button" data-token-toggle type="button" aria-pressed="false">Show</button>
+      <button class="button button-primary" data-token-copy type="button">Copy token</button>
+    </div>
+    <p data-token-status role="status" aria-live="polite"></p>
+    <div class="notice notice-warning"><p>Leaving this screen permanently removes the plaintext from Siftail. Creating this replacement did not revoke another token.</p></div>
+    <a class="button button-primary" href="{{.DoneURL}}">Done</a>
+  </div>
+</section>
+{{end}}

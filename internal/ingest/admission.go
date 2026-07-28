@@ -141,6 +141,7 @@ type WriteBatch struct {
 	Result                chan error
 	RequestID             string
 	AuthenticatedServerID int64
+	AuthenticatedTokenID  int64
 
 	lease *residentLease
 	once  sync.Once

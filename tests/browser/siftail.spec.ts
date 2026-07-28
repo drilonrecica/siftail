@@ -75,6 +75,28 @@ async function ingestSource(
   }
 }
 
+async function ingestWithToken(token: string, application: string): Promise<number> {
+  const state = readState();
+  const response = await fetch(`http://${state.ingestAddress}/api/v1/ingest`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify([{
+      timestamp: new Date().toISOString(),
+      project: "browser-project",
+      environment: "test",
+      application,
+      service: "web",
+      stream: "stdout",
+      level: "INFO",
+      log: "browser managed token check",
+    }]),
+  });
+  return response.status;
+}
+
 async function trackEventSources(page: Page): Promise<void> {
   await page.addInitScript(() => {
     const NativeEventSource = window.EventSource;
@@ -481,6 +503,83 @@ test("source aliases, clear logs, removal, confirmation focus, and expired sessi
   )).toBeVisible();
   await expect(page.getByRole("row").filter({ hasText: "mutation-worker / jobs" })).toHaveCount(0);
   await expect(page.getByRole("row").filter({ hasText: hostileAlias })).toHaveCount(1);
+});
+
+test("Server token creation, one-time copy, rotation, navigation loss, and revocation", async ({
+  page,
+}) => {
+  await login(page);
+  await page.getByRole("link", { name: "Servers", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Servers", exact: true, level: 2 })).toBeVisible();
+  await page.locator("#server-name").fill("Browser managed");
+  await page.locator("#server-hostname").fill("managed.example");
+  await page.getByRole("button", { name: "Create Server" }).press("Enter");
+  await expect(page.getByRole("heading", { name: "Browser managed" })).toBeVisible();
+
+  await page.locator("#token-name").fill("primary");
+  await page.getByRole("button", { name: "Create token" }).click();
+  await expect(page.getByRole("heading", { name: "Copy this token now" })).toBeVisible();
+  const tokenInput = page.locator("[data-token-secret]");
+  const primary = await tokenInput.inputValue();
+  expect(primary).toMatch(/^sft_[A-Za-z0-9_-]{43}$/);
+  expect(page.url()).not.toContain(primary);
+  await expect(tokenInput).toHaveAttribute("type", "password");
+  await page.getByRole("button", { name: "Show" }).click();
+  await expect(tokenInput).toHaveAttribute("type", "text");
+  await expect(tokenInput).toBeFocused();
+  await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+  await page.getByRole("button", { name: "Copy token" }).click();
+  await expect(page.getByText("Token copied.")).toBeVisible();
+
+  await page.getByRole("link", { name: "Done" }).click();
+  await expect(page.getByRole("heading", { name: "Browser managed" })).toBeVisible();
+  expect(await page.content()).not.toContain(primary);
+  await page.goBack();
+  expect(await page.content()).not.toContain(primary);
+  await page.goto("/servers");
+  expect(await page.content()).not.toContain(primary);
+
+  await page.getByRole("link", { name: "Browser managed" }).click();
+  await page.locator("#token-name").fill("replacement");
+  await page.getByRole("button", { name: "Create token" }).click();
+  const replacement = await page.locator("[data-token-secret]").inputValue();
+  expect(replacement).not.toBe(primary);
+  await page.getByRole("link", { name: "Done" }).click();
+  await expect(page.getByRole("row").filter({ hasText: "primary" })).toContainText("Active");
+  await expect(page.getByRole("row").filter({ hasText: "replacement" })).toContainText("Active");
+  expect(await ingestWithToken(primary, "managed-primary")).toBe(204);
+  expect(await ingestWithToken(replacement, "managed-replacement")).toBe(204);
+  await page.reload();
+  await expect(page.getByRole("row").filter({ hasText: "replacement" })).not.toContainText("Never");
+
+  const primaryRow = page.getByRole("row").filter({ hasText: "primary" });
+  await primaryRow.getByLabel(/Type primary to revoke/).fill("primary");
+  await primaryRow.getByRole("button", { name: "Revoke" }).click();
+  await expect(page.getByText(
+    "Token revoked. New ingestion requests using it fail immediately.",
+  )).toBeVisible();
+  await expect(page.getByRole("row").filter({ hasText: "primary" })).toContainText("Revoked");
+  expect(await ingestWithToken(primary, "managed-primary-revoked")).toBe(401);
+  expect(await ingestWithToken(replacement, "managed-replacement-active")).toBe(204);
+
+  await page.locator("[data-theme-select]").selectOption("dark");
+  let results = await new AxeBuilder({ page })
+    .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"])
+    .analyze();
+  expect(results.violations.map((violation) => violation.id)).toEqual([]);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.locator("[data-theme-select]").selectOption("light");
+  expect(await page.evaluate(
+    () => document.documentElement.scrollWidth > window.innerWidth,
+  )).toBe(false);
+  results = await new AxeBuilder({ page })
+    .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"])
+    .analyze();
+  expect(results.violations.map((violation) => violation.id)).toEqual([]);
+  await page.screenshot({
+    path: ".playwright-artifacts/servers-mobile-light.png",
+    fullPage: true,
+  });
 });
 
 test("keyboard, themes, reduced motion, mobile inspection, and axe smoke", async ({ page }) => {

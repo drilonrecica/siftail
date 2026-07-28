@@ -294,7 +294,7 @@ func (a *App) ingestMux() *http.ServeMux {
 }
 
 func (a *App) initializeIngestion() error {
-	store := sources.NewStore(a.db.Reader())
+	store := sources.NewCoordinatedStore(a.db.Reader(), a.coordinator)
 	admission := ingest.NewAdmission(ingest.AdmissionLimits{
 		MaxDecoders:       int(a.cfg.IngestMaxDecoders),
 		ResidentMaxEvents: a.cfg.IngestResidentMaxEvents,

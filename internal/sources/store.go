@@ -23,6 +23,13 @@ type Store struct {
 	now     func() time.Time
 }
 
+var (
+	ErrInvalidServerInput = errors.New("invalid Server input")
+	ErrServerNameInUse    = errors.New("Server name is already in use")
+	ErrInvalidTokenInput  = errors.New("invalid ingestion-token input")
+	ErrTokenNameInUse     = errors.New("ingestion-token name is already in use")
+)
+
 func NewStore(db *sql.DB) *Store {
 	return &Store{db: db, mutator: directMutator{db: db}, now: time.Now}
 }
@@ -62,6 +69,7 @@ type Server struct {
 }
 
 type AuthenticatedServer struct {
+	TokenID  int64
 	ID       int64
 	Name     string
 	Hostname string
@@ -71,14 +79,23 @@ func (s *Store) CreateServer(ctx context.Context, name, hostname string) (Server
 	name = strings.TrimSpace(name)
 	hostname = strings.TrimSpace(hostname)
 	if err := validText(name, 128, false); err != nil {
-		return Server{}, fmt.Errorf("server name: %w", err)
+		return Server{}, fmt.Errorf("%w: name: %v", ErrInvalidServerInput, err)
 	}
 	if err := validText(hostname, 255, true); err != nil {
-		return Server{}, fmt.Errorf("server hostname: %w", err)
+		return Server{}, fmt.Errorf("%w: hostname: %v", ErrInvalidServerInput, err)
 	}
 	created := s.now().UnixMicro()
 	var id int64
 	err := s.mutator.Do(ctx, func(tx *sql.Tx) error {
+		var exists int
+		if err := tx.QueryRowContext(ctx,
+			`SELECT EXISTS(SELECT 1 FROM servers WHERE name = ? LIMIT 1)`, name,
+		).Scan(&exists); err != nil {
+			return fmt.Errorf("check Server name: %w", err)
+		}
+		if exists != 0 {
+			return ErrServerNameInUse
+		}
 		result, err := tx.ExecContext(ctx,
 			"INSERT INTO servers(name, hostname, created_at_us) VALUES (?, nullif(?, ''), ?)",
 			name, hostname, created)
@@ -128,11 +145,11 @@ type CreatedToken struct {
 
 func (s *Store) CreateToken(ctx context.Context, serverID int64, name string) (CreatedToken, error) {
 	if serverID <= 0 {
-		return CreatedToken{}, errors.New("server ID must be positive")
+		return CreatedToken{}, ErrServerNotFound
 	}
 	name = strings.TrimSpace(name)
 	if err := validText(name, 128, false); err != nil {
-		return CreatedToken{}, fmt.Errorf("token name: %w", err)
+		return CreatedToken{}, fmt.Errorf("%w: name: %v", ErrInvalidTokenInput, err)
 	}
 	random := make([]byte, 32)
 	if _, err := rand.Read(random); err != nil {
@@ -143,6 +160,21 @@ func (s *Store) CreateToken(ctx context.Context, serverID int64, name string) (C
 	fingerprint := hex.EncodeToString(hash[:6])
 	var id int64
 	err := s.mutator.Do(ctx, func(tx *sql.Tx) error {
+		var serverExists, nameExists int
+		if err := tx.QueryRowContext(ctx, `SELECT
+			EXISTS(SELECT 1 FROM servers WHERE id = ? LIMIT 1),
+			EXISTS(SELECT 1 FROM ingestion_tokens
+				WHERE server_id = ? AND name = ? LIMIT 1)`,
+			serverID, serverID, name,
+		).Scan(&serverExists, &nameExists); err != nil {
+			return fmt.Errorf("check ingestion-token ownership: %w", err)
+		}
+		if serverExists == 0 {
+			return ErrServerNotFound
+		}
+		if nameExists != 0 {
+			return ErrTokenNameInUse
+		}
 		result, err := tx.ExecContext(ctx, `INSERT INTO ingestion_tokens(
 			server_id, name, token_hash, fingerprint, created_at_us
 		) VALUES (?, ?, ?, ?, ?)`, serverID, name, hash[:], fingerprint, s.now().UnixMicro())
@@ -166,7 +198,7 @@ func (s *Store) CreateToken(ctx context.Context, serverID int64, name string) (C
 
 func (s *Store) RevokeToken(ctx context.Context, id int64) error {
 	if id <= 0 {
-		return errors.New("token ID must be positive")
+		return ErrTokenNotFound
 	}
 	return s.mutator.Do(ctx, func(tx *sql.Tx) error {
 		result, err := tx.ExecContext(ctx,
@@ -180,7 +212,7 @@ func (s *Store) RevokeToken(ctx context.Context, id int64) error {
 			return fmt.Errorf("revoke token: %w", err)
 		}
 		if affected == 0 {
-			return errors.New("active token not found")
+			return ErrTokenNotFound
 		}
 		return nil
 	})
@@ -192,7 +224,7 @@ func (s *Store) VerifyToken(ctx context.Context, plaintext string) (Authenticate
 	hash := sha256.Sum256([]byte(plaintext))
 	fingerprint := hex.EncodeToString(hash[:6])
 	rows, err := s.db.QueryContext(ctx, `SELECT
-		t.token_hash, s.id, s.name, coalesce(s.hostname, '')
+		t.id, t.token_hash, s.id, s.name, coalesce(s.hostname, '')
 		FROM ingestion_tokens t JOIN servers s ON s.id=t.server_id
 		WHERE t.fingerprint=? AND t.revoked_at_us IS NULL
 		ORDER BY t.id LIMIT 8`, fingerprint)
@@ -206,17 +238,22 @@ func (s *Store) VerifyToken(ctx context.Context, plaintext string) (Authenticate
 	matched := false
 	for rows.Next() {
 		var stored []byte
+		var tokenID int64
 		var candidate AuthenticatedServer
-		if err := rows.Scan(&stored, &candidate.ID, &candidate.Name, &candidate.Hostname); err != nil {
+		if err := rows.Scan(&tokenID, &stored, &candidate.ID, &candidate.Name, &candidate.Hostname); err != nil {
 			return AuthenticatedServer{}, fmt.Errorf("verify token")
 		}
 		compared = true
 		if len(stored) == sha256.Size && subtle.ConstantTimeCompare(hash[:], stored) == 1 {
 			authenticated = candidate
+			authenticated.TokenID = tokenID
 			matched = true
 		}
 	}
 	if err := rows.Err(); err != nil {
+		return AuthenticatedServer{}, fmt.Errorf("verify token")
+	}
+	if err := rows.Close(); err != nil {
 		return AuthenticatedServer{}, fmt.Errorf("verify token")
 	}
 	if !compared {

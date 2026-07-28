@@ -349,6 +349,23 @@ them and clearly avoid any promise of forensic erasure. Security-audit storage
 is scheduled for the later audit milestone; these pre-audit operations do not
 claim a persisted audit record yet.
 
+### Browser Server and token management
+
+The authenticated `/servers` workspace creates trusted Servers and manages
+their independently revocable ingestion tokens through the same
+coordinator-owned store used by the CLI. It shows only nonsecret token names,
+fingerprints, creation/last-use/revocation times, active state, source count,
+and last event time.
+
+Token creation and rotation return one no-store response with a masked
+plaintext credential, show/hide and copy controls, and an explicit Done action.
+Siftail stores only the token hash and cannot display the plaintext again.
+Creating a replacement leaves the old token active until it is explicitly
+revoked; revocation takes effect at authentication and is rechecked at durable
+batch commit. Successful batch commit updates token last-use metadata in the
+same transaction. The complete threat and exposure boundary is documented in
+[`docs/security/ingestion-tokens.md`](docs/security/ingestion-tokens.md).
+
 ### Current dependency rationale
 
 - `github.com/mattn/go-sqlite3` v1.14.48 is the accepted SQLite driver. It

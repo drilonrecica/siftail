@@ -32,6 +32,9 @@ type ShellView struct {
 	Live      LiveView
 	Sources   SourcesView
 	Source    SourceDetailView
+	Servers   ServersView
+	Server    ServerDetailView
+	Token     OneTimeTokenView
 }
 
 type SelectOption struct {
@@ -198,6 +201,59 @@ type ContainerObservationView struct {
 	LastSeen  string
 }
 
+type ServersView struct {
+	CSRFToken      string
+	Rows           []ServerRowView
+	NextURL        string
+	Notice         string
+	Error          string
+	ErrorRequestID string
+	ServerError    string
+	Name           string
+	Hostname       string
+}
+
+type ServerRowView struct {
+	ID          int64
+	DetailURL   string
+	Name        string
+	Hostname    string
+	SourceCount int64
+	TokenCount  int64
+	LastEvent   string
+}
+
+type ServerDetailView struct {
+	ServerRowView
+	CSRFToken       string
+	Notice          string
+	Tokens          []TokenRowView
+	TokensTruncated bool
+	TokenError      string
+	TokenName       string
+	RevokeError     string
+}
+
+type TokenRowView struct {
+	ID          int64
+	Name        string
+	Fingerprint string
+	Created     string
+	LastUsed    string
+	Revoked     string
+	Active      bool
+}
+
+type OneTimeTokenView struct {
+	CSRFToken   string
+	ServerID    int64
+	ServerName  string
+	TokenName   string
+	Fingerprint string
+	Token       string
+	DoneURL     string
+}
+
 func New() *Renderer {
 	return &Renderer{templates: template.Must(template.ParseFS(files, "templates/*.html"))}
 }
@@ -252,6 +308,7 @@ func (r *Renderer) Asset(w http.ResponseWriter, request *http.Request) {
 		"app.css":            "text/css; charset=utf-8",
 		"app.js":             "text/javascript; charset=utf-8",
 		"live.js":            "text/javascript; charset=utf-8",
+		"tokens.js":          "text/javascript; charset=utf-8",
 		"favicon.svg":        "image/svg+xml",
 		"htmx-2.0.10.min.js": "text/javascript; charset=utf-8",
 	}

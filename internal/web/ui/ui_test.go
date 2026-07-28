@@ -80,6 +80,7 @@ func TestShellTemplateUsesLocalCSPCompatibleAssets(t *testing.T) {
 		`src="/assets/htmx-2.0.10.min.js"`,
 		`src="/assets/app.js"`,
 		`src="/assets/live.js"`,
+		`src="/assets/tokens.js"`,
 		`hx-history="false"`,
 		`name="htmx-config"`,
 		`"[45].."`,
@@ -212,6 +213,38 @@ func TestSourceDetailMutationFormsKeepActionsDistinctAndEscaped(t *testing.T) {
 	}
 }
 
+func TestOneTimeTokenTemplateContainsNoSecretURLOrUnsafeMarkup(t *testing.T) {
+	renderer := New()
+	response := httptest.NewRecorder()
+	secret := `sft_secret"><script>alert(1)</script>`
+	if err := renderer.Shell(response, http.StatusCreated, ShellView{
+		Mode: "token-created",
+		Token: OneTimeTokenView{
+			ServerID: 3, ServerName: `Production <unsafe>`, TokenName: "rotation",
+			Fingerprint: "abcdef123456", Token: secret, DoneURL: "/servers/3",
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	body := response.Body.String()
+	for _, want := range []string{
+		`data-one-time-token`, `data-done-url="/servers/3"`,
+		`data-token-secret type="password"`,
+		`data-token-toggle`, `data-token-copy`,
+		`stores only a hash and cannot show it again`,
+		`href="/servers/3">Done</a>`,
+		`Production &lt;unsafe&gt;`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("one-time token shell missing %q", want)
+		}
+	}
+	if strings.Contains(body, `<script>alert`) ||
+		strings.Contains(body, `/servers/3?`) {
+		t.Fatal("one-time token shell emitted unsafe markup or secret-bearing URL")
+	}
+}
+
 func TestHistoryFragmentsRenderFocusedEscapedState(t *testing.T) {
 	renderer := New()
 	view := HistoryView{
@@ -312,6 +345,7 @@ func TestEmbeddedAssetsTypesIntegrityAndSafety(t *testing.T) {
 		"app.css":            "text/css; charset=utf-8",
 		"app.js":             "text/javascript; charset=utf-8",
 		"live.js":            "text/javascript; charset=utf-8",
+		"tokens.js":          "text/javascript; charset=utf-8",
 		"favicon.svg":        "image/svg+xml",
 		"htmx-2.0.10.min.js": "text/javascript; charset=utf-8",
 	}
@@ -379,6 +413,25 @@ func TestEmbeddedAssetsTypesIntegrityAndSafety(t *testing.T) {
 	} {
 		if !strings.Contains(string(liveJS), required) {
 			t.Errorf("Live JavaScript missing lifecycle constraint %q", required)
+		}
+	}
+	tokenJS, err := files.ReadFile("assets/tokens.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, forbidden := range []string{"innerHTML", "document.write", "console."} {
+		if strings.Contains(string(tokenJS), forbidden) {
+			t.Fatalf("token JavaScript contains unsafe API %q", forbidden)
+		}
+	}
+	for _, required := range []string{
+		`history.replaceState(null, "", doneURL)`,
+		`navigator.clipboard.writeText(secret.value)`,
+		`window.addEventListener("pagehide"`,
+		`secret.value = ""`,
+	} {
+		if !strings.Contains(string(tokenJS), required) {
+			t.Errorf("token JavaScript missing one-time constraint %q", required)
 		}
 	}
 	css, err := files.ReadFile("assets/app.css")

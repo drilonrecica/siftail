@@ -127,6 +127,24 @@ func (w *BatchWriter) persistTransaction(
 	tx *sql.Tx,
 	batch *WriteBatch,
 ) ([]logs.CommittedEvent, []cacheUpdate[sourceKey], []cacheUpdate[containerKey], error) {
+	if batch.AuthenticatedTokenID > 0 {
+		result, err := tx.ExecContext(ctx, `UPDATE ingestion_tokens
+			SET last_used_at_us = max(coalesce(last_used_at_us, 0), ?)
+			WHERE id = ? AND server_id = ? AND revoked_at_us IS NULL`,
+			maxBatchReceivedAt(batch.Events), batch.AuthenticatedTokenID,
+			batch.AuthenticatedServerID,
+		)
+		if err != nil {
+			return nil, nil, nil, database.Classify("update ingestion-token use", err)
+		}
+		affected, err := result.RowsAffected()
+		if err != nil {
+			return nil, nil, nil, database.Classify("read ingestion-token update", err)
+		}
+		if affected != 1 {
+			return nil, nil, nil, &Error{Category: CategoryForbidden}
+		}
+	}
 	for _, event := range batch.Events {
 		if batch.AuthenticatedServerID <= 0 || event.Source.ServerID != batch.AuthenticatedServerID {
 			return nil, nil, nil, &Error{Category: CategoryForbidden}
@@ -244,6 +262,16 @@ func (w *BatchWriter) persistTransaction(
 		return nil, nil, nil, err
 	}
 	return committed, sourceUpdates, containerUpdates, nil
+}
+
+func maxBatchReceivedAt(events []logs.CanonicalEvent) int64 {
+	var latest int64
+	for _, event := range events {
+		if event.ReceivedAtUS > latest {
+			latest = event.ReceivedAtUS
+		}
+	}
+	return latest
 }
 
 func (w *BatchWriter) resolveSource(ctx context.Context, tx *sql.Tx, source logs.SourceIdentity, seen int64) (int64, bool, error) {

@@ -109,6 +109,11 @@ func (b *Browser) Register(mux *http.ServeMux) {
 	mux.Handle("POST /sources/{id}/alias", b.Protect(http.HandlerFunc(b.sourceAlias)))
 	mux.Handle("POST /sources/{id}/clear-logs", b.Protect(http.HandlerFunc(b.sourceClearLogs)))
 	mux.Handle("POST /sources/{id}/remove", b.Protect(http.HandlerFunc(b.sourceRemove)))
+	mux.Handle("GET /servers", b.Protect(http.HandlerFunc(b.serversPage)))
+	mux.Handle("POST /servers", b.Protect(http.HandlerFunc(b.serverCreate)))
+	mux.Handle("GET /servers/{id}", b.Protect(http.HandlerFunc(b.serverDetailPage)))
+	mux.Handle("POST /servers/{id}/tokens", b.Protect(http.HandlerFunc(b.tokenCreate)))
+	mux.Handle("POST /tokens/{id}/revoke", b.Protect(http.HandlerFunc(b.tokenRevoke)))
 }
 
 func (b *Browser) loginPage(w http.ResponseWriter, r *http.Request) {

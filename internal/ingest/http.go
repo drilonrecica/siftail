@@ -129,6 +129,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeBatch := NewWriteBatch(batch, requestID(r), server.ID)
+		writeBatch.AuthenticatedTokenID = server.TokenID
 		if err := h.queue.Enqueue(writeBatch); err != nil {
 			writeSafe(w, statusFor(err))
 			return

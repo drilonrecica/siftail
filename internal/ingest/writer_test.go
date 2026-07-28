@@ -124,6 +124,47 @@ func TestBatchWriterEnforcesServerTrustAndDiscoveryQuotas(t *testing.T) {
 	assertCategory(t, err, CategoryForbidden)
 }
 
+func TestBatchWriterRejectsTokenRevokedBeforeCommit(t *testing.T) {
+	db, _, writer := newWriterTest(t, WriterOptions{})
+	serverID := insertTestServer(t, db.Writer())
+	result, err := db.Writer().Exec(`INSERT INTO ingestion_tokens(
+		server_id,name,token_hash,fingerprint,created_at_us
+	) VALUES(?,?,zeroblob(32),?,?)`, serverID, "revoked-before-commit", "123456789012", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tokenID, err := result.LastInsertId()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Writer().Exec(
+		"UPDATE ingestion_tokens SET revoked_at_us=? WHERE id=?",
+		2, tokenID,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	event := canonicalEvent(serverID, "", "must not commit", 3)
+	err = writer.Persist(context.Background(), &WriteBatch{
+		Events:                []logs.CanonicalEvent{event},
+		AuthenticatedServerID: serverID,
+		AuthenticatedTokenID:  tokenID,
+	})
+	assertCategory(t, err, CategoryForbidden)
+	assertCounts(t, db.Reader(), 0, 0, 0)
+
+	var lastUsedAtUS sql.NullInt64
+	if err := db.Reader().QueryRow(
+		"SELECT last_used_at_us FROM ingestion_tokens WHERE id=?",
+		tokenID,
+	).Scan(&lastUsedAtUS); err != nil {
+		t.Fatal(err)
+	}
+	if lastUsedAtUS.Valid {
+		t.Fatalf("last_used_at_us = %d after rejected commit", lastUsedAtUS.Int64)
+	}
+}
+
 func TestBatchWriterCachesRemainBoundedAndReconstructable(t *testing.T) {
 	db, _, writer := newWriterTest(t, WriterOptions{
 		SourceLimit: 20, ContainerLimit: 20, SourceCache: 2, ContainerCache: 3,

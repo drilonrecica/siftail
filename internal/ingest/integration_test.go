@@ -67,7 +67,7 @@ func newIngestionIntegrationWithPublisher(
 		MaxCompressedBytes: 1 << 20, MaxDecompressedBytes: 2 << 20,
 		MaxEventBytes: 1 << 20, MaxEvents: 100, MaxJSONDepth: 32,
 	}).WithAdmission(admission)
-	handler := NewHandler(sources.NewStore(db.Reader()), decoder, Limits{
+	handler := NewHandler(sources.NewCoordinatedStore(db.Reader(), coordinator), decoder, Limits{
 		MaxCompressedBytes: 1 << 20, RequestTimeout: time.Second,
 	}).WithQueue(queue)
 	writerDone := make(chan error, 1)
@@ -163,6 +163,12 @@ func TestIngestionDoesNotPublishRolledBackBatch(t *testing.T) {
 		t.Fatalf("rolled-back event was published: %v", err)
 	}
 	assertEventCount(t, fixture.db.Reader(), 1)
+	var lastUsed sql.NullInt64
+	if err := fixture.db.Reader().QueryRow(
+		`SELECT last_used_at_us FROM ingestion_tokens WHERE name='test'`,
+	).Scan(&lastUsed); err != nil || !lastUsed.Valid {
+		t.Fatalf("committed token last use = %#v, err=%v", lastUsed, err)
+	}
 }
 
 func (f *ingestionIntegration) request(ctx context.Context, body string) (*httptest.ResponseRecorder, chan struct{}) {
