@@ -1067,10 +1067,26 @@ Apply request contexts and reasonable server timeouts. Broad expensive queries s
 
 ### 16.6 Exports
 
-Export runs a streaming cursor query independent of the visible page. One export may
-run at a time. It writes a private staging file under `/data`, verifies final row and
-byte limits, then serves the completed artifact. Cancellation removes the staging
-file, so clients never receive an undocumented partial export.
+The export store normalizes a typed `HistoryQuery`, then shares the exact
+closed, bound-parameter filter builder used by History. It deliberately removes
+pagination cursor/direction/page size and issues one
+`event_at_us DESC, id DESC` query with `maximum rows + 1`, so it exports the
+complete matching range and detects overflow without `COUNT(*)`.
+
+Rows are scanned through the complete canonical History event scanner. The
+encoder retains one bounded event and its encoded row at a time. NDJSON uses
+`encoding/json` with HTML escaping disabled because this is a download, while
+still applying JSON string escaping. Text uses a fixed version/header and
+reversible quoted tab-separated cells. Both include standard padded-base64 raw
+payload and validated JSON attributes. Synchronous writer calls provide
+backpressure; caller cancellation and an internal maximum two-minute context
+stop SQLite iteration between writes.
+
+One export workflow may run at a time. SFT-046 writes store output to a private
+staging file under `/data`, verifies final row and byte limits, then serves the
+completed artifact. The streaming store can have written an invalid partial
+staging artifact when it returns a limit/cancellation/write error; callers must
+delete it and must never send it as a successful response.
 
 Requirements:
 
@@ -1088,6 +1104,12 @@ Initial export safety defaults:
 - maximum 256 MiB streamed response;
 - whichever limit is reached first;
 - explicit refusal rather than silent partial output.
+
+The store returns bounded `ExportAttempt`/`ExportResult` metadata even on
+ordinary failure: format, optional Server ID, absolute range, maxima, emitted
+rows/bytes, and a closed category (`canceled`, `timeout`, `row_limit`,
+`byte_limit`, or `failed`). SFT-046 uses only this safe metadata for mandatory
+audit; it never records filters or content.
 
 ---
 
@@ -2025,6 +2047,7 @@ These references inform integration, but Siftail's tested contract and integrati
 - ingestion tokens;
 - source metadata;
 - backups;
+- exports and export staging artifacts;
 - audit history.
 
 ### 29.2 Adversaries
@@ -2151,6 +2174,8 @@ reduced to safe categories.
 - environment variables;
 - database upgrade behavior;
 - backup artifact compatibility within stated rules.
+- documented text/NDJSON export schema versions once the authenticated export
+  workflow is exposed.
 
 ### 31.2 Non-public contracts
 

@@ -196,6 +196,21 @@ func (s *Store) History(ctx context.Context, query HistoryQuery) (HistoryPage, e
 }
 
 func buildHistorySQL(query HistoryQuery, cursor *HistoryCursor) (string, []any) {
+	filter, arguments := buildHistoryFilterSQL(query, cursor)
+	order := "DESC"
+	if cursor != nil && query.Direction == DirectionNewer {
+		order = "ASC"
+	}
+	arguments = append(arguments, query.Limit+1)
+	return historyPageColumns + "\nWHERE " + filter +
+		"\nORDER BY e.event_at_us " + order + ", e.id " + order +
+		"\nLIMIT ?", arguments
+}
+
+func buildHistoryFilterSQL(
+	query HistoryQuery,
+	cursor *HistoryCursor,
+) (string, []any) {
 	clauses := []string{"e.event_at_us >= ?", "e.event_at_us < ?"}
 	arguments := []any{query.FromUS, query.ToUS}
 	addExact := func(column string, value any, present bool) {
@@ -256,13 +271,7 @@ func buildHistorySQL(query HistoryQuery, cursor *HistoryCursor) (string, []any) 
 		)
 		arguments = append(arguments, cursor.EventAtUS, cursor.EventAtUS, cursor.ID)
 	}
-	order := "DESC"
-	if cursor != nil && query.Direction == DirectionNewer {
-		order = "ASC"
-	}
-	arguments = append(arguments, query.Limit+1)
-	return historyPageColumns + "\nWHERE " + strings.Join(clauses, "\nAND ") +
-		"\nORDER BY e.event_at_us " + order + ", e.id " + order + "\nLIMIT ?", arguments
+	return strings.Join(clauses, "\nAND "), arguments
 }
 
 func scanHistoryPageEvent(row rowScanner) (HistoryEvent, error) {

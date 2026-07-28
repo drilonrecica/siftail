@@ -1245,6 +1245,50 @@ Invariants:
   fingerprint of the canonical query shape, protected against tampering;
 - query export applies to complete matching range within export limits.
 
+### 24.1 Historical export
+
+Export validates and reuses the same typed time/source/container/level/stream/
+literal-message/common-field filters. Page cursor, page direction, and page
+size do not narrow an export; results always use canonical
+`event_at_us DESC, id DESC` order across the complete matching range. Export
+does not add regex, wildcard, arbitrary JSON, SQL, query-language, or hidden
+wider-range behavior.
+
+Version-one limits are:
+
+- at most 100,000 matching application events;
+- at most 256 MiB of encoded output;
+- at most a two-minute store query/encoding operation;
+- the existing inclusive-from/exclusive-to maximum 31-day range; and
+- explicit failure if any limit would be exceeded, never a successful partial
+  export.
+
+Both schemas contain the same canonical event identity, event and receive
+timestamps, trusted Server and stable source identity/presentation, optional
+container observation, independent stream/canonical/original level, message
+text, lossless base64 raw payload, bounded JSON attributes, stable source event
+ID, and normalized common fields. Optional fields are explicit `null`.
+Timestamps are UTC RFC3339Nano and raw payload uses padded standard base64.
+Deployment boundaries, audit/diagnostic events, credentials, and hidden source
+state are not application-event export rows.
+
+NDJSON format version one is one JSON object per physical line and carries
+`"schema_version":1` in every row. Text format version one begins with
+`# siftail-text-v1`, then a fixed tab-separated column header; string cells are
+quoted with reversible JSON/Go-style escapes, so tabs, newlines, control
+characters, and hostile HTML remain data without breaking record framing.
+Bare `null` represents absence.
+
+The event ID is local database identity and is not promised globally unique
+after restore. Export schema versions are explicit compatibility contracts;
+new fields or incompatible representation changes require a new version rather
+than silently changing version one.
+
+Every attempt produces bounded safe operation metadata: requested format,
+Server ID when scoped, absolute range, configured row/byte maxima, emitted
+row/byte counts, and a closed result category. Filter text and event content
+must never enter the security audit or process log.
+
 ---
 
 ## 25. Live subscription model

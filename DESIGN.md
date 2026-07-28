@@ -1318,6 +1318,17 @@ also requires typing `RESTORE` and re-entering the administrator password.
 - Plain text;
 - NDJSON.
 
+Format labels must identify the stable schema:
+
+- `Text (siftail-text-v1)` for a fixed tab-separated, reversibly escaped
+  complete-event schema;
+- `NDJSON (schema 1)` for one complete-event JSON object per physical line.
+
+Both preserve multiline/control/hostile content as escaped data, use UTC
+timestamps, represent optional fields as `null`, include bounded attributes and
+lossless base64 raw payload, and preserve canonical newest-first ordering.
+Neither format is an HTML fragment.
+
 ### 22.2 Export dialog
 
 Show:
@@ -1332,6 +1343,11 @@ Show:
 Copy:
 
 > Exports contain the complete matching result set up to the configured export limit, not only the rows currently loaded.
+
+The dialog must also state the hard 100,000-event, 256 MiB, and 31-day limits.
+Page direction, loaded-row count, and `Load older` cursor do not change export
+scope. Active filter text appears only in the authenticated dialog, never in
+audit metadata or the suggested filename.
 
 ### 22.3 Large export
 
