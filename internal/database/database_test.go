@@ -75,7 +75,8 @@ func TestOpenRejectsNewerSchema(t *testing.T) {
 
 	_, err = Open(context.Background(), path)
 	var tooNew *SchemaTooNewError
-	if !errors.As(err, &tooNew) || tooNew.Actual != 99 {
+	if !errors.As(err, &tooNew) || tooNew.Actual != 99 ||
+		tooNew.Supported != MaxSchemaVersion {
 		t.Fatalf("error = %#v", err)
 	}
 }

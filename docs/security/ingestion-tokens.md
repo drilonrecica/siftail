@@ -66,8 +66,9 @@ Server creation, token creation/rotation, and revocation require:
 
 Revocation additionally requires typing the visible token name. Responses are
 `no-store`; unexpected errors contain only generic text and a request ID.
-Security-audit persistence is assigned to the later audit-storage milestone and
-is not claimed by this pre-audit implementation.
+The bounded audit store exists after migration `0004`, but Server/token action
+wiring is assigned to the following audit integration task and is not claimed
+by this pre-integration implementation.
 
 ## Verification and measured impact
 

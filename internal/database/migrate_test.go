@@ -12,8 +12,8 @@ import (
 
 func TestInitialMigrationAndNoOpReopen(t *testing.T) {
 	db := openTestDB(t)
-	assertSchemaVersion(t, db.Writer(), 3)
-	for _, table := range []string{"settings", "servers", "ingestion_tokens", "sources", "container_instances", "log_events", "administrators", "sessions"} {
+	assertSchemaVersion(t, db.Writer(), 4)
+	for _, table := range []string{"settings", "servers", "ingestion_tokens", "sources", "container_instances", "log_events", "administrators", "sessions", "security_audit_events"} {
 		var found int
 		if err := db.Writer().QueryRow("SELECT count(*) FROM sqlite_schema WHERE type='table' AND name=?", table).Scan(&found); err != nil {
 			t.Fatal(err)
@@ -25,7 +25,7 @@ func TestInitialMigrationAndNoOpReopen(t *testing.T) {
 	if err := Migrate(context.Background(), db.Writer()); err != nil {
 		t.Fatal(err)
 	}
-	assertSchemaVersion(t, db.Writer(), 3)
+	assertSchemaVersion(t, db.Writer(), 4)
 }
 
 func TestAdministratorMigrationPreservesPreviousSchemaData(t *testing.T) {
@@ -51,7 +51,7 @@ func TestAdministratorMigrationPreservesPreviousSchemaData(t *testing.T) {
 	if err := applyMigrations(context.Background(), db, migrations); err != nil {
 		t.Fatal(err)
 	}
-	assertSchemaVersion(t, db, 3)
+	assertSchemaVersion(t, db, 4)
 	var name string
 	if err := db.QueryRow("SELECT name FROM servers WHERE id=7").Scan(&name); err != nil || name != "preserved" {
 		t.Fatalf("preserved server = %q, err=%v", name, err)
@@ -65,7 +65,7 @@ func TestAdministratorMigrationPreservesPreviousSchemaData(t *testing.T) {
 	}
 	var tooNew *SchemaTooNewError
 	if err := checkSchemaCompatible(context.Background(), db, 2); !errors.As(err, &tooNew) ||
-		tooNew.Actual != 3 || tooNew.Supported != 2 {
+		tooNew.Actual != 4 || tooNew.Supported != 2 {
 		t.Fatalf("older compatibility error = %#v", err)
 	}
 }
@@ -92,7 +92,7 @@ func TestSessionMigrationPreservesAdministrator(t *testing.T) {
 	if err := applyMigrations(context.Background(), db, migrations); err != nil {
 		t.Fatal(err)
 	}
-	assertSchemaVersion(t, db, 3)
+	assertSchemaVersion(t, db, 4)
 	var username string
 	if err := db.QueryRow("SELECT username FROM administrators WHERE id=1").Scan(&username); err != nil ||
 		username != "Admin" {
@@ -101,6 +101,137 @@ func TestSessionMigrationPreservesAdministrator(t *testing.T) {
 	var sessions int
 	if err := db.QueryRow("SELECT count(*) FROM sessions").Scan(&sessions); err != nil || sessions != 0 {
 		t.Fatalf("sessions = %d, err=%v", sessions, err)
+	}
+}
+
+func TestSecurityAuditMigrationPreservesSchemaThreeData(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "schema-three.db")
+	db, err := sql.Open("sqlite3", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.Exec("PRAGMA foreign_keys=ON"); err != nil {
+		t.Fatal(err)
+	}
+	migrations, err := loadMigrations(migrationFiles)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := applyMigrations(context.Background(), db, migrations[:3]); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO administrators(
+			id,username,password_hash,created_at_us,password_changed_at_us
+		) VALUES(1,'Admin',?,1,1);
+		INSERT INTO servers(id,name,created_at_us) VALUES(7,'preserved',1);
+		INSERT INTO sources(
+			id,server_id,project_key,environment_key,application_key,service_key,
+			project_label,environment_label,application_label,service_label,
+			first_seen_at_us,last_seen_at_us
+		) VALUES(8,7,'p','e','a','s','p','e','a','s',1,1);
+		INSERT INTO log_events(
+			id,event_at_us,received_at_us,source_id,stream,level_normalized,
+			message_raw,message_text
+		) VALUES(9,10,11,8,'stdout','info',x'707265736572766564','preserved')`,
+		strings.Repeat("h", 64)); err != nil {
+		t.Fatal(err)
+	}
+	if err := applyMigrations(context.Background(), db, migrations); err != nil {
+		t.Fatal(err)
+	}
+	assertSchemaVersion(t, db, 4)
+	var administrator, server, message string
+	if err := db.QueryRow("SELECT username FROM administrators WHERE id=1").
+		Scan(&administrator); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow("SELECT name FROM servers WHERE id=7").
+		Scan(&server); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow("SELECT message_text FROM log_events WHERE id=9").
+		Scan(&message); err != nil {
+		t.Fatal(err)
+	}
+	if administrator != "Admin" || server != "preserved" || message != "preserved" {
+		t.Fatalf("preserved values = %q, %q, %q", administrator, server, message)
+	}
+	var auditCount int
+	if err := db.QueryRow("SELECT count(*) FROM security_audit_events").
+		Scan(&auditCount); err != nil || auditCount != 0 {
+		t.Fatalf("audit count = %d, err=%v", auditCount, err)
+	}
+	if err := IntegrityCheck(context.Background(), db); err != nil {
+		t.Fatal(err)
+	}
+	var tooNew *SchemaTooNewError
+	if err := checkSchemaCompatible(context.Background(), db, 3); !errors.As(err, &tooNew) ||
+		tooNew.Actual != 4 || tooNew.Supported != 3 {
+		t.Fatalf("older compatibility error = %#v", err)
+	}
+}
+
+func TestSecurityAuditSchemaConstraintsAndOrdering(t *testing.T) {
+	db := openTestDB(t)
+	insert := `INSERT INTO security_audit_events(
+		occurred_at_us,category,action,outcome,actor_type,
+		administrator_id,server_id,source_id,safe_metadata_json,request_id
+	) VALUES(?,?,?,?,?,?,?,?,?,?)`
+	if _, err := db.Writer().Exec(insert, 2, "authentication", "sign_in",
+		"succeeded", "administrator", 1, nil, nil, `{}`, "request-2"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Writer().Exec(insert, 2, "session", "session.revoke",
+		"failed", "system", nil, nil, nil, `{}`, nil); err != nil {
+		t.Fatal(err)
+	}
+	for name, arguments := range map[string][]any{
+		"timestamp": {0, "authentication", "sign_in", "succeeded",
+			"system", nil, nil, nil, `{}`, nil},
+		"category": {1, "unknown", "sign_in", "succeeded",
+			"system", nil, nil, nil, `{}`, nil},
+		"action": {1, "authentication", "", "succeeded",
+			"system", nil, nil, nil, `{}`, nil},
+		"outcome": {1, "authentication", "sign_in", "unknown",
+			"system", nil, nil, nil, `{}`, nil},
+		"actor": {1, "authentication", "sign_in", "succeeded",
+			"unknown", nil, nil, nil, `{}`, nil},
+		"identifier": {1, "authentication", "sign_in", "succeeded",
+			"system", nil, 0, nil, `{}`, nil},
+		"metadata-array": {1, "authentication", "sign_in", "succeeded",
+			"system", nil, nil, nil, `[]`, nil},
+		"metadata-size": {1, "authentication", "sign_in", "succeeded",
+			"system", nil, nil, nil,
+			`{"value":"` + strings.Repeat("x", 2048) + `"}`, nil},
+		"request-size": {1, "authentication", "sign_in", "succeeded",
+			"system", nil, nil, nil, `{}`, strings.Repeat("x", 129)},
+	} {
+		if _, err := db.Writer().Exec(insert, arguments...); err == nil {
+			t.Errorf("%s constraint accepted", name)
+		}
+	}
+	if _, err := db.Writer().Exec(
+		"UPDATE security_audit_events SET outcome='failed' WHERE id=1",
+	); err == nil || !strings.Contains(err.Error(), "immutable") {
+		t.Fatalf("immutable update error = %v", err)
+	}
+	rows, err := db.Writer().Query(`SELECT id FROM security_audit_events
+		ORDER BY occurred_at_us DESC, id DESC`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, id)
+	}
+	if len(ids) != 2 || ids[0] != 2 || ids[1] != 1 {
+		t.Fatalf("audit order = %v", ids)
 	}
 }
 

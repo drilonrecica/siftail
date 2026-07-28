@@ -553,6 +553,23 @@ A likely normalized schema includes:
 avoids speculative hierarchy joins while preserving exact identity and foreign-key
 integrity. Deployment boundaries are not stored in version one.
 
+Migration `0004` adds `security_audit_events` as an immutable `STRICT` table.
+Category, outcome, actor type, action, occurrence time, optional safe entity
+identifiers, request ID, and a bounded JSON metadata object are explicit
+fields. Entity identifiers deliberately are not foreign keys: deleting a
+source or other referenced object must not mutate or block its historical
+audit attribution. The feature store accepts only whitelisted metadata keys,
+at most 12 fields, 256 bytes per value, and 2 KiB total encoded JSON.
+
+One `(occurred_at_us DESC, id DESC)` index supports newest-first pages and the
+reverse oldest-first cleanup scan. Occurrence time is selective for ordinary
+pages, and the index has one low-volume entry per audit event. It adds
+write/storage cost but shortens both primary reads and retention deletion;
+application-event retention never uses or deletes it. Category and outcome do
+not receive speculative indexes: the table is hard-capped at 100,000 rows, and
+the measured worst-case selective scan remains bounded. Add an index only if
+the implemented audit UI benchmarks justify its cost.
+
 ### 10.7 Log-event schema sketch
 
 Illustrative, not a substitute for migrations:
@@ -1476,6 +1493,13 @@ When it reaches 95% of the configured limit:
 Delete the oldest security audit records in bounded chunks when they are older than
 the configured age or the table exceeds 100,000 rows. Application-log retention never
 deletes audit records.
+
+The audit store enforces the count cap in the same transaction as every insert,
+keeping the newest 100,000 events by `(occurred_at_us, id)`. Explicit cleanup
+deletes at most 1,000 rows per coordinator transaction, applying the age limit
+first and then repairing any count overflow. The storage and cleanup
+primitives exist after migration `0004`; application lifecycle scheduling and
+privileged-action wiring belong to their tracked audit tasks.
 
 ### 23.5 Vacuum and checkpoint
 

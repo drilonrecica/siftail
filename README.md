@@ -255,9 +255,10 @@ valid UTF-8 bytes and are not trimmed or normalized; CR/LF line terminators from
 the two-line input are removed.
 
 Schema migration `0002` adds the single administrator record and migration
-`0003` adds hashed, bounded browser sessions. Upgrades apply them transactionally
-and preserve ingestion and administrator data. Older binaries refuse databases
-with newer schema versions.
+`0003` adds hashed, bounded browser sessions. Migration `0004` adds immutable,
+bounded security-audit storage. Upgrades apply them transactionally and
+preserve ingestion, administrator, session, source, and event data. Older
+binaries refuse databases with newer schema versions.
 
 All browser sessions can be invalidated locally:
 
@@ -399,8 +400,8 @@ source.
 
 Both destructive actions notify connected Live clients without waiting for
 them and clearly avoid any promise of forensic erasure. Security-audit storage
-is scheduled for the later audit milestone; these pre-audit operations do not
-claim a persisted audit record yet.
+exists in schema version 4, but privileged-action wiring is the next audit
+task; these pre-audit operations do not yet claim a persisted audit record.
 
 ### Browser Server and token management
 
@@ -418,6 +419,23 @@ revoked; revocation takes effect at authentication and is rechecked at durable
 batch commit. Successful batch commit updates token last-use metadata in the
 same transaction. The complete threat and exposure boundary is documented in
 [`docs/security/ingestion-tokens.md`](docs/security/ingestion-tokens.md).
+
+### Security-audit storage
+
+Schema migration `0004` adds the immutable, separately retained security-audit
+store used by the hardening milestone. It keeps at most 100,000 events, defaults
+to 365-day retention, removes oldest records in transactions of at most 1,000,
+and is never touched by application-log retention. Safe metadata is limited to
+whitelisted nonsecret fields and 2 KiB of JSON; passwords, tokens, hashes,
+authorization headers, and application payloads have no accepted metadata
+field. See [`docs/security/audit.md`](docs/security/audit.md) for the schema,
+atomic-write contract, measurements, and current wiring boundary.
+
+The migration is additive and automatic. It preserves schema-1/2/3 data, but
+an older Siftail binary correctly refuses the resulting schema-4 database.
+Audit storage alone does not claim that existing privileged workflows are
+already recorded; that integration and the authenticated Audit view remain the
+next tracked task.
 
 ### Browser retention settings
 
