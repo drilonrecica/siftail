@@ -39,6 +39,8 @@ func TestBrowserBackupIsProtectedStartsAndShowsVerifiedOutcome(t *testing.T) {
 		!strings.Contains(body, "replaces the database") ||
 		!strings.Contains(body, "not a merge") ||
 		!strings.Contains(body, "Verification is read-only") ||
+		!strings.Contains(body, "restore --confirm RESTORE") ||
+		!strings.Contains(body, "siftail.db.rollback") ||
 		!strings.Contains(body, "Never copy only the live main database file") {
 		t.Fatalf("backup page = %d %#v %q", page.Code, page.Header(), body)
 	}

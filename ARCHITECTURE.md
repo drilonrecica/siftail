@@ -159,8 +159,10 @@ Recommended `/data` layout:
 ├── siftail.db
 ├── siftail.db-wal
 ├── siftail.db-shm
+├── siftail.db.rollback     # one verified pre-restore full artifact
 ├── siftail-control.sock  # owner-only; exists only while the server is active
-├── restore-staging/       # created only during controlled restore
+├── .siftail-maintenance.lock # owner-only advisory server/maintenance lock
+├── restore-staging/       # exists only during controlled restore/recovery
 └── backups/               # optional operator-mounted destination, not required
 ```
 
@@ -1663,24 +1665,58 @@ details, hashes, or artifact contents.
 ### 25.5 Restore flow
 
 ```text
-1. Require maintenance mode / ingestion stopped.
-2. Verify backup.
-3. Confirm destructive operation.
-4. Close active database connections.
-5. Move current database files to rollback location.
-6. Place restored database atomically.
-7. Remove stale WAL/SHM safely.
-8. Open restored database.
-9. Check schema compatibility.
-10. Migrate a supported older schema using normal forward migrations.
-11. Run quick check.
-12. Reopen services or instruct restart.
+1. Require exact `RESTORE` confirmation and acquire the same exclusive,
+   owner-private advisory lock held for the lifetime of `siftail serve`.
+2. Verify the input backup read-only and fully inspect the stopped current
+   database; require its current supported schema as a rollback source.
+3. Preflight room for the input artifact, current logical database/WAL state,
+   and 5% or at least 1 MiB of slack.
+4. Exclusively create mode-0700 `/data/restore-staging`; refuse a leftover
+   directory because it may contain recovery state from an interrupted process.
+5. Stream-copy the input into a mode-0600 staged file with a 128 KiB buffer,
+   synchronize it, and verify type/checksum again to close the input TOCTOU
+   boundary.
+6. Capture the stopped current database through SQLite's online backup API,
+   finalize it as a verified format-1 full artifact with sessions removed, and
+   synchronize it. This incorporates committed WAL state without copying only
+   the live main file.
+7. Run a truncating checkpoint on the old database, close every connection,
+   synchronize the main file/directory, and remove only its checkpointed
+   WAL/SHM/journal sidecars.
+8. Atomically rename the staged restore over the main database and synchronize
+   the directory.
+9. Open it through the production database lifecycle, refuse newer schemas,
+   apply only normal forward migrations, delete sessions and artifact-only
+   metadata, and atomically record `restore.apply` with local-operator
+   attribution and safe type/basename.
+10. Run full integrity, current-schema, required-table/query, zero-session,
+    metadata-absence, truncate-checkpoint, mode-0600, and closed-file checks.
+11. Only after every check passes, atomically replace the preceding managed
+    `<database>.rollback` with the verified pre-restore artifact, synchronize,
+    and verify it again.
+12. On an ordinary error after replacement, reinstall the pre-restore
+    candidate, remove sessions/artifact metadata, record failed/canceled audit,
+    run the same validation, and return failure. If automatic recovery itself
+    cannot complete, preserve staging and require manual recovery.
 ```
 
-Restore is primarily CLI-driven. Keep exactly one managed rollback copy and replace
-the preceding managed rollback only after the new database passes compatibility and
-integrity checks. Because sessions are excluded, every restore invalidates browser
-sessions and requires a new sign-in.
+Restore is CLI-only and never runs through HTTP. `restore-staging` has fixed
+known contents and is removed without recursive deletion after success or
+automatic rollback. A hard process interruption can leave either the old valid
+main database, the already verified restored main database, and/or the verified
+rollback candidate; it never intentionally deletes both states. The server
+refuses startup while a live restore owns the maintenance lock. A leftover
+staging directory is preserved for operator recovery rather than silently
+removed. After a hard interruption releases the lock, server startup also
+refuses while that directory remains, so an incompletely finalized installed
+artifact cannot silently enter service.
+
+Keep exactly one managed rollback and replace the preceding copy only after the
+new database passes every check. The rollback is itself a full backup artifact.
+Copy it to a separate protected filename before supplying it to `restore`;
+direct use of the managed path is refused so a failed recovery attempt cannot
+consume the only copy. Because sessions are excluded, every restore or
+automatic rollback requires a new sign-in.
 
 ### 25.6 Downgrade behavior
 

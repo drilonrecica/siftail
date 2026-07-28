@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"net"
@@ -18,6 +19,7 @@ import (
 
 	"github.com/drilonrecica/siftail/internal/auth"
 	"github.com/drilonrecica/siftail/internal/config"
+	"github.com/drilonrecica/siftail/internal/database"
 	"github.com/drilonrecica/siftail/internal/ingest"
 	statusstate "github.com/drilonrecica/siftail/internal/status"
 )
@@ -112,6 +114,42 @@ func TestAppStartsListeners(t *testing.T) {
 
 	if _, err := os.Stat(filepath.Join(cfg.DataDir, "siftail-control.sock")); !os.IsNotExist(err) {
 		t.Fatal("control socket was not removed on shutdown")
+	}
+}
+
+func TestAppRefusesDatabaseOwnedByMaintenance(t *testing.T) {
+	cfg := testConfig(t)
+	lock, err := database.AcquireMaintenanceLock(cfg.DataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Close()
+	err = New(cfg, testLogger(t)).Run(context.Background())
+	if !errors.Is(err, database.ErrMaintenanceActive) {
+		t.Fatalf("app maintenance ownership error = %v", err)
+	}
+	if _, err := os.Stat(cfg.DatabasePath); !os.IsNotExist(err) {
+		t.Fatalf("app opened database while maintenance owned it: %v", err)
+	}
+}
+
+func TestAppPreservesAndRefusesIncompleteRestoreStaging(t *testing.T) {
+	cfg := testConfig(t)
+	staging := filepath.Join(cfg.DataDir, "restore-staging")
+	if err := os.Mkdir(staging, 0700); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(staging, "rollback.sqlite")
+	if err := os.WriteFile(marker, []byte("recovery"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	err := New(cfg, testLogger(t)).Run(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "manual recovery") {
+		t.Fatalf("app restore recovery error = %v", err)
+	}
+	contents, readErr := os.ReadFile(marker)
+	if readErr != nil || string(contents) != "recovery" {
+		t.Fatalf("restore recovery state changed: %q, %v", contents, readErr)
 	}
 }
 

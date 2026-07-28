@@ -1294,11 +1294,20 @@ permissions, and checksum without restoring.
 
 Browser documentation/status copy:
 
-> Restoring replaces the active database and requires maintenance mode. Use the Siftail CLI on the host.
+> Restoring replaces the active database and requires the Siftail server to be
+> stopped. Run `siftail restore --confirm RESTORE /path/to/backup.sqlite` on the
+> host. Siftail preserves one verified `siftail.db.rollback` artifact and always
+> requires a fresh sign-in.
+
+The browser provides explanation only, not a restore form. It tells the
+operator to copy the managed rollback to another protected path before using
+that copy as a recovery artifact.
 
 ### 21.4 Destructive confirmation
 
-Restore requires typing `RESTORE` and re-entering administrator password when invoked from an interactive path, plus CLI confirmation.
+Restore requires the exact case-sensitive CLI confirmation `--confirm RESTORE`.
+No browser restore path exists in version one; if one is introduced later, it
+also requires typing `RESTORE` and re-entering the administrator password.
 
 ---
 

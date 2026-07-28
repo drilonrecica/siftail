@@ -95,6 +95,12 @@ func run(args []string, stdout, stderr io.Writer) int {
 			return 1
 		}
 		return 0
+	case "restore":
+		if err := runRestoreCommand(args[1:], stdout); err != nil {
+			fmt.Fprintf(stderr, "siftail: %v\n", err)
+			return 1
+		}
+		return 0
 	case "help", "-h", "--help":
 		printUsage(stdout)
 		return 0
@@ -169,4 +175,5 @@ func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "  diagnostics      Print the latest sanitized operational diagnostics")
 	fmt.Fprintln(w, "  backup [--configuration-only] --output <path> Create and verify a backup")
 	fmt.Fprintln(w, "  backup verify <path> Verify a backup without applying changes")
+	fmt.Fprintln(w, "  restore --confirm RESTORE <path> Replace the stopped-server database")
 }

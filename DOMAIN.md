@@ -1366,6 +1366,20 @@ Restore requires:
 - startup integrity check after restore;
 - audit record where possible.
 
+A restore accepts only a verified full or configuration artifact and requires
+the exact CLI confirmation `RESTORE`. The server and restore command contend on
+one owner-private maintenance lock, so they cannot own the database
+concurrently. Before replacement, the current database—including committed WAL
+state—is captured through SQLite's online backup API as a verified full
+artifact with sessions removed.
+
+After the restored database passes migration, integrity, required-query,
+permission, and closed-file validation, that pre-restore artifact atomically
+becomes the single managed `<database>.rollback` copy. A preceding managed
+rollback remains untouched until this point. To recover it, the operator first
+copies it to another protected path and restores that copy through the same
+verification flow.
+
 A configuration-only restore replaces the active database; it is not a merge or
 import. A current binary automatically migrates an older supported restored
 schema. An older binary must refuse a backup/database schema newer than it
@@ -1374,6 +1388,9 @@ supports.
 Restore rolls password and ingestion-token state back to the backup point.
 Previously revoked credentials may therefore become valid again; the operator
 must review and rotate credentials after restoration when that risk matters.
+Browser sessions are absent from both the restored database and the managed
+rollback, so a restore or automatic rollback always requires a fresh login.
+Artifact-only backup metadata is removed from the active database.
 
 ---
 

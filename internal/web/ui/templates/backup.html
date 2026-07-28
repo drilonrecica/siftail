@@ -59,7 +59,8 @@
 
   <section aria-labelledby="restore-heading">
     <h2 id="restore-heading">Restore</h2>
-    <p>Restoring replaces the active database and requires maintenance mode. Use the Siftail CLI on the host. Never copy only the live main database file while WAL mode is active.</p>
+    <p>Restoring replaces the active database and requires the Siftail server to be stopped. On the host, run <code>siftail restore --confirm RESTORE /path/to/backup.sqlite</code>. The command preserves one verified <code>siftail.db.rollback</code> artifact and always requires a fresh sign-in.</p>
+    <p>Copy the managed rollback to another protected path before using it as a recovery artifact. Never copy only the live main database file while WAL mode is active.</p>
   </section>
 </section>
 {{end}}

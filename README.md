@@ -592,6 +592,30 @@ Restore replaces the database with the saved configuration and empty history;
 it is not a merge. See
 [`docs/operations/full-backups.md`](docs/operations/full-backups.md).
 
+### Stopped-server restore
+
+Stop Siftail, then restore a verified full or configuration-only artifact with
+explicit confirmation:
+
+```bash
+./siftail restore --confirm RESTORE /backups/siftail-full.sqlite
+```
+
+The command and server share an exclusive maintenance lock, so they cannot
+open the database concurrently. Restore verifies and stages the artifact,
+captures the current database and committed WAL state as a verified
+session-free `siftail.db.rollback`, atomically installs the new database,
+applies supported forward migrations, removes artifact metadata and sessions,
+records a safe local-operator audit, and runs full open/closed integrity and
+critical-schema checks. The previous managed rollback is replaced only after
+the restored database passes.
+
+Restoring configuration replaces the complete database with empty log history;
+it does not merge. Password and ingestion-token state roll back to the artifact
+point, so review credentials afterward. A fresh login is always required. Copy
+the managed rollback to a separate protected path before restoring that copy.
+See [`docs/operations/restores.md`](docs/operations/restores.md).
+
 ### Current dependency rationale
 
 - `github.com/mattn/go-sqlite3` v1.14.48 is the accepted SQLite driver. It

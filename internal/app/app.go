@@ -61,6 +61,20 @@ func (a *App) Run(ctx context.Context) error {
 	if err := a.ensureDataDir(); err != nil {
 		return err
 	}
+	maintenanceLock, err := database.AcquireMaintenanceLock(a.cfg.DataDir)
+	if err != nil {
+		return fmt.Errorf("database ownership: %w", err)
+	}
+	defer func() {
+		if err := maintenanceLock.Close(); err != nil {
+			a.logger.Error("database ownership release failed",
+				"component", "database",
+				"error_category", "maintenance_lock")
+		}
+	}()
+	if err := backup.RestoreRecoveryRequired(a.cfg.DataDir); err != nil {
+		return fmt.Errorf("restore recovery: %w", err)
+	}
 	db, err := database.Open(serverCtx, a.cfg.DatabasePath)
 	if err != nil {
 		return fmt.Errorf("database startup: %w", err)

@@ -746,6 +746,9 @@ test("full and configuration backups are typed, verified, and accessible", async
   await expect(page.getByRole("heading", { name: "Backup", exact: true })).toBeVisible();
   await expect(page.locator("#backup-output-path")).toBeFocused();
   await expect(page.getByText("Browser sessions are always excluded")).toBeVisible();
+  await expect(page.getByText("restore --confirm RESTORE", {
+    exact: false,
+  })).toBeVisible();
   await page.locator("#backup-output-path").fill(output);
   await page.getByRole("button", { name: "Create verified full backup" }).click();
   await expect(page).toHaveURL(/\/backup$/);

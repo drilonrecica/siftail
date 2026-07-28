@@ -10,15 +10,12 @@ import (
 	"github.com/drilonrecica/siftail/internal/database"
 )
 
-var requiredTables = []string{
-	"administrators",
+var baseBackupTables = []string{
 	"container_instances",
 	"ingestion_tokens",
 	"log_events",
 	"schema_migrations",
-	"security_audit_events",
 	"servers",
-	"sessions",
 	"settings",
 	"siftail_backup_metadata",
 	"sources",
@@ -79,6 +76,16 @@ func Verify(ctx context.Context, path string) (Result, error) {
 	).Scan(&schemaVersion); err != nil || schemaVersion != result.SchemaVersion {
 		return Result{}, errors.New("backup schema metadata is inconsistent")
 	}
+	requiredTables := append([]string(nil), baseBackupTables...)
+	if result.SchemaVersion >= 2 {
+		requiredTables = append(requiredTables, "administrators")
+	}
+	if result.SchemaVersion >= 3 {
+		requiredTables = append(requiredTables, "sessions")
+	}
+	if result.SchemaVersion >= 4 {
+		requiredTables = append(requiredTables, "security_audit_events")
+	}
 	for _, table := range requiredTables {
 		var count int
 		if err := db.QueryRowContext(ctx, `SELECT count(*) FROM sqlite_schema
@@ -87,16 +94,22 @@ func Verify(ctx context.Context, path string) (Result, error) {
 			return Result{}, errors.New("backup required tables are incomplete")
 		}
 	}
-	var sessions int
-	if err := db.QueryRowContext(
-		ctx, "SELECT count(*) FROM sessions",
-	).Scan(&sessions); err != nil || sessions != 0 {
-		return Result{}, errors.New("backup contains browser sessions")
+	if result.SchemaVersion >= 3 {
+		var sessions int
+		if err := db.QueryRowContext(
+			ctx, "SELECT count(*) FROM sessions",
+		).Scan(&sessions); err != nil || sessions != 0 {
+			return Result{}, errors.New("backup contains browser sessions")
+		}
 	}
 	if result.Type == TypeConfiguration {
-		for _, table := range []string{
-			"log_events", "container_instances", "security_audit_events",
-		} {
+		excludedTables := []string{"log_events", "container_instances"}
+		if result.SchemaVersion >= 4 {
+			excludedTables = append(
+				excludedTables, "security_audit_events",
+			)
+		}
+		for _, table := range excludedTables {
 			var count int
 			if err := db.QueryRowContext(
 				ctx, "SELECT count(*) FROM "+table,

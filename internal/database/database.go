@@ -256,6 +256,23 @@ func (d *DB) Checkpoint(ctx context.Context) error {
 	return nil
 }
 
+// CheckpointTruncate incorporates every committed WAL frame into the main
+// database and truncates the stopped-server WAL before file replacement.
+func (d *DB) CheckpointTruncate(ctx context.Context) error {
+	var busy, logFrames, checkpointed int
+	if err := d.writer.QueryRowContext(
+		ctx, "PRAGMA wal_checkpoint(TRUNCATE)",
+	).Scan(&busy, &logFrames, &checkpointed); err != nil {
+		return classify("truncate WAL checkpoint", err)
+	}
+	if busy != 0 || checkpointed < logFrames {
+		return &CategoryError{
+			Category: CategoryBusy, Operation: "truncate WAL checkpoint",
+		}
+	}
+	return nil
+}
+
 // QuickCheck runs SQLite's bounded startup integrity check.
 func QuickCheck(ctx context.Context, db *sql.DB) error {
 	return integrityCheck(ctx, db, "PRAGMA quick_check")
