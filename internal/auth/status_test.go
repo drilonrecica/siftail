@@ -61,6 +61,7 @@ func TestBrowserStatusIsProtectedSanitizedAndShowsTransitions(t *testing.T) {
 	fixture.handler().ServeHTTP(degraded, request.Clone(context.Background()))
 	if degraded.Code != http.StatusOK ||
 		!strings.Contains(degraded.Body.String(), "Degraded") ||
+		!strings.Contains(degraded.Body.String(), "Ingestion is returning 507") ||
 		!strings.Contains(degraded.Body.String(),
 			"Ingestion could not commit because storage was unavailable.") {
 		t.Fatalf("degraded Status = %d %q", degraded.Code, degraded.Body.String())

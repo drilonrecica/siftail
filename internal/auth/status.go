@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/drilonrecica/siftail/internal/ingest"
 	statusstate "github.com/drilonrecica/siftail/internal/status"
 	"github.com/drilonrecica/siftail/internal/version"
 	"github.com/drilonrecica/siftail/internal/web"
@@ -171,6 +172,12 @@ func statusView(snapshot statusstate.OperationalSnapshot, now time.Time) webui.S
 	if state.LastDatabaseError != nil {
 		view.LastDatabaseError = state.LastDatabaseError.Category + " · " +
 			formatStatusTime(state.LastDatabaseError.At)
+	}
+	switch state.DegradedCategory {
+	case string(ingest.CategoryStorageFull):
+		view.StorageWarning = "Storage is full. Ingestion is returning 507 while retained reads remain available. Free host space or reduce retention pressure; Siftail will test recovery automatically."
+	case "retention_target_unmet":
+		view.StorageWarning = "The configured storage target cannot be reached after bounded retention. Ingestion is returning 507 while retained reads remain available. Increase the limit or reduce retention pressure."
 	}
 	for index, diagnostic := range state.Diagnostics {
 		view.Diagnostics[index] = webui.StatusDiagnosticView{

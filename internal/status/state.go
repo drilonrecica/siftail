@@ -124,6 +124,46 @@ func (s *State) DatabaseWritable() bool {
 	return s.databaseWritable && s.databaseCategory == ""
 }
 
+func (s *State) IngestUnavailable() ingest.ErrorCategory {
+	if s == nil {
+		return ingest.CategoryUnavailable
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.retentionDegraded {
+		return ingest.CategoryStorageFull
+	}
+	switch s.databaseCategory {
+	case string(ingest.CategoryStorageFull):
+		return ingest.CategoryStorageFull
+	case "":
+		return ""
+	default:
+		return ingest.CategoryUnavailable
+	}
+}
+
+func (s *State) RecordDatabaseRecovered(at time.Time) {
+	if s == nil {
+		return
+	}
+	at = at.UTC()
+	s.mu.Lock()
+	if s.databaseCategory == "" {
+		s.mu.Unlock()
+		return
+	}
+	s.markDatabaseRecoveredLocked(at)
+	s.databaseWritable = true
+	s.databaseCategory = ""
+	s.appendDiagnosticLocked(Diagnostic{
+		At: at, Severity: "information", Component: "database",
+		Category: "storage_recovered",
+		Summary:  "Database writability recovered after a bounded probe.",
+	})
+	s.mu.Unlock()
+}
+
 func (s *State) RecordIngestAccepted(events int, at time.Time) {
 	if s == nil || events <= 0 {
 		return
@@ -322,6 +362,9 @@ func sanitizeDiagnostic(input DiagnosticInput) (Diagnostic, error) {
 	case "database/database_checkpoint_busy":
 		severity = "attention"
 		summary = "The passive WAL checkpoint was busy."
+	case "database/storage_recovered":
+		severity = "information"
+		summary = "Database writability recovered after a bounded probe."
 	case "retention/retention_cleanup":
 		severity = "attention"
 		summary = "Retention cleanup did not complete."

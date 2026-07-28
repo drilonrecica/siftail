@@ -189,6 +189,20 @@ func (a *App) Run(ctx context.Context) error {
 		}).Run(serverCtx)
 	})
 	g.Go(func() error {
+		return database.NewRecoveryWorker(
+			coordinator,
+			func() bool { return !operationalState.DatabaseWritable() },
+			operationalState.RecordDatabaseRecovered,
+			func(error) {
+				a.logger.Debug("database recovery probe did not commit",
+					"component", "database",
+					"error_category", "recovery_probe",
+				)
+			},
+			database.DefaultRecoveryProbeInterval,
+		).Run(serverCtx)
+	})
+	g.Go(func() error {
 		cleaner := retention.NewCleaner(
 			db.Reader(), coordinator, a.cfg.DatabasePath, retentionStore,
 			retention.CleanerOptions{AfterDelete: func(int64) {
@@ -417,7 +431,7 @@ func (a *App) initializeIngestion() error {
 	handler := ingest.NewHandler(store, decoder, ingest.Limits{
 		MaxCompressedBytes: a.cfg.MaxCompressedRequestBytes,
 		RequestTimeout:     30 * time.Second,
-	}).WithQueue(queue).WithObserver(a.status)
+	}).WithQueue(queue).WithObserver(a.status).WithAvailability(a.status)
 	a.admission = admission
 	a.queue = queue
 	a.ingestHTTP = handler

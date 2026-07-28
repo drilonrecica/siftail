@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -214,6 +215,59 @@ func TestCleanerStopsSizeDeletionWhenCheckpointIsBusy(t *testing.T) {
 		t.Fatalf("busy-checkpoint cleanup = %#v", result)
 	}
 	assertRetentionEventIDs(t, db.Reader(), []int64{2, 3, 4, 5})
+}
+
+func TestCleanerCanReleaseQuotaPressureForRecoveryProbe(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "siftail.db")
+	db, coordinator, stop := settingsTestDatabase(t, path)
+	defer stop()
+	store := NewStore(db.Reader(), coordinator)
+	if _, err := store.Save(context.Background(), Input{
+		AgeDays: 1, MaxDatabaseGiB: 1,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	insertRetentionSource(t, db.Writer())
+	now := time.Unix(200_000, 0).UTC()
+	cutoff := now.AddDate(0, 0, -1).UnixMicro()
+	if _, err := db.Writer().Exec(`INSERT INTO log_events(
+		id,event_at_us,received_at_us,source_id,stream,
+		level_normalized,message_raw,message_text,attributes_json
+	) VALUES(1,?,?,1,'stdout','info',zeroblob(65536),'old','{}')`,
+		cutoff-1, cutoff-1); err != nil {
+		t.Fatal(err)
+	}
+	var pages int
+	if err := db.Writer().QueryRow("PRAGMA page_count").Scan(&pages); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Writer().Exec(
+		"PRAGMA max_page_count=" + strconv.Itoa(pages),
+	); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.ProbeWritable(
+		context.Background(), coordinator, now,
+	); err == nil {
+		t.Fatal("recovery probe succeeded before retention released pages")
+	}
+
+	cleaner := NewCleaner(db.Reader(), coordinator, path, store, CleanerOptions{
+		DeleteChunk: 1, VacuumPages: 1, Now: func() time.Time { return now },
+		MeasureFootprint: func(string) (int64, error) { return 1, nil },
+	})
+	result, err := cleaner.RunOnce(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.AgeDeleted != 1 {
+		t.Fatalf("cleanup result = %#v", result)
+	}
+	if err := database.ProbeWritable(
+		context.Background(), coordinator, now.Add(time.Second),
+	); err != nil {
+		t.Fatalf("probe after bounded retention cleanup: %v", err)
+	}
 }
 
 func TestActiveFootprintAndWorkerShutdown(t *testing.T) {

@@ -1542,6 +1542,8 @@ When storage becomes unavailable:
 
 - set readiness unhealthy for ingestion;
 - reject ingestion with `507` for full storage or `503` for temporary database issue;
+- authenticate each ingestion request, then reject known degradation before
+  decoding or queueing its payload;
 - preserve UI read access where possible;
 - show a critical warning;
 - record sanitized diagnostic;
@@ -1553,11 +1555,20 @@ When storage becomes unavailable:
 
 After operator frees space or retention succeeds:
 
-- test database writability;
+- while degraded, retry every five seconds with one coordinator-serialized,
+  bounded 64 KiB settings mutation that is inserted and deleted in the same
+  transaction;
+- require that transaction to commit successfully, leaving no settings row;
 - clear degraded state;
 - restore readiness;
 - record recovery event;
 - allow Fluent Bit retries to resume.
+
+The probe exercises the same main-database/WAL commit path as application
+writes. A failed probe remains safely categorized and is logged only at debug
+with no SQLite detail. It does not recreate, replace, delete, vacuum, or
+migrate the database. Retention remains an independent bounded worker and may
+release pages that allow a later probe to succeed.
 
 ---
 
@@ -1673,13 +1684,15 @@ Healthy when:
 Response remains minimal.
 
 Startup migration, integrity, and writable checks establish the initial state.
-The writer lifecycle then owns the live ready/not-ready transition. A
-storage-unavailable commit marks readiness unhealthy; a later durable commit
-recovers database readiness. Retention remains independently degraded when the
-size target cannot be reached after application events are exhausted, and only
-a later successful retention result clears that condition. Shutdown makes
-readiness unhealthy before listeners drain. Liveness remains healthy for these
-database and degradation states while the HTTP stack can respond.
+The writer lifecycle owns the live ready/not-ready transition. A
+storage-unavailable commit marks readiness unhealthy; while degraded, a
+coordinator-serialized bounded transaction tests recovery every five seconds
+and only its successful commit recovers database readiness. Retention remains
+independently degraded when the size target cannot be reached after
+application events are exhausted, and only a later successful retention result
+clears that condition. Shutdown makes readiness unhealthy before listeners
+drain. Liveness remains healthy for these database and degradation states while
+the HTTP stack can respond.
 
 ### 26.3 Authentication
 

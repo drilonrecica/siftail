@@ -21,6 +21,12 @@ func (f decoderFunc) Decode(ctx context.Context, request DecodeRequest) (Decoded
 	return f(ctx, request)
 }
 
+type fixedAvailability ErrorCategory
+
+func (a fixedAvailability) IngestUnavailable() ErrorCategory {
+	return ErrorCategory(a)
+}
+
 type handlerFixture struct {
 	handler *Handler
 	store   *sources.Store
@@ -138,6 +144,49 @@ func TestHTTPBoundaryRevocationIsImmediate(t *testing.T) {
 		authorizedRequest(fixture.token.Token, "application/json", `{}`))
 	if response.Code != http.StatusUnauthorized || calls != 0 {
 		t.Fatalf("status/calls = %d/%d", response.Code, calls)
+	}
+}
+
+func TestHTTPBoundaryAuthenticatesThenShortCircuitsKnownStorageDegradation(t *testing.T) {
+	for _, test := range []struct {
+		category ErrorCategory
+		status   int
+	}{
+		{CategoryStorageFull, http.StatusInsufficientStorage},
+		{CategoryUnavailable, http.StatusServiceUnavailable},
+	} {
+		calls := 0
+		fixture := newHandlerFixture(t, decoderFunc(func(
+			context.Context,
+			DecodeRequest,
+		) (DecodedBatch, error) {
+			calls++
+			return DecodedBatch{}, nil
+		}), 1024)
+		fixture.handler.WithAvailability(fixedAvailability(test.category))
+
+		unauthorized := httptest.NewRecorder()
+		web.RequestID(fixture.handler).ServeHTTP(
+			unauthorized,
+			authorizedRequest("invalid", "application/json", `{"private":"payload"}`),
+		)
+		if unauthorized.Code != http.StatusUnauthorized || calls != 0 {
+			t.Fatalf("%s unauthorized status/calls = %d/%d",
+				test.category, unauthorized.Code, calls)
+		}
+		response := httptest.NewRecorder()
+		web.RequestID(fixture.handler).ServeHTTP(
+			response,
+			authorizedRequest(
+				fixture.token.Token, "application/json",
+				`{"private":"payload"}`,
+			),
+		)
+		if response.Code != test.status || calls != 0 ||
+			strings.Contains(response.Body.String(), "private") {
+			t.Fatalf("%s response = %d/%d %q",
+				test.category, response.Code, calls, response.Body.String())
+		}
 	}
 }
 

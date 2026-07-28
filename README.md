@@ -465,6 +465,23 @@ receive a post-commit retention notice; deletion never waits for a browser.
 Measured reclamation and writer-interference evidence is recorded in
 [`docs/performance/retention.md`](docs/performance/retention.md).
 
+### Storage-full recovery
+
+A failed SQLite commit caused by full database, WAL, temporary storage, or host
+filesystem capacity is never acknowledged. Full storage returns `507`; other
+temporary database failures return `503`. After token authentication, Siftail
+rejects requests during the known degraded state before decoding or queueing
+their payloads. History and authenticated operational reads continue where
+SQLite permits, liveness remains healthy, and readiness reports `503`.
+
+While degraded, Siftail tests writability every five seconds with one bounded
+64 KiB coordinator-serialized transaction. It restores readiness only after that
+transaction commits. It never deletes or recreates the database, starts an
+overflow spool, or claims recovery because the process restarted. Bounded
+retention may release application-event pages first. The operator procedure,
+failure categories, and safe escalation boundary are documented in
+[`docs/operations/storage-full-recovery.md`](docs/operations/storage-full-recovery.md).
+
 ### Health and status
 
 The unauthenticated UI-listener endpoints are deliberately minimal:
@@ -478,9 +495,9 @@ GET /health/ready  migration/integrity startup, writer, writable storage,
 Liveness remains `200` during a transient database failure to avoid restart
 loops. Readiness returns `503` with only `not ready` when the writer is
 unavailable, storage cannot commit, shutdown has begun, or retention exhausts
-application events without reaching the configured size target. A later
-durable commit recovers database readiness; retention degradation clears only
-after a successful cleanup result.
+application events without reaching the configured size target. A bounded
+recovery-probe commit recovers database readiness; retention degradation clears
+only after a successful cleanup result.
 
 The authenticated `/status` page shows version, uptime, architecture,
 schema and SQLite versions, DB/WAL/SHM sizes, the configured retention limit,

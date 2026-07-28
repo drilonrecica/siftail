@@ -42,12 +42,17 @@ type Limits struct {
 }
 
 type Handler struct {
-	tokens   *sources.Store
-	decoder  Decoder
-	queue    *Queue
-	observer Observer
-	limits   Limits
-	now      func() time.Time
+	tokens       *sources.Store
+	decoder      Decoder
+	queue        *Queue
+	observer     Observer
+	availability Availability
+	limits       Limits
+	now          func() time.Time
+}
+
+type Availability interface {
+	IngestUnavailable() ErrorCategory
 }
 
 func (h *Handler) WithObserver(observer Observer) *Handler {
@@ -57,6 +62,11 @@ func (h *Handler) WithObserver(observer Observer) *Handler {
 
 func (h *Handler) WithQueue(queue *Queue) *Handler {
 	h.queue = queue
+	return h
+}
+
+func (h *Handler) WithAvailability(availability Availability) *Handler {
+	h.availability = availability
 	return h
 }
 
@@ -97,6 +107,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeSafe(w, http.StatusUnauthorized)
 		return
+	}
+	if h.availability != nil {
+		if category := h.availability.IngestUnavailable(); category != "" {
+			writeSafe(w, statusFor(&Error{Category: category}))
+			return
+		}
 	}
 	mediaType, parameters, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
 	if err != nil || (mediaType != "application/json" && mediaType != "application/x-ndjson") {

@@ -3,6 +3,9 @@
   {{if .CheckNotice}}<div class="notice {{if .CheckFailed}}notice-warning{{else}}notice-info{{end}}" role="status">
     <p>{{.CheckNotice}}</p>
   </div>{{end}}
+  {{if .StorageWarning}}<div class="notice notice-warning" role="alert">
+    <p>{{.StorageWarning}}</p>
+  </div>{{end}}
   {{if .Error}}<div class="form-error" role="alert">
     <p>{{.Error}}</p>
     {{if .ErrorRequestID}}<p>Request ID: <code>{{.ErrorRequestID}}</code></p>{{end}}

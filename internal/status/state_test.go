@@ -64,6 +64,7 @@ func TestStateReadinessRateRecoveryAndDiagnosticBound(t *testing.T) {
 	}, started.Add(133*time.Second))
 	state.RecordIngestAccepted(1, started.Add(134*time.Second))
 	if state.Ready(false) ||
+		state.IngestUnavailable() != ingest.CategoryStorageFull ||
 		state.Snapshot(started.Add(134*time.Second)).DegradedCategory !=
 			"retention_target_unmet" {
 		t.Fatal("successful ingest cleared critical retention degradation")
@@ -160,5 +161,40 @@ func TestStateConcurrentRecordingAndSnapshot(t *testing.T) {
 	if snapshot.AcceptedEvents != 800 || snapshot.AcceptedBatches != 800 ||
 		snapshot.RejectedBatches != 800 || len(snapshot.Diagnostics) != 0 {
 		t.Fatalf("concurrent snapshot = %#v", snapshot)
+	}
+}
+
+func TestStateGatesKnownDatabaseFailureAndRecordsProbeRecovery(t *testing.T) {
+	at := time.Date(2026, 7, 28, 13, 0, 0, 0, time.UTC)
+	state := NewState(at.Add(-time.Hour))
+	state.SetWriterReady(true)
+	state.RecordIngestRejected(ingest.CategoryStorageFull, true, at)
+	if got := state.IngestUnavailable(); got != ingest.CategoryStorageFull {
+		t.Fatalf("ingestion gate = %q", got)
+	}
+	if state.DatabaseWritable() || state.Ready(false) {
+		t.Fatal("full storage remained writable or ready")
+	}
+
+	recoveredAt := at.Add(5 * time.Second)
+	state.RecordDatabaseRecovered(recoveredAt)
+	if got := state.IngestUnavailable(); got != "" ||
+		!state.DatabaseWritable() || !state.Ready(false) {
+		t.Fatalf("state did not recover: gate=%q snapshot=%#v",
+			got, state.Snapshot(recoveredAt))
+	}
+	snapshot := state.Snapshot(recoveredAt)
+	if snapshot.LastDatabaseError == nil ||
+		snapshot.LastDatabaseError.RecoveredAt == nil ||
+		!snapshot.LastDatabaseError.RecoveredAt.Equal(recoveredAt) ||
+		len(snapshot.Diagnostics) != 2 ||
+		snapshot.Diagnostics[0].Category != "storage_recovered" ||
+		snapshot.Diagnostics[1].RecoveredAt == nil {
+		t.Fatalf("recovery diagnostics = %#v", snapshot)
+	}
+
+	state.RecordDatabaseRecovered(recoveredAt.Add(time.Second))
+	if got := len(state.Snapshot(recoveredAt.Add(time.Second)).Diagnostics); got != 2 {
+		t.Fatalf("healthy probe added diagnostics: %d", got)
 	}
 }

@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -272,6 +274,72 @@ func TestBatchWriterBusyFailureIsTemporary(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertCounts(t, db.Reader(), 0, 0, 0)
+}
+
+func TestBatchWriterStorageFullRollsBackPreservesReadsAndRecovers(t *testing.T) {
+	db, coordinator, writer := newWriterTest(t, WriterOptions{})
+	serverID := insertTestServer(t, db.Writer())
+	baseline := canonicalEvent(serverID, "baseline", "retained", 1)
+	if err := writer.Persist(context.Background(), &WriteBatch{
+		Events: []logs.CanonicalEvent{baseline}, AuthenticatedServerID: serverID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	var pages int
+	if err := db.Writer().QueryRow("PRAGMA page_count").Scan(&pages); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Writer().Exec(
+		"PRAGMA max_page_count=" + strconv.Itoa(pages),
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	readErrors := make(chan error, 1)
+	go func() {
+		for index := 0; index < 20; index++ {
+			var message string
+			if err := db.Reader().QueryRow(
+				"SELECT message_text FROM log_events WHERE source_event_id='baseline'",
+			).Scan(&message); err != nil {
+				readErrors <- err
+				return
+			}
+			if message != "retained" {
+				readErrors <- fmt.Errorf("retained message = %q", message)
+				return
+			}
+		}
+		readErrors <- nil
+	}()
+
+	large := canonicalEvent(serverID, "must-rollback", strings.Repeat("x", 64<<10), 2)
+	err := writer.Persist(context.Background(), &WriteBatch{
+		Events: []logs.CanonicalEvent{large}, AuthenticatedServerID: serverID,
+	})
+	assertCategory(t, err, CategoryStorageFull)
+	if err := <-readErrors; err != nil {
+		t.Fatalf("read while full: %v", err)
+	}
+	assertCounts(t, db.Reader(), 1, 1, 1)
+
+	if _, err := db.Writer().Exec(
+		"PRAGMA max_page_count=" + strconv.Itoa(pages+1024),
+	); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.ProbeWritable(
+		context.Background(), coordinator, time.Now(),
+	); err != nil {
+		t.Fatalf("recovery probe: %v", err)
+	}
+	if err := writer.Persist(context.Background(), &WriteBatch{
+		Events: []logs.CanonicalEvent{large}, AuthenticatedServerID: serverID,
+	}); err != nil {
+		t.Fatalf("retry after recovery: %v", err)
+	}
+	assertCounts(t, db.Reader(), 1, 1, 2)
 }
 
 func TestPersistenceErrorClassification(t *testing.T) {

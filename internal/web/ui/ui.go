@@ -306,6 +306,7 @@ type StatusView struct {
 	LastDatabaseError string
 	DatabaseCheck     string
 	DatabaseCheckAt   string
+	StorageWarning    string
 	CheckNotice       string
 	CheckFailed       bool
 	CSRFToken         string

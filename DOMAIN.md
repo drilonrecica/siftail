@@ -1437,7 +1437,11 @@ Return retryable status such as `429` or `503` with safe hints.
 
 ### 29.4 Storage full
 
-Return `507 Insufficient Storage`. Read access remains available where possible.
+Return `507 Insufficient Storage`. After authentication, a known storage-full
+state rejects before payload decoding. Read access remains available where
+possible. Success resumes only after a bounded internal transaction proves that
+SQLite can commit again; clearing a warning or restarting alone is not proof of
+recovery.
 
 ### 29.5 Atomicity
 
