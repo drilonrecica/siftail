@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/drilonrecica/siftail/internal/database"
+	"github.com/drilonrecica/siftail/internal/sessions"
 )
 
 func TestAdministratorCreateVerifyResetAndSingleAccount(t *testing.T) {
@@ -108,5 +109,66 @@ func TestConcurrentAdministratorCreationEnforcesOne(t *testing.T) {
 	group.Wait()
 	if successes != 1 {
 		t.Fatalf("successful creations = %d", successes)
+	}
+}
+
+func TestPasswordResetRevokesSessionsInSameMutation(t *testing.T) {
+	db, err := database.Open(context.Background(), filepath.Join(t.TempDir(), "siftail.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	administratorStore := NewStore(db.Writer())
+	if _, err := administratorStore.Create(
+		context.Background(), "Admin", []byte("initial-password"),
+	); err != nil {
+		t.Fatal(err)
+	}
+	sessionStore := sessions.NewStore(db.Writer())
+	issued, err := sessionStore.Issue(context.Background(), 1, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := administratorStore.ResetPassword(context.Background(), []byte("replacement-password")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sessionStore.Lookup(context.Background(), issued.Token); !errors.Is(err, sessions.ErrInvalidSession) {
+		t.Fatalf("session survived password reset: %v", err)
+	}
+}
+
+func TestPasswordResetRollsBackWhenSessionRevocationFails(t *testing.T) {
+	db, err := database.Open(context.Background(), filepath.Join(t.TempDir(), "siftail.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	administratorStore := NewStore(db.Writer())
+	if _, err := administratorStore.Create(
+		context.Background(), "Admin", []byte("initial-password"),
+	); err != nil {
+		t.Fatal(err)
+	}
+	sessionStore := sessions.NewStore(db.Writer())
+	issued, err := sessionStore.Issue(context.Background(), 1, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Writer().Exec(`CREATE TRIGGER reject_session_revocation
+		BEFORE UPDATE OF revoked_at_us ON sessions
+		BEGIN SELECT RAISE(ABORT, 'injected failure'); END`); err != nil {
+		t.Fatal(err)
+	}
+	err = administratorStore.ResetPassword(context.Background(), []byte("must-not-commit"))
+	if err == nil {
+		t.Fatal("password reset succeeded despite revocation failure")
+	}
+	if _, matched, err := administratorStore.Verify(
+		context.Background(), "Admin", []byte("initial-password"),
+	); err != nil || !matched {
+		t.Fatalf("original password matched=%v err=%v", matched, err)
+	}
+	if _, err := sessionStore.Lookup(context.Background(), issued.Token); err != nil {
+		t.Fatalf("session was partially revoked: %v", err)
 	}
 }

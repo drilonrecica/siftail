@@ -721,10 +721,16 @@ Session plaintext must never enter logs, diagnostics, or backups.
 
 ### SFT-018 — Implement the authenticated browser security boundary
 
-**Status:** Planned  
+**Status:** Done
 **Milestone:** 0.2.0  
 **Depends on:** SFT-017  
-**Issue/PR:** —
+**Issue/PR:** — (direct maintainer implementation)
+**Completed:** 2026-07-28
+**Completion evidence:** Real-store browser tests cover uniform login failure,
+fifth-attempt bounded throttling, fresh secure cookies, safe returns,
+expiry/logout, HMAC CSRF, content type and exact Origin rejection, authenticated
+no-store responses, proxy spoofing, ignored identity headers, strict security
+headers, request IDs, panic recovery, and sensitive-log exclusion.
 
 **Authoritative references:** `ARCHITECTURE.md` §§18–22; `DESIGN.md` §7;
 `AGENTS.md` §§11, 13; ADR 0003.

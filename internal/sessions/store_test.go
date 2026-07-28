@@ -6,11 +6,11 @@ import (
 	"encoding/base64"
 	"errors"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/drilonrecica/siftail/internal/auth"
 	"github.com/drilonrecica/siftail/internal/database"
 )
 
@@ -134,47 +134,6 @@ func TestSessionCleanupAfterGraceAndBound(t *testing.T) {
 	}
 }
 
-func TestPasswordResetRevokesSessionsInSameMutation(t *testing.T) {
-	db, store := newSessionStore(t)
-	issued, err := store.Issue(context.Background(), 1, "", "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	administratorStore := auth.NewStore(db.Writer())
-	if err := administratorStore.ResetPassword(context.Background(), []byte("replacement-password")); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := store.Lookup(context.Background(), issued.Token); !errors.Is(err, ErrInvalidSession) {
-		t.Fatalf("session survived password reset: %v", err)
-	}
-}
-
-func TestPasswordResetRollsBackWhenSessionRevocationFails(t *testing.T) {
-	db, store := newSessionStore(t)
-	issued, err := store.Issue(context.Background(), 1, "", "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.Writer().Exec(`CREATE TRIGGER reject_session_revocation
-		BEFORE UPDATE OF revoked_at_us ON sessions
-		BEGIN SELECT RAISE(ABORT, 'injected failure'); END`); err != nil {
-		t.Fatal(err)
-	}
-	administratorStore := auth.NewStore(db.Writer())
-	err = administratorStore.ResetPassword(context.Background(), []byte("must-not-commit"))
-	if err == nil {
-		t.Fatal("password reset succeeded despite revocation failure")
-	}
-	if _, matched, err := administratorStore.Verify(
-		context.Background(), "Admin", []byte("initial-password"),
-	); err != nil || !matched {
-		t.Fatalf("original password matched=%v err=%v", matched, err)
-	}
-	if _, err := store.Lookup(context.Background(), issued.Token); err != nil {
-		t.Fatalf("session was partially revoked: %v", err)
-	}
-}
-
 func TestConcurrentLookupAndRevocation(t *testing.T) {
 	_, store := newSessionStore(t)
 	issued, err := store.Issue(context.Background(), 1, "", "")
@@ -239,8 +198,9 @@ func newSessionStore(t *testing.T) (*database.DB, *Store) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	administratorStore := auth.NewStore(db.Writer())
-	if _, err := administratorStore.Create(context.Background(), "Admin", []byte("initial-password")); err != nil {
+	if _, err := db.Writer().Exec(`INSERT INTO administrators(
+		id,username,password_hash,created_at_us,password_changed_at_us
+	) VALUES(1,'Admin',?,1,1)`, strings.Repeat("h", 64)); err != nil {
 		t.Fatal(err)
 	}
 	return db, NewStore(db.Writer())

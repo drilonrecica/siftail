@@ -197,6 +197,27 @@ Sessions have a 14-day absolute lifetime, a 7-day idle lifetime, and a maximum
 of 64 active records; invalid records are removed after a 7-day grace period by
 bounded hourly cleanup.
 
+### Browser security boundary
+
+The UI exposes `/login`, creates sessions through `POST /session`, and signs out
+through `POST /session/logout`. Successful sign-in always rotates to a newly
+issued opaque session and continues to `/logs` or a validated local return path.
+Failures use uniform copy; the bounded in-memory client/account throttle begins
+temporary `429` responses on the fifth failure and never requires an external
+service.
+
+Every authenticated browser mutation requires the session, an HMAC-derived CSRF
+token, form content type, and an exact allowed Origin or Referer. Authenticated
+responses use `Cache-Control: no-store`. UI responses set a self-only CSP,
+clickjacking, MIME, referrer, permissions, opener, and resource-policy headers;
+HTTPS public URLs also enable HSTS and Secure session cookies.
+
+Set `SIFTAIL_PUBLIC_URL` to the operator-facing HTTP(S) origin. Forwarded
+client, scheme, and host metadata is considered only when the immediate peer is
+inside `SIFTAIL_TRUSTED_PROXY_CIDRS`; direct clients cannot spoof it. Siftail
+does not treat `Remote-User`, `X-Forwarded-User`, or other identity headers as
+authentication.
+
 ### Current dependency rationale
 
 - `github.com/mattn/go-sqlite3` v1.14.48 is the accepted SQLite driver. It

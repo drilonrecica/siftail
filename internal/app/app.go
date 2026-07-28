@@ -33,6 +33,7 @@ type App struct {
 	admission    *ingest.Admission
 	queue        *ingest.Queue
 	ingestHTTP   http.Handler
+	browser      *auth.Browser
 	shuttingDown atomic.Bool
 }
 
@@ -78,6 +79,12 @@ func (a *App) Run(ctx context.Context) error {
 	coordinatorDone := make(chan error, 1)
 	go func() { coordinatorDone <- coordinator.Run(coordinatorCtx) }()
 	<-coordinator.Ready()
+	administratorStore := auth.NewCoordinatedStore(db.Reader(), coordinator)
+	sessionStore := sessions.NewCoordinatedStore(db.Reader(), coordinator)
+	a.browser = auth.NewBrowser(administratorStore, sessionStore, auth.BrowserConfig{
+		PublicURL: a.cfg.PublicURL, TrustedProxyCIDRs: a.cfg.TrustedProxyCIDRs,
+	})
+	defer func() { a.browser = nil }()
 
 	if err := a.initializeIngestion(); err != nil {
 		coordinator.Close()
@@ -99,7 +106,6 @@ func (a *App) Run(ctx context.Context) error {
 	g.Go(func() error { return a.runControlServer(serverCtx, controlListener) })
 	g.Go(func() error { return a.runUIServer(serverCtx) })
 	g.Go(func() error { return a.runIngestServer(serverCtx) })
-	sessionStore := sessions.NewCoordinatedStore(db.Reader(), coordinator)
 	g.Go(func() error {
 		return sessions.NewCleanupWorker(sessionStore, time.Hour, func(error) {
 			a.logger.Warn("session cleanup failed",
@@ -242,6 +248,7 @@ func (a *App) uiMux() *http.ServeMux {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	})
+	a.browser.Register(mux)
 	return mux
 }
 
@@ -301,7 +308,7 @@ func (a *App) newServer(handler http.Handler, name string) *http.Server {
 }
 
 func (a *App) runUIServer(ctx context.Context) error {
-	srv := a.newServer(a.uiMux(), "ui")
+	srv := a.newServer(auth.SecurityHeaders(a.cfg.PublicURL)(a.uiMux()), "ui")
 	return a.runHTTPServer(ctx, srv, a.cfg.UIAddr, "ui")
 }
 
