@@ -2382,12 +2382,18 @@ CI noise must be considered. Correctness and durability remain hard gates; noisy
 
 Recommended multi-stage build:
 
-1. frontend asset preparation, including pinned local HTMX and any development-only tooling;
-2. Go build with CGO for target architecture;
-3. minimal runtime image with required C library and CA certificates;
-4. non-root runtime user where compatible with mounted volume permissions.
+1. Go build with CGO for the target architecture from the digest-pinned Go
+   toolchain image;
+2. digest-pinned Distroless `cc-debian12:nonroot` runtime with the required
+   glibc, CA certificates, and timezone database;
+3. Siftail binary, Apache license, and owner-writable empty `/data` directory;
+4. numeric non-root identity `65532:65532`.
 
-No compiler, Node runtime, npm cache, or source tree in final image.
+HTMX and the complete web UI are Go-embedded repository assets, so no frontend
+build stage is required. No shell, package manager, compiler, Node runtime, npm
+cache, browser artifact, test fixture, or source tree is present in the final
+image. Cross-compilation packages are version-pinned and remain in the builder
+stage only.
 
 ### 34.2 Embedded assets
 
@@ -2402,8 +2408,12 @@ Use Go `embed` for:
 ### 34.3 Container behavior
 
 - default command starts server;
-- health checks target liveness/readiness;
-- graceful SIGTERM;
+- the exec-form entrypoint runs Siftail directly so SIGTERM reaches the Go
+  process without a shell or init wrapper;
+- the image health check runs `siftail healthcheck`, which uses a bounded,
+  no-proxy loopback request against `/health/ready`;
+- graceful SIGTERM drains accepted writes within the configured shutdown
+  deadline;
 - `/data` documented as required volume;
 - UI and ingestion ports exposed/documented;
 - no privileged mode;

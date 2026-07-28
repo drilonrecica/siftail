@@ -88,6 +88,21 @@ Measured engineering baselines are recorded under
 [`docs/performance/`](docs/performance/); they describe their exact hardware and
 method and are not cross-machine performance guarantees.
 
+### Production image
+
+The multi-stage [`Dockerfile`](Dockerfile) produces the supported
+`linux/amd64` and `linux/arm64` container artifacts. The runtime is a
+digest-pinned glibc-based Distroless image, runs Siftail directly as
+`65532:65532`, exposes `8080` and `8081`, declares `/data`, and includes an
+explicit readiness health check. It contains no shell, package manager,
+compiler, Node runtime, browser tooling, tests, or source tree.
+
+Exact build inputs, deterministic-build requirements, non-root volume
+behavior, runtime dependency/license ownership, image scans, footprint
+measurements, and both-architecture smoke commands are recorded in
+[`docs/operations/container-image.md`](docs/operations/container-image.md).
+No public image is implied until the release workflow publishes one.
+
 Browser verification requires Node.js 22 or newer only on the development/CI
 host:
 

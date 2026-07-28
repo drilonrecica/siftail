@@ -28,6 +28,12 @@ func run(args []string, stdout, stderr io.Writer) int {
 	case "version":
 		runVersion(stdout)
 		return 0
+	case "healthcheck":
+		if err := runHealthcheck(); err != nil {
+			fmt.Fprintln(stderr, "siftail: healthcheck failed")
+			return 1
+		}
+		return 0
 	case "serve":
 		if err := runServe(); err != nil {
 			fmt.Fprintf(stderr, "siftail: %v\n", err)
@@ -162,6 +168,7 @@ func printUsage(w io.Writer) {
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Commands:")
 	fmt.Fprintln(w, "  version         Print version information")
+	fmt.Fprintln(w, "  healthcheck     Check local UI readiness")
 	fmt.Fprintln(w, "  serve           Start the Siftail server")
 	fmt.Fprintln(w, "  config validate Validate process configuration without opening the database")
 	fmt.Fprintln(w, "  server create    Create a trusted Server")
