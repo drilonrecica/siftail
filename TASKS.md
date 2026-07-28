@@ -849,10 +849,17 @@ migration with documented write/storage/retention cost.
 
 ### SFT-021 — Add the embedded web shell and login experience
 
-**Status:** Planned  
+**Status:** Done
 **Milestone:** 0.2.0  
 **Depends on:** SFT-018  
-**Issue/PR:** —
+**Issue/PR:** — (direct maintainer implementation)
+**Completed:** 2026-07-28
+**Completion evidence:** Renderer and browser tests cover administrator-present,
+missing, expired, uniform-error, authenticated, and hostile escaped states;
+embedded asset types, exact HTMX SHA-384 and license, CSP-local references,
+snapshot disabling, and application-JavaScript DOM safety. Headless Chromium
+checks cover keyboard focus, dark/light themes, reduced motion, desktop/mobile
+layouts without page-wide horizontal overflow, and login/shell screenshots.
 
 **Authoritative references:** `ARCHITECTURE.md` §18; `DESIGN.md` §§5–7, 27–35.
 

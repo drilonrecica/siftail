@@ -1,0 +1,55 @@
+{{define "login.html"}}<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <title>Sign in · Siftail</title>
+  <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/assets/app.css">
+  <script src="/assets/htmx-2.0.10.min.js" defer></script>
+  <script src="/assets/app.js" defer></script>
+</head>
+<body class="login-page" hx-history="false">
+  <a class="skip-link" href="#main-content">Skip to main content</a>
+  <header class="login-brand" aria-label="Siftail">
+    <span class="brand-mark" aria-hidden="true">S</span>
+    <span>Siftail</span>
+  </header>
+  <main id="main-content" class="login-main">
+    <section class="login-panel" aria-labelledby="login-title">
+      <div class="login-heading">
+        <p class="eyebrow">Private log inspection</p>
+        <h1 id="login-title">Sign in to Siftail</h1>
+        <p>Sign in to inspect your private application logs.</p>
+      </div>
+      {{if .AdministratorMissing}}
+      <div class="notice notice-warning" role="status">
+        <h2>No administrator is configured</h2>
+        <p>Create the administrator with <code>siftail admin create --username &lt;name&gt;</code> on the host, then return here.</p>
+      </div>
+      {{else}}
+      {{if .Expired}}
+      <p class="notice notice-info" role="status">Your session expired. Sign in again to continue.</p>
+      {{end}}
+      {{if .Error}}
+      <p id="login-error" class="form-error" role="alert">{{.Error}}</p>
+      {{end}}
+      <form class="login-form" method="post" action="/session"{{if .Error}} aria-describedby="login-error"{{end}}>
+        <input type="hidden" name="return" value="{{.ReturnPath}}">
+        <div class="field">
+          <label for="username">Username</label>
+          <input id="username" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" autofocus required>
+        </div>
+        <div class="field">
+          <label for="password">Password</label>
+          <input id="password" name="password" type="password" autocomplete="current-password" required>
+        </div>
+        <button class="button button-primary" type="submit">Sign in</button>
+      </form>
+      <p class="recovery-copy">Lost access? Reset the administrator password with the Siftail CLI on the host.</p>
+      {{end}}
+    </section>
+  </main>
+</body>
+</html>{{end}}

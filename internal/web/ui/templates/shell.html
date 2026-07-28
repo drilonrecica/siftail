@@ -1,0 +1,61 @@
+{{define "shell.html"}}<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <title>Logs · Siftail</title>
+  <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/assets/app.css">
+  <script src="/assets/htmx-2.0.10.min.js" defer></script>
+  <script src="/assets/app.js" defer></script>
+</head>
+<body hx-history="false">
+  <a class="skip-link" href="#main-content">Skip to main content</a>
+  <header class="app-header">
+    <a class="brand" href="/logs" aria-label="Siftail logs">
+      <span class="brand-mark" aria-hidden="true">S</span>
+      <span>Siftail</span>
+    </a>
+    <nav class="primary-nav" aria-label="Primary">
+      <a href="/logs" aria-current="page">Logs</a>
+    </nav>
+    <div class="header-actions">
+      <label class="compact-control" for="theme">Theme</label>
+      <select id="theme" name="theme" data-theme-select>
+        <option value="system">System</option>
+        <option value="dark">Dark</option>
+        <option value="light">Light</option>
+      </select>
+      <label class="compact-control" for="density">Density</label>
+      <select id="density" name="density" data-density-select>
+        <option value="compact">Compact</option>
+        <option value="comfortable">Comfortable</option>
+      </select>
+      <form method="post" action="/session/logout">
+        <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+        <button class="button button-quiet" type="submit">Sign out</button>
+      </form>
+    </div>
+  </header>
+  <main id="main-content" class="workspace">
+    <header class="workspace-heading">
+      <div>
+        <p class="eyebrow">History</p>
+        <h1>Logs</h1>
+      </div>
+      <p class="workspace-context">All retained sources · Last hour</p>
+    </header>
+    <section class="workspace-panel" aria-labelledby="history-heading">
+      <div class="mode-tabs" role="tablist" aria-label="Log mode">
+        <a id="history-heading" role="tab" aria-selected="true" href="/logs">History</a>
+        <span role="tab" aria-selected="false" aria-disabled="true">Live</span>
+      </div>
+      <div class="empty-state">
+        <h2>Historical browsing is ready for filters</h2>
+        <p>Select a source or keep the all-source scope to inspect the last hour.</p>
+      </div>
+    </section>
+  </main>
+</body>
+</html>{{end}}

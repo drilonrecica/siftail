@@ -6,7 +6,6 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
-	"html/template"
 	"mime"
 	"net/http"
 	"net/url"
@@ -16,6 +15,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/drilonrecica/siftail/internal/sessions"
+	webui "github.com/drilonrecica/siftail/internal/web/ui"
 )
 
 const csrfPurpose = "siftail-browser-csrf-v1"
@@ -31,6 +31,7 @@ type Browser struct {
 	publicURL      string
 	proxies        proxyTrust
 	throttle       *loginThrottle
+	ui             *webui.Renderer
 }
 
 func NewBrowser(administrators *Store, sessionStore *sessions.Store, config BrowserConfig) *Browser {
@@ -40,6 +41,7 @@ func NewBrowser(administrators *Store, sessionStore *sessions.Store, config Brow
 		publicURL:      strings.TrimSuffix(config.PublicURL, "/"),
 		proxies:        newProxyTrust(config.TrustedProxyCIDRs),
 		throttle:       newLoginThrottle(),
+		ui:             webui.New(),
 	}
 }
 
@@ -65,11 +67,13 @@ func CSRFToken(token string) string {
 func (b *Browser) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /login", b.loginPage)
 	mux.HandleFunc("POST /session", b.login)
+	mux.HandleFunc("/assets/", b.ui.Asset)
 	mux.Handle("POST /session/logout", b.Protect(http.HandlerFunc(b.logout)))
 	mux.Handle("GET /logs", b.Protect(http.HandlerFunc(b.logsPlaceholder)))
 }
 
 func (b *Browser) loginPage(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
 	if cookie, err := r.Cookie(sessions.CookieName); err == nil {
 		if _, err := b.sessions.Lookup(r.Context(), cookie.Value); err == nil {
 			http.Redirect(w, r, "/logs", http.StatusSeeOther)
@@ -81,13 +85,12 @@ func (b *Browser) loginPage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Sign-in is temporarily unavailable.", http.StatusServiceUnavailable)
 		return
 	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	data := loginView{
+	data := webui.LoginView{
 		AdministratorMissing: !exists,
 		ReturnPath:           safeReturnPath(r.URL.Query().Get("return")),
 		Expired:              r.URL.Query().Get("expired") == "1",
 	}
-	if err := loginTemplate.Execute(w, data); err != nil {
+	if err := b.ui.Login(w, http.StatusOK, data); err != nil {
 		http.Error(w, "Sign-in is temporarily unavailable.", http.StatusInternalServerError)
 	}
 }
@@ -108,7 +111,7 @@ func (b *Browser) login(w http.ResponseWriter, r *http.Request) {
 	clientKey := clientThrottleKey(b.proxies.clientIdentity(r))
 	accountKey := accountThrottleKey(username)
 	if delay := b.throttle.Check(clientKey, accountKey); delay > 0 {
-		writeRateLimited(w, delay)
+		b.writeRateLimitedLogin(w, r, delay)
 		return
 	}
 	administrator, matched, err := b.administrators.Verify(r.Context(), username, password)
@@ -118,10 +121,11 @@ func (b *Browser) login(w http.ResponseWriter, r *http.Request) {
 	}
 	if !matched {
 		if delay := b.throttle.Failure(clientKey, accountKey); delay > 0 {
-			writeRateLimited(w, delay)
+			b.writeRateLimitedLogin(w, r, delay)
 			return
 		}
-		http.Error(w, "Sign-in failed. Check your credentials and try again.", http.StatusUnauthorized)
+		b.writeLoginFailure(w, r, http.StatusUnauthorized,
+			"Sign-in failed. Check your credentials and try again.")
 		return
 	}
 	issued, err := b.sessions.Issue(r.Context(), administrator.ID, summarizeUserAgent(r.UserAgent()), b.proxies.clientIdentity(r))
@@ -202,8 +206,9 @@ func (b *Browser) logout(w http.ResponseWriter, r *http.Request) {
 
 func (b *Browser) logsPlaceholder(w http.ResponseWriter, r *http.Request) {
 	session, _ := BrowserSessionFromContext(r.Context())
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_ = logsTemplate.Execute(w, session)
+	if err := b.ui.Shell(w, http.StatusOK, webui.ShellView{CSRFToken: session.CSRFToken}); err != nil {
+		http.Error(w, "Logs are temporarily unavailable.", http.StatusInternalServerError)
+	}
 }
 
 func (b *Browser) requireLogin(w http.ResponseWriter, r *http.Request, expired bool) {
@@ -300,37 +305,34 @@ func summarizeUserAgent(value string) string {
 	return value
 }
 
-func writeRateLimited(w http.ResponseWriter, delay time.Duration) {
+func (b *Browser) writeRateLimitedLogin(
+	w http.ResponseWriter,
+	r *http.Request,
+	delay time.Duration,
+) {
 	seconds := int((delay + time.Second - 1) / time.Second)
 	if seconds < 1 {
 		seconds = 1
 	}
 	w.Header().Set("Retry-After", strconv.Itoa(seconds))
-	http.Error(w, "Too many attempts. Try again shortly.", http.StatusTooManyRequests)
+	b.writeLoginFailure(w, r, http.StatusTooManyRequests,
+		"Too many attempts. Try again shortly.")
 }
 
-type loginView struct {
-	AdministratorMissing bool
-	ReturnPath           string
-	Expired              bool
+func (b *Browser) writeLoginFailure(
+	w http.ResponseWriter,
+	r *http.Request,
+	status int,
+	message string,
+) {
+	view := webui.LoginView{
+		ReturnPath: safeReturnPath(r.PostForm.Get("return")),
+		Error:      message,
+	}
+	if err := b.ui.Login(w, status, view); err != nil {
+		http.Error(w, "Sign-in is temporarily unavailable.", http.StatusInternalServerError)
+	}
 }
-
-var loginTemplate = template.Must(template.New("login").Parse(`<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><title>Sign in · Siftail</title></head>
-<body><main><h1>Siftail</h1><p>Sign in to inspect your private application logs.</p>
-{{if .AdministratorMissing}}<p>No administrator is configured. Create one with <code>siftail admin create --username &lt;name&gt;</code> on the host.</p>{{else}}
-{{if .Expired}}<p>Your session expired. Sign in again to continue.</p>{{end}}
-<form method="post" action="/session"><input type="hidden" name="return" value="{{.ReturnPath}}">
-<label for="username">Username</label><input id="username" name="username" autocomplete="username" autofocus required>
-<label for="password">Password</label><input id="password" name="password" type="password" autocomplete="current-password" required>
-<button type="submit">Sign in</button></form>
-<p>Lost access? Reset the administrator password with the Siftail CLI on the host.</p>{{end}}</main></body></html>`))
-
-var logsTemplate = template.Must(template.New("logs").Parse(`<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><title>Logs · Siftail</title></head>
-<body><main><h1>Logs</h1><p>Historical browsing is being prepared.</p>
-<form method="post" action="/session/logout"><input type="hidden" name="csrf_token" value="{{.CSRFToken}}"><button type="submit">Sign out</button></form>
-</main></body></html>`))
 
 func SecurityHeaders(publicURL string) func(http.Handler) http.Handler {
 	https := strings.HasPrefix(strings.ToLower(publicURL), "https://")

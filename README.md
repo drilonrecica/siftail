@@ -218,6 +218,22 @@ inside `SIFTAIL_TRUSTED_PROXY_CIDRS`; direct clients cannot spoof it. Siftail
 does not treat `Remote-User`, `X-Forwarded-User`, or other identity headers as
 authentication.
 
+### Embedded browser interface
+
+Login and the authenticated application shell are rendered from escaped Go
+templates embedded in the binary. CSS, focused preference JavaScript, the
+favicon, and HTMX are local embedded assets; ordinary operation makes no CDN,
+font, analytics, or other outbound browser request. Login exposes no setup
+form, uses uniform associated errors, and points recovery to the local CLI
+without host detail.
+
+The shell is dark-first with a complete light theme, visible focus, a skip
+link, reduced-motion handling, and responsive layouts for emergency mobile
+inspection. Theme (`System`, `Dark`, or `Light`) and density (`Compact` or
+`Comfortable`) are presentation-only browser-local preferences. HTMX history
+snapshots are disabled both declaratively and with a zero-entry history cache,
+so authenticated DOM is refetched instead of restored from a snapshot.
+
 ### Historical query compatibility
 
 History URLs use `mode=history` and absolute UTC `from`/`to` endpoints with
@@ -280,6 +296,18 @@ The measured 100k/1M development baseline and query-plan review are recorded in
   Password hashing is request-driven and adds no persistent idle allocation.
   Security updates to these modules require ordinary dependency and release
   review.
+- HTMX 2.0.10 is vendored as its exact 51,238-byte minified distribution under
+  the Zero-Clause BSD license. It has no transitive package dependencies and
+  is served only as an embedded same-origin asset; the standard library does
+  not provide its server-driven fragment interaction model. HTMX adds no Go
+  API, production Node runtime, runtime service, outbound request, or idle
+  server allocation. On this linux/amd64 Go 1.26.5 development build, all
+  SFT-021 embedded UI code and assets together increased the unstripped binary
+  from 18,205,480 to 18,292,368 bytes (+86,888 bytes, about 0.48%) in builds
+  with the build ID removed for comparison. Browser
+  memory is limited to the loaded document and static assets; later History
+  and Live tasks retain their separate DOM caps. Security updates require
+  explicitly replacing the vendored file, license review, and integrity tests.
 
 ## Important note
 
