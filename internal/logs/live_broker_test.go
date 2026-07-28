@@ -74,6 +74,27 @@ func TestLiveBrokerPublishesSourceScopedControls(t *testing.T) {
 	}
 }
 
+func TestLiveBrokerPublishesGlobalRetentionControl(t *testing.T) {
+	broker := startLiveBroker(t, LiveBrokerOptions{})
+	first := subscribeLive(t, broker, LiveFilter{SourceIDs: []int64{1}})
+	second := subscribeLive(t, broker, LiveFilter{SourceIDs: []int64{2}})
+	control := LiveControl{Type: LiveControlRetentionPurged}
+	if !broker.TryPublishControl(control) {
+		t.Fatal("global retention control was rejected")
+	}
+	for _, subscription := range []*LiveSubscription{first, second} {
+		message := nextLive(t, subscription)
+		if message.Type != LiveMessageControl || message.Control != control {
+			t.Fatalf("retention control = %#v", message)
+		}
+	}
+	if broker.TryPublishControl(LiveControl{
+		Type: LiveControlRetentionPurged, SourceID: 1,
+	}) {
+		t.Fatal("source-scoped retention control accepted")
+	}
+}
+
 func TestLiveBrokerSlowSubscriberOverflowsWithoutBlockingPublish(t *testing.T) {
 	broker := startLiveBroker(t, LiveBrokerOptions{
 		SubscriberMaxMessages: 2,

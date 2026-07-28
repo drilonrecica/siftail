@@ -84,6 +84,44 @@ func TestCoordinatorRollsBackAndDrainsAcceptedWork(t *testing.T) {
 	<-done
 }
 
+func TestCoordinatorSerializesBoundedMaintenanceWithMutations(t *testing.T) {
+	db := openTestDB(t)
+	coordinator, cancel, done := runTestCoordinator(t, db)
+	defer func() {
+		coordinator.Close()
+		cancel()
+		<-done
+	}()
+
+	if err := coordinator.Do(context.Background(), func(tx *sql.Tx) error {
+		_, err := tx.Exec(`INSERT INTO settings(key,value_json,updated_at_us)
+			VALUES('before-maintenance','{}',1)`)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := coordinator.DoMaintenance(context.Background(), func(writer *sql.DB) error {
+		var count int
+		if err := writer.QueryRow(
+			"SELECT count(*) FROM settings WHERE key='before-maintenance'",
+		).Scan(&count); err != nil {
+			return err
+		}
+		if count != 1 {
+			return errors.New("maintenance ran before prior mutation commit")
+		}
+		_, err := writer.Exec("PRAGMA incremental_vacuum(1)")
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := coordinator.DoMaintenance(
+		context.Background(), nil,
+	); err == nil {
+		t.Fatal("nil maintenance operation accepted")
+	}
+}
+
 func runTestCoordinator(t *testing.T, db *DB) (*Coordinator, context.CancelFunc, <-chan error) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())

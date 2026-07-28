@@ -58,8 +58,9 @@ const (
 type LiveControlType string
 
 const (
-	LiveControlSourcePurged  LiveControlType = "source_purged"
-	LiveControlSourceRemoved LiveControlType = "source_removed"
+	LiveControlSourcePurged    LiveControlType = "source_purged"
+	LiveControlSourceRemoved   LiveControlType = "source_removed"
+	LiveControlRetentionPurged LiveControlType = "retention_purged"
 )
 
 type LiveControl struct {
@@ -461,6 +462,8 @@ func validLiveControl(control LiveControl) bool {
 	switch control.Type {
 	case LiveControlSourcePurged, LiveControlSourceRemoved:
 		return true
+	case LiveControlRetentionPurged:
+		return control.SourceID == 0
 	default:
 		return false
 	}

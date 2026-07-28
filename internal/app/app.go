@@ -95,11 +95,12 @@ func (a *App) Run(ctx context.Context) error {
 	liveBroker := logs.NewLiveBroker(logs.LiveBrokerOptions{})
 	administratorStore := auth.NewCoordinatedStore(db.Reader(), coordinator)
 	sessionStore := sessions.NewCoordinatedStore(db.Reader(), coordinator)
+	retentionStore := retention.NewStore(db.Reader(), coordinator)
 	a.browser = auth.NewBrowser(administratorStore, sessionStore, auth.BrowserConfig{
 		PublicURL: a.cfg.PublicURL, TrustedProxyCIDRs: a.cfg.TrustedProxyCIDRs,
 		HistoryStore:   logs.NewHistoryStore(db.Reader(), cursorCodec),
 		SourceStore:    sources.NewCoordinatedStore(db.Reader(), coordinator),
-		RetentionStore: retention.NewStore(db.Reader(), coordinator),
+		RetentionStore: retentionStore,
 		LiveBroker:     liveBroker,
 	})
 	defer func() { a.browser = nil }()
@@ -135,6 +136,22 @@ func (a *App) Run(ctx context.Context) error {
 			a.logger.Warn("session cleanup failed",
 				"component", "sessions",
 				"error_category", "session_cleanup",
+			)
+		}).Run(serverCtx)
+	})
+	g.Go(func() error {
+		cleaner := retention.NewCleaner(
+			db.Reader(), coordinator, a.cfg.DatabasePath, retentionStore,
+			retention.CleanerOptions{AfterDelete: func(int64) {
+				liveBroker.TryPublishControl(logs.LiveControl{
+					Type: logs.LiveControlRetentionPurged,
+				})
+			}},
+		)
+		return retention.NewWorker(cleaner, retention.DefaultCleanupInterval, func(error) {
+			a.logger.Warn("retention cleanup failed",
+				"component", "retention",
+				"error_category", "retention_cleanup",
 			)
 		}).Run(serverCtx)
 	})

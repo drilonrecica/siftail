@@ -283,6 +283,12 @@
         ensureEmptyState();
         addNotice("This source changed and its previous rows are no longer retained.", "source-change");
         break;
+      case "retention_purged":
+        addNotice(
+          "Retention removed older application events. Some Live rows may no longer be available in History.",
+          "retention-change",
+        );
+        break;
       case "session_invalid":
         closeSource();
         window.location.assign(`/login?return=${encodeURIComponent(window.location.pathname + window.location.search)}&expired=1`);

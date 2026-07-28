@@ -379,9 +379,16 @@ by the earlier of event time and receive time, then event ID, and size cleanup
 measures the main database plus WAL and shared-memory files. These controls
 apply only to application events: they do not remove Servers, tokens, aliases,
 sessions, settings, or security audit history. Retention is not forensic
-erasure and does not control backups, snapshots, or unrelated host files. The
-bounded cleanup worker that enforces the persisted policy is implemented by
-the next tracked retention task.
+erasure and does not control backups, snapshots, or unrelated host files.
+
+The lifecycle-owned cleanup worker runs at startup and hourly. It deletes no
+more than 10,000 events per transaction through the single writer coordinator,
+then performs bounded incremental vacuum and controlled WAL checkpointing.
+Size cleanup stops for the current run when a reader prevents checkpointing,
+instead of deleting speculatively, and retries later. Connected Live views
+receive a post-commit retention notice; deletion never waits for a browser.
+Measured reclamation and writer-interference evidence is recorded in
+[`docs/performance/retention.md`](docs/performance/retention.md).
 
 ### Current dependency rationale
 

@@ -17,9 +17,17 @@ type MutationCoordinator interface {
 	Do(context.Context, func(*sql.Tx) error) error
 }
 
+// MaintenanceCoordinator additionally serializes bounded writer-connection
+// maintenance that SQLite does not permit inside a transaction.
+type MaintenanceCoordinator interface {
+	MutationCoordinator
+	DoMaintenance(context.Context, func(*sql.DB) error) error
+}
+
 type mutationOperation struct {
-	run    func(*sql.Tx) error
-	result chan error
+	run         func(*sql.Tx) error
+	maintenance func(*sql.DB) error
+	result      chan error
 }
 
 // Coordinator serializes every mutation performed by an active server. Its
@@ -64,7 +72,7 @@ func (c *Coordinator) Run(ctx context.Context) error {
 	for {
 		select {
 		case operation := <-c.operations:
-			operation.result <- c.execute(context.Background(), operation.run)
+			operation.result <- c.executeOperation(context.Background(), operation)
 		case <-ctx.Done():
 			c.Close()
 			c.drain(context.Background())
@@ -80,7 +88,7 @@ func (c *Coordinator) drain(ctx context.Context) {
 	for {
 		select {
 		case operation := <-c.operations:
-			operation.result <- c.execute(ctx, operation.run)
+			operation.result <- c.executeOperation(ctx, operation)
 		default:
 			return
 		}
@@ -91,7 +99,17 @@ func (c *Coordinator) Ready() <-chan struct{} {
 	return c.ready
 }
 
+func (c *Coordinator) executeOperation(ctx context.Context, operation mutationOperation) error {
+	if operation.maintenance != nil {
+		return c.executeMaintenance(operation.maintenance)
+	}
+	return c.execute(ctx, operation.run)
+}
+
 func (c *Coordinator) execute(ctx context.Context, run func(*sql.Tx) error) error {
+	if run == nil {
+		return errors.New("database mutation operation is nil")
+	}
 	tx, err := c.db.BeginTx(ctx, nil)
 	if err != nil {
 		return classify("begin coordinated mutation", err)
@@ -106,14 +124,34 @@ func (c *Coordinator) execute(ctx context.Context, run func(*sql.Tx) error) erro
 	return nil
 }
 
+func (c *Coordinator) executeMaintenance(run func(*sql.DB) error) error {
+	if run == nil {
+		return errors.New("database maintenance operation is nil")
+	}
+	return run(c.db)
+}
+
 // Do admits one operation and waits for its committed result. Once admitted,
 // caller cancellation does not remove the operation from the serialized path.
 func (c *Coordinator) Do(ctx context.Context, run func(*sql.Tx) error) error {
 	if run == nil {
 		return errors.New("database mutation operation is nil")
 	}
-	operation := mutationOperation{run: run, result: make(chan error, 1)}
+	return c.submit(ctx, mutationOperation{run: run, result: make(chan error, 1)})
+}
 
+// DoMaintenance orders one bounded non-transactional writer operation with
+// mutations. Once admitted it follows the same completion semantics as Do.
+func (c *Coordinator) DoMaintenance(ctx context.Context, run func(*sql.DB) error) error {
+	if run == nil {
+		return errors.New("database maintenance operation is nil")
+	}
+	return c.submit(ctx, mutationOperation{
+		maintenance: run, result: make(chan error, 1),
+	})
+}
+
+func (c *Coordinator) submit(ctx context.Context, operation mutationOperation) error {
 	c.mu.RLock()
 	if !c.started || c.closed {
 		c.mu.RUnlock()

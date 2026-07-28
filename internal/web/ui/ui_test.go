@@ -91,6 +91,14 @@ func TestShellTemplateUsesLocalCSPCompatibleAssets(t *testing.T) {
 			t.Errorf("shell missing %q", want)
 		}
 	}
+	liveAsset, err := files.ReadFile("assets/live.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(liveAsset), `"retention_purged"`) ||
+		!strings.Contains(string(liveAsset), "may no longer be available in History") {
+		t.Fatal("Live asset lacks explicit retention-purge handling")
+	}
 	for _, forbidden := range []string{
 		`<script>`, `<style`, `https://`, `http://`, `"><script>`,
 	} {

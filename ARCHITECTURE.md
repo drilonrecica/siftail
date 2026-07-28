@@ -1481,9 +1481,14 @@ deletes audit records.
 
 After meaningful deletion:
 
-- run bounded `PRAGMA incremental_vacuum(N)`;
-- perform controlled WAL checkpoint when appropriate;
+- preflight with a passive WAL checkpoint;
+- run incremental vacuum for at most 8,192 pages per reclamation cycle;
+- perform a controlled truncate checkpoint to release physical WAL allocation;
 - avoid full `VACUUM` automatically.
+
+A busy checkpoint stops size-driven deletion for the current run and retries
+on the next scheduled cycle. This prevents a long-lived reader from causing
+speculative event deletion merely because physical WAL reclamation is delayed.
 
 A full `VACUUM` is a manual CLI maintenance command because it rewrites the database and may need substantial free disk.
 

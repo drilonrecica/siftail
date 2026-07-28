@@ -163,6 +163,16 @@ func TestLiveStreamFiltersFramesPreviewsReconnectAndControls(t *testing.T) {
 		!strings.Contains(frame, `"source_id":2`) {
 		t.Fatalf("source control frame = %q", frame)
 	}
+	if !broker.TryPublishControl(logs.LiveControl{
+		Type: logs.LiveControlRetentionPurged,
+	}) {
+		t.Fatal("retention control was not accepted")
+	}
+	frame = readLiveFrame(t, reader)
+	if !strings.Contains(frame, `"type":"retention_purged"`) ||
+		strings.Contains(frame, `"source_id":`) {
+		t.Fatalf("retention control frame = %q", frame)
+	}
 	cancel()
 }
 
