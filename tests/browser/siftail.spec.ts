@@ -39,6 +39,16 @@ function getLiveToken(): string {
 }
 
 async function ingestLive(messages: string[]): Promise<void> {
+  await ingestSource(messages, "api", "web", "api-container", "api-1");
+}
+
+async function ingestSource(
+  messages: string[],
+  application: string,
+  service: string,
+  containerID: string,
+  containerName: string,
+): Promise<void> {
   const state = readState();
   const now = Date.now();
   const response = await fetch(`http://${state.ingestAddress}/api/v1/ingest`, {
@@ -51,10 +61,10 @@ async function ingestLive(messages: string[]): Promise<void> {
       timestamp: new Date(now + index).toISOString(),
       project: "browser-project",
       environment: "test",
-      application: "api",
-      service: "web",
-      container_id: "api-container",
-      container_name: "api-1",
+      application,
+      service,
+      container_id: containerID,
+      container_name: containerName,
       stream: index % 2 === 0 ? "stderr" : "stdout",
       level: index % 3 === 0 ? "ERROR" : "INFO",
       log: message,
@@ -388,6 +398,89 @@ test("source catalog preserves hierarchy, observations, responsive layout, and l
   await page.getByRole("link", { name: "Open logs" }).click();
   await expect(page).toHaveURL(/\/logs\?.*application=api.*service=web/);
   await expect(page.locator(".log-row")).not.toHaveCount(0);
+});
+
+test("source aliases, clear logs, removal, confirmation focus, and expired sessions stay distinct", async ({
+  page,
+}) => {
+  test.setTimeout(30_000);
+  await login(page);
+  await ingestSource(
+    ["mutation-api-retained"],
+    "mutation-api",
+    "web",
+    "mutation-api-container",
+    "mutation-api-1",
+  );
+  await ingestSource(
+    ["mutation-worker-retained"],
+    "mutation-worker",
+    "jobs",
+    "mutation-worker-container",
+    "mutation-worker-1",
+  );
+  await page.getByRole("link", { name: "Sources", exact: true }).click();
+  const apiRow = page.getByRole("row").filter({ hasText: "mutation-api / web" }).first();
+  await apiRow.getByRole("link", { name: "mutation-api/web" }).click();
+
+  const hostileAlias = "<img src=x onerror=window.siftailSourceXSS=true> API";
+  await page.locator("#source-alias").fill(hostileAlias);
+  await page.getByRole("button", { name: "Save alias" }).click();
+  await expect(page.getByRole("heading", { name: hostileAlias })).toBeVisible();
+  await expect(page.getByText(
+    "Source alias updated. Stable identity and stored events were unchanged.",
+  )).toBeVisible();
+  await expect(page.locator("img")).toHaveCount(0);
+  expect(await page.evaluate(
+    () => (window as Window & { siftailSourceXSS?: boolean }).siftailSourceXSS,
+  )).toBeUndefined();
+  await expect(page.getByText(
+    "Alias changes only how this source is displayed. Original metadata remains unchanged.",
+  )).toBeVisible();
+
+  await page.getByRole("button", { name: "Clear logs" }).click();
+  await expect(page.locator("#clear-confirmation")).toBeFocused();
+  await expect(page.getByText(
+    "Type the displayed source name exactly to clear retained logs.",
+  )).toBeVisible();
+
+  await page.locator("#clear-confirmation").fill(hostileAlias);
+  const state = readState();
+  execFileSync(state.binary, ["sessions", "revoke-all"], {
+    env: siftailEnvironment({ SIFTAIL_DATA_DIR: state.dataDirectory }),
+    encoding: "utf8",
+  });
+  await page.getByRole("button", { name: "Clear logs" }).click();
+  await expect(page).toHaveURL(/\/login\?return=.*expired=1/);
+
+  await login(page);
+  await page.getByRole("link", { name: "Sources", exact: true }).click();
+  await page.getByRole("row").filter({ hasText: hostileAlias })
+    .getByRole("link", { name: hostileAlias }).click();
+  await expect(page.getByText("Retained logs", { exact: true })).toBeVisible();
+  await page.locator("#clear-confirmation").fill(hostileAlias);
+  await page.getByRole("button", { name: "Clear logs" }).click();
+  await expect(page.getByText(
+    "Retained logs were cleared. The source, alias, and container observations remain.",
+  )).toBeVisible();
+  await expect(page.getByRole("heading", { name: hostileAlias })).toBeVisible();
+  await expect(page.getByText("No retained logs", { exact: true })).toBeVisible();
+  await expect(page.getByText("mutation-api-1")).toBeVisible();
+
+  await page.getByRole("link", { name: "Sources", exact: true }).click();
+  const workerRow = page.getByRole("row").filter({ hasText: "mutation-worker / jobs" }).first();
+  await workerRow.getByRole("link", { name: "mutation-worker/jobs" }).click();
+  await page.getByRole("button", { name: "Remove source" }).click();
+  await expect(page.locator("#remove-confirmation")).toBeFocused();
+  await expect(page.getByText("Type the complete removal phrase exactly.")).toBeVisible();
+  await page.locator("#remove-confirmation").fill("remove mutation-worker/jobs");
+  await page.getByRole("button", { name: "Remove source" }).click();
+  await expect(page).toHaveURL(/\/sources\?notice=source-removed/);
+  await expect(page.getByText(
+    "Source removed. An active sender may discover it again.",
+  )).toBeVisible();
+  await expect(page.getByRole("row").filter({ hasText: "mutation-worker / jobs" })).toHaveCount(0);
+  await expect(page.getByRole("row").filter({ hasText: hostileAlias })).toHaveCount(1);
 });
 
 test("keyboard, themes, reduced motion, mobile inspection, and axe smoke", async ({ page }) => {

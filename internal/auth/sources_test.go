@@ -1,11 +1,15 @@
 package auth
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/drilonrecica/siftail/internal/logs"
 )
 
 func TestSourcesPagesAreProtectedBoundedAndEscaped(t *testing.T) {
@@ -96,6 +100,167 @@ func TestSourceDetailShowsStableIdentityAndContainerObservations(t *testing.T) {
 		if badResponse.Code != want {
 			t.Errorf("%s = %d, want %d", target, badResponse.Code, want)
 		}
+	}
+}
+
+func TestSourceMutationsRequireProtectionConfirmationAndPublishControls(t *testing.T) {
+	fixture, broker := newLiveBrowserFixture(t, logs.LiveBrokerOptions{})
+	seedBrowserSources(t, fixture)
+	cookie := loginBrowserCookie(t, fixture)
+
+	noCSRF := sourceMutationRequest(t, fixture, cookie,
+		"/sources/1/alias", url.Values{"alias": {"Unsafe"}}, false)
+	noCSRFResponse := httptest.NewRecorder()
+	fixture.handler().ServeHTTP(noCSRFResponse, noCSRF)
+	if noCSRFResponse.Code != http.StatusForbidden {
+		t.Fatalf("missing CSRF status = %d", noCSRFResponse.Code)
+	}
+	wrongOrigin := sourceMutationRequest(t, fixture, cookie,
+		"/sources/1/alias", url.Values{"alias": {"Unsafe"}}, true)
+	wrongOrigin.Header.Set("Origin", "https://attacker.example")
+	wrongOriginResponse := httptest.NewRecorder()
+	fixture.handler().ServeHTTP(wrongOriginResponse, wrongOrigin)
+	if wrongOriginResponse.Code != http.StatusForbidden {
+		t.Fatalf("wrong Origin status = %d", wrongOriginResponse.Code)
+	}
+	invalidAlias := sourceMutationRequest(t, fixture, cookie,
+		"/sources/1/alias", url.Values{"alias": {strings.Repeat("x", 129)}}, true)
+	invalidAliasResponse := httptest.NewRecorder()
+	fixture.handler().ServeHTTP(invalidAliasResponse, invalidAlias)
+	if invalidAliasResponse.Code != http.StatusUnprocessableEntity ||
+		!strings.Contains(invalidAliasResponse.Body.String(), `id="source-alias"`) ||
+		!strings.Contains(invalidAliasResponse.Body.String(), "autofocus") {
+		t.Fatalf("invalid alias = %d %q",
+			invalidAliasResponse.Code, invalidAliasResponse.Body.String())
+	}
+	unknownField := sourceMutationRequest(t, fixture, cookie,
+		"/sources/1/alias", url.Values{"alias": {"Unsafe"}, "role": {"admin"}}, true)
+	unknownFieldResponse := httptest.NewRecorder()
+	fixture.handler().ServeHTTP(unknownFieldResponse, unknownField)
+	if unknownFieldResponse.Code != http.StatusBadRequest {
+		t.Fatalf("unknown alias field status = %d", unknownFieldResponse.Code)
+	}
+
+	alias := sourceMutationRequest(t, fixture, cookie,
+		"/sources/1/alias", url.Values{"alias": {"Friendly API"}}, true)
+	aliasResponse := httptest.NewRecorder()
+	fixture.handler().ServeHTTP(aliasResponse, alias)
+	if aliasResponse.Code != http.StatusSeeOther ||
+		aliasResponse.Header().Get("Location") != "/sources/1?notice=alias-updated" {
+		t.Fatalf("alias response = %d %#v", aliasResponse.Code, aliasResponse.Header())
+	}
+	var sourceAlias string
+	if err := fixture.db.Reader().QueryRow(`SELECT alias FROM sources WHERE id=1`).
+		Scan(&sourceAlias); err != nil || sourceAlias != "Friendly API" {
+		t.Fatalf("stored alias = %q, err=%v", sourceAlias, err)
+	}
+
+	badClear := sourceMutationRequest(t, fixture, cookie,
+		"/sources/1/clear-logs", url.Values{"confirmation": {"API/Web"}}, true)
+	badClearResponse := httptest.NewRecorder()
+	fixture.handler().ServeHTTP(badClearResponse, badClear)
+	if badClearResponse.Code != http.StatusUnprocessableEntity ||
+		!strings.Contains(badClearResponse.Body.String(), "Type the displayed source name exactly") {
+		t.Fatalf("bad clear = %d %q", badClearResponse.Code, badClearResponse.Body.String())
+	}
+	assertBrowserCount(t, fixture, `SELECT count(*) FROM log_events WHERE source_id=1`, 1)
+
+	sourceOne := subscribeAuthLive(t, broker, logs.LiveFilter{SourceIDs: []int64{1}})
+	clear := sourceMutationRequest(t, fixture, cookie,
+		"/sources/1/clear-logs", url.Values{"confirmation": {"Friendly API"}}, true)
+	clearResponse := httptest.NewRecorder()
+	fixture.handler().ServeHTTP(clearResponse, clear)
+	if clearResponse.Code != http.StatusSeeOther ||
+		clearResponse.Header().Get("Location") != "/sources/1?notice=logs-cleared" {
+		t.Fatalf("clear response = %d %#v", clearResponse.Code, clearResponse.Header())
+	}
+	clearControl := nextAuthLive(t, sourceOne)
+	if clearControl.Type != logs.LiveMessageControl ||
+		clearControl.Control.Type != logs.LiveControlSourcePurged {
+		t.Fatalf("clear control = %#v", clearControl)
+	}
+	assertBrowserCount(t, fixture, `SELECT count(*) FROM log_events WHERE source_id=1`, 0)
+	assertBrowserCount(t, fixture, `SELECT count(*) FROM sources WHERE id=1 AND alias='Friendly API'`, 1)
+	assertBrowserCount(t, fixture, `SELECT count(*) FROM container_instances WHERE source_id=1`, 1)
+
+	badRemove := sourceMutationRequest(t, fixture, cookie,
+		"/sources/2/remove", url.Values{"confirmation": {"Worker/Jobs"}}, true)
+	badRemoveResponse := httptest.NewRecorder()
+	fixture.handler().ServeHTTP(badRemoveResponse, badRemove)
+	if badRemoveResponse.Code != http.StatusUnprocessableEntity ||
+		!strings.Contains(badRemoveResponse.Body.String(), "complete removal phrase") {
+		t.Fatalf("bad remove = %d %q", badRemoveResponse.Code, badRemoveResponse.Body.String())
+	}
+	sourceTwo := subscribeAuthLive(t, broker, logs.LiveFilter{SourceIDs: []int64{2}})
+	remove := sourceMutationRequest(t, fixture, cookie,
+		"/sources/2/remove", url.Values{"confirmation": {"remove Worker/Jobs"}}, true)
+	removeResponse := httptest.NewRecorder()
+	fixture.handler().ServeHTTP(removeResponse, remove)
+	if removeResponse.Code != http.StatusSeeOther ||
+		removeResponse.Header().Get("Location") != "/sources?notice=source-removed" {
+		t.Fatalf("remove response = %d %#v", removeResponse.Code, removeResponse.Header())
+	}
+	removeControl := nextAuthLive(t, sourceTwo)
+	if removeControl.Type != logs.LiveMessageControl ||
+		removeControl.Control.Type != logs.LiveControlSourceRemoved {
+		t.Fatalf("remove control = %#v", removeControl)
+	}
+	assertBrowserCount(t, fixture, `SELECT count(*) FROM sources WHERE id=2`, 0)
+	assertBrowserCount(t, fixture, `SELECT count(*) FROM servers WHERE id=1`, 1)
+}
+
+func sourceMutationRequest(
+	t *testing.T,
+	fixture *browserFixture,
+	cookie *http.Cookie,
+	target string,
+	values url.Values,
+	withCSRF bool,
+) *http.Request {
+	t.Helper()
+	if withCSRF {
+		values.Set("csrf_token", CSRFToken(cookie.Value))
+	}
+	request := httptest.NewRequest(http.MethodPost, target, strings.NewReader(values.Encode()))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	request.Header.Set("Origin", fixture.browser.publicURL)
+	request.AddCookie(cookie)
+	return request
+}
+
+func subscribeAuthLive(
+	t *testing.T,
+	broker *logs.LiveBroker,
+	filter logs.LiveFilter,
+) *logs.LiveSubscription {
+	t.Helper()
+	subscription, err := broker.Subscribe(context.Background(), filter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(subscription.Close)
+	return subscription
+}
+
+func nextAuthLive(t *testing.T, subscription *logs.LiveSubscription) logs.LiveMessage {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	message, err := subscription.Next(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return message
+}
+
+func assertBrowserCount(t *testing.T, fixture *browserFixture, query string, want int) {
+	t.Helper()
+	var got int
+	if err := fixture.db.Reader().QueryRow(query).Scan(&got); err != nil {
+		t.Fatal(err)
+	}
+	if got != want {
+		t.Fatalf("%s = %d, want %d", query, got, want)
 	}
 }
 

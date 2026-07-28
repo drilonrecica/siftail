@@ -149,6 +149,7 @@ type SourcesView struct {
 	Rows           []SourceRowView
 	LoadedCount    int
 	NextURL        string
+	Notice         string
 	Error          string
 	ErrorRequestID string
 }
@@ -172,6 +173,7 @@ type SourceRowView struct {
 
 type SourceDetailView struct {
 	SourceRowView
+	CSRFToken           string
 	ServerHostname      string
 	ProjectKey          string
 	EnvironmentKey      string
@@ -181,6 +183,11 @@ type SourceDetailView struct {
 	Containers          []ContainerObservationView
 	ContainersTruncated bool
 	LogsURL             string
+	Notice              string
+	AliasValue          string
+	AliasError          string
+	ClearError          string
+	RemoveError         string
 }
 
 type ContainerObservationView struct {

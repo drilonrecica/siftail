@@ -172,6 +172,46 @@ func TestSourceCatalogShellEscapesHierarchyAndMarksLifecycle(t *testing.T) {
 	}
 }
 
+func TestSourceDetailMutationFormsKeepActionsDistinctAndEscaped(t *testing.T) {
+	renderer := New()
+	response := httptest.NewRecorder()
+	view := SourceDetailView{
+		SourceRowView: SourceRowView{
+			ID: 9, DisplayName: `<img src=x onerror=alert(1)>`,
+			Server: "Production", Project: "Project", Environment: "Production",
+			Application: "API", Service: "Web", Status: "Inactive",
+		},
+		CSRFToken:  `csrf"><script>`,
+		AliasValue: `<Alias>`,
+		ClearError: "Type the displayed source name exactly to clear retained logs.",
+	}
+	if err := renderer.Shell(response, http.StatusUnprocessableEntity, ShellView{
+		Mode: "source-detail", Source: view,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	body := response.Body.String()
+	for _, want := range []string{
+		`action="/sources/9/alias"`,
+		`Alias changes only how this source is displayed. Original metadata remains unchanged.`,
+		`action="/sources/9/clear-logs"`,
+		`keeping the source, alias, and container observations`,
+		`action="/sources/9/remove"`,
+		`active sender may discover this source again`,
+		`This is not secure forensic erasure.`,
+		`id="clear-confirmation"`,
+		`aria-describedby="clear-error" autofocus`,
+		`&lt;img src=x onerror=alert(1)&gt;`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("source mutation shell missing %q", want)
+		}
+	}
+	if strings.Contains(body, `<img src=x`) || strings.Contains(body, `<script>`) {
+		t.Fatal("source mutation shell emitted hostile metadata or CSRF")
+	}
+}
+
 func TestHistoryFragmentsRenderFocusedEscapedState(t *testing.T) {
 	renderer := New()
 	view := HistoryView{

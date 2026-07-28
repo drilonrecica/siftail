@@ -54,7 +54,7 @@ func newBrowserFixture(t *testing.T, publicURL string, administrator bool) *brow
 	}
 	browser := NewBrowser(adminStore, sessionStore, BrowserConfig{
 		PublicURL: publicURL, HistoryStore: logs.NewHistoryStore(db.Reader(), codec),
-		SourceStore: sources.NewStore(db.Reader()),
+		SourceStore: sources.NewCoordinatedStore(db.Reader(), coordinator),
 	})
 	fixture := &browserFixture{
 		db: db, browser: browser, sessions: sessionStore,

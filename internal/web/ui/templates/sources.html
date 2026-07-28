@@ -7,6 +7,7 @@
     </div>
     {{if .Rows}}<p>{{.LoadedCount}} sources on this page</p>{{end}}
   </header>
+  {{if .Notice}}<div class="notice notice-info source-notice" role="status"><p>{{.Notice}}</p></div>{{end}}
   {{if .Error}}
   <div class="history-error" role="alert">
     <strong>{{.Error}}</strong>
@@ -65,6 +66,7 @@
       <a class="button" href="{{.LogsURL}}">Open logs</a>
     </div>
   </header>
+  {{if .Notice}}<div class="notice notice-info source-notice" role="status"><p>{{.Notice}}</p></div>{{end}}
   {{if .CleanupEligible}}<div class="notice notice-info">
     <p>This source has been inactive for at least 90 days. Retained logs or administrative metadata may still protect it from cleanup.</p>
   </div>{{end}}
@@ -88,6 +90,19 @@
         <div><dt>Retained data</dt><dd>{{.Retained}}</dd></div>
       </dl>
     </section>
+    <section>
+      <h3>Display alias</h3>
+      <p>Alias changes only how this source is displayed. Original metadata remains unchanged.</p>
+      <form method="post" action="/sources/{{.ID}}/alias" class="source-action-form">
+        <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+        <label for="source-alias">Alias
+          <input id="source-alias" name="alias" value="{{.AliasValue}}" maxlength="128" aria-describedby="alias-help{{if .AliasError}} alias-error{{end}}"{{if .AliasError}} autofocus{{end}}>
+        </label>
+        <p id="alias-help" class="field-help">Leave empty to remove the alias.</p>
+        {{if .AliasError}}<p id="alias-error" class="form-error" role="alert">{{.AliasError}}</p>{{end}}
+        <button class="button button-primary" type="submit">Save alias</button>
+      </form>
+    </section>
   </div>
   <section class="container-observations">
     <h3>Container observations</h3>
@@ -105,6 +120,33 @@
     </div>
     {{if .ContainersTruncated}}<p class="notice notice-info">Showing the 200 most recently seen container observations.</p>{{end}}
     {{else}}<p>No container identity has been observed for this source.</p>{{end}}
+  </section>
+  <section class="source-danger-zone" aria-labelledby="source-danger-title">
+    <h3 id="source-danger-title">Destructive actions</h3>
+    <div class="source-danger-actions">
+      <form method="post" action="/sources/{{.ID}}/clear-logs" class="source-action-form">
+        <h4>Clear logs</h4>
+        <p>Delete retained application logs for <strong>{{.DisplayName}}</strong> while keeping the source, alias, and container observations.</p>
+        <p>This is not secure forensic erasure.</p>
+        <label for="clear-confirmation">Type <strong>{{.DisplayName}}</strong> to confirm
+          <input id="clear-confirmation" name="confirmation" autocomplete="off"{{if .ClearError}} aria-describedby="clear-error" autofocus{{end}}>
+        </label>
+        {{if .ClearError}}<p id="clear-error" class="form-error" role="alert">{{.ClearError}}</p>{{end}}
+        <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+        <button class="button button-danger" type="submit">Clear logs</button>
+      </form>
+      <form method="post" action="/sources/{{.ID}}/remove" class="source-action-form">
+        <h4>Remove source</h4>
+        <p>Delete retained logs, aliases, unreferenced container history, and removable metadata for <strong>{{.DisplayName}}</strong>.</p>
+        <p>Events committed after deletion starts remain, and an active sender may discover this source again. This is not secure forensic erasure.</p>
+        <label for="remove-confirmation">Type <strong>remove {{.DisplayName}}</strong> to confirm
+          <input id="remove-confirmation" name="confirmation" autocomplete="off"{{if .RemoveError}} aria-describedby="remove-error" autofocus{{end}}>
+        </label>
+        {{if .RemoveError}}<p id="remove-error" class="form-error" role="alert">{{.RemoveError}}</p>{{end}}
+        <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+        <button class="button button-danger" type="submit">Remove source</button>
+      </form>
+    </div>
   </section>
 </section>
 {{end}}

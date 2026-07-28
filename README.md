@@ -332,6 +332,23 @@ returns to History with the exact Server and four stable source-key dimensions.
 The measured 10,000-source plan and latency baseline is recorded in
 [`docs/performance/source-catalog.md`](docs/performance/source-catalog.md).
 
+An alias may be set or removed from source detail and changes presentation
+only. Every mutation uses the single database coordinator and the browser's
+authenticated CSRF plus exact-origin protections. `Clear logs` requires typing
+the displayed source name and deletes only application events at or below a
+captured watermark in 10,000-event transactions; it keeps the stable source,
+alias, Server, and container observations. `Remove source` requires the
+stronger `remove <display name>` phrase, deletes watermark-bounded events,
+aliases, unreferenced container observations, and source metadata when
+referentially safe, but never deletes the trusted Server. Events committed
+after either watermark remain, and an active sender may rediscover a removed
+source.
+
+Both destructive actions notify connected Live clients without waiting for
+them and clearly avoid any promise of forensic erasure. Security-audit storage
+is scheduled for the later audit milestone; these pre-audit operations do not
+claim a persisted audit record yet.
+
 ### Current dependency rationale
 
 - `github.com/mattn/go-sqlite3` v1.14.48 is the accepted SQLite driver. It

@@ -261,6 +261,11 @@ button,
   background: var(--accent-primary-hover);
 }
 
+.button-danger {
+  border-color: var(--status-error);
+  color: var(--status-error);
+}
+
 .button-quiet {
   background: transparent;
 }
@@ -999,6 +1004,10 @@ code {
   margin: var(--space-4);
 }
 
+.source-notice {
+  margin: var(--space-4);
+}
+
 .source-detail-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1036,6 +1045,49 @@ code {
 .container-observations {
   padding: var(--space-4);
   border-top: 1px solid var(--border-subtle);
+}
+
+.source-action-form {
+  display: grid;
+  align-content: start;
+  gap: var(--space-3);
+}
+
+.source-action-form label {
+  display: grid;
+  gap: var(--space-1);
+  font-weight: 650;
+}
+
+.source-action-form .button {
+  justify-self: start;
+}
+
+.source-danger-zone {
+  padding: var(--space-4);
+  border-top: 1px solid var(--border-subtle);
+}
+
+.source-danger-zone > h3 {
+  margin-top: 0;
+  color: var(--status-error);
+}
+
+.source-danger-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-4);
+}
+
+.source-danger-actions .source-action-form {
+  padding: var(--space-4);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+}
+
+.source-danger-actions h4,
+.source-danger-actions p {
+  margin: 0;
 }
 
 :root[data-density="comfortable"] {
@@ -1076,6 +1128,10 @@ code {
   }
 
   .source-detail-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .source-danger-actions {
     grid-template-columns: 1fr;
   }
 

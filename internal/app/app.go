@@ -97,7 +97,7 @@ func (a *App) Run(ctx context.Context) error {
 	a.browser = auth.NewBrowser(administratorStore, sessionStore, auth.BrowserConfig{
 		PublicURL: a.cfg.PublicURL, TrustedProxyCIDRs: a.cfg.TrustedProxyCIDRs,
 		HistoryStore: logs.NewHistoryStore(db.Reader(), cursorCodec),
-		SourceStore:  sources.NewStore(db.Reader()),
+		SourceStore:  sources.NewCoordinatedStore(db.Reader(), coordinator),
 		LiveBroker:   liveBroker,
 	})
 	defer func() { a.browser = nil }()

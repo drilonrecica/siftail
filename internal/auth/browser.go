@@ -106,6 +106,9 @@ func (b *Browser) Register(mux *http.ServeMux) {
 	mux.Handle("GET /logs/live/stream", b.Protect(http.HandlerFunc(b.liveStream)))
 	mux.Handle("GET /sources", b.Protect(http.HandlerFunc(b.sourcesPage)))
 	mux.Handle("GET /sources/{id}", b.Protect(http.HandlerFunc(b.sourceDetailPage)))
+	mux.Handle("POST /sources/{id}/alias", b.Protect(http.HandlerFunc(b.sourceAlias)))
+	mux.Handle("POST /sources/{id}/clear-logs", b.Protect(http.HandlerFunc(b.sourceClearLogs)))
+	mux.Handle("POST /sources/{id}/remove", b.Protect(http.HandlerFunc(b.sourceRemove)))
 }
 
 func (b *Browser) loginPage(w http.ResponseWriter, r *http.Request) {
