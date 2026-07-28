@@ -937,10 +937,20 @@ browser token management, deployment boundaries, or export.
 
 ### SFT-023 — Implement safe inline event details
 
-**Status:** Planned  
+**Status:** Done
 **Milestone:** 0.2.0  
 **Depends on:** SFT-020, SFT-021  
-**Issue/PR:** —
+**Issue/PR:** — (direct maintainer implementation)
+**Completed:** 2026-07-28
+**Completion evidence:** Authenticated real-SQLite handler and escaped-template
+tests cover complete source/timing/severity/common metadata, recursively ordered
+nested attributes, multiline hostile content, 16 KiB initial section bounds,
+exact stored sizes, explicit complete schema-bounded retrieval, invalid queries,
+database failure, and indistinguishable missing/deleted events. Application
+JavaScript tests exclude `innerHTML` and require `textContent` clipboard and
+independent replacement controls. A production binary with real ingestion and
+headless Chromium verified inert hostile markup, multiline clipboard fidelity,
+expansion/collapse focus, light theme, and a 390px layout without overflow.
 
 **Authoritative references:** `DESIGN.md` §§12–13; `AGENTS.md` §§11.5, 18.6.
 

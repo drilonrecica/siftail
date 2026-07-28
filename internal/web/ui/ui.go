@@ -51,6 +51,8 @@ type PresetLink struct {
 
 type HistoryRowView struct {
 	ID           int64
+	DetailID     string
+	DetailURL    string
 	TimestampUTC string
 	Timestamp    string
 	ShowDate     bool
@@ -59,6 +61,36 @@ type HistoryRowView struct {
 	Source       string
 	Message      string
 	OOB          bool
+}
+
+type DetailField struct {
+	Label string
+	Value string
+}
+
+type EventDetailView struct {
+	ID                  int64
+	DetailID            string
+	FullURL             string
+	Full                bool
+	Message             string
+	MessageBytes        int
+	MessageTruncated    bool
+	SourceFields        []DetailField
+	TimingFields        []DetailField
+	SeverityFields      []DetailField
+	CommonFields        []DetailField
+	Attributes          string
+	AttributesBytes     int
+	AttributesTruncated bool
+	Raw                 string
+	RawBytes            int
+	RawTruncated        bool
+}
+
+type EventErrorView struct {
+	Message   string
+	RequestID string
 }
 
 type HistoryView struct {
@@ -119,6 +151,14 @@ func (r *Renderer) HistoryAppend(w http.ResponseWriter, status int, view History
 
 func (r *Renderer) HistoryError(w http.ResponseWriter, status int, view HistoryView) error {
 	return r.render(w, status, "history-error.html", view)
+}
+
+func (r *Renderer) EventDetail(w http.ResponseWriter, status int, view EventDetailView) error {
+	return r.render(w, status, "event-detail.html", view)
+}
+
+func (r *Renderer) EventError(w http.ResponseWriter, status int, view EventErrorView) error {
+	return r.render(w, status, "event-error.html", view)
 }
 
 func (r *Renderer) render(w http.ResponseWriter, status int, name string, view any) error {

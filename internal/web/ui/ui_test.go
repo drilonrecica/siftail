@@ -113,8 +113,9 @@ func TestHistoryFragmentsRenderFocusedEscapedState(t *testing.T) {
 		StreamsValue:  "stderr",
 		Contains:      `<script>alert(1)</script>`,
 		Rows: []HistoryRowView{{
-			ID: 7, TimestampUTC: "2026-07-28T00:30:00Z",
-			Timestamp: "00:30:00.000 UTC", Level: "error", Stream: "stderr",
+			ID: 7, DetailID: "event-detail-7", DetailURL: "/logs/events/7",
+			TimestampUTC: "2026-07-28T00:30:00Z",
+			Timestamp:    "00:30:00.000 UTC", Level: "error", Stream: "stderr",
 			Source: `API <unsafe>`, Message: `<img src=x onerror=alert(1)>`,
 		}},
 		LoadedCount: 1,
@@ -135,6 +136,8 @@ func TestHistoryFragmentsRenderFocusedEscapedState(t *testing.T) {
 		`&lt;img src=x onerror=alert(1)&gt;`,
 		`id="load-older"`,
 		`hx-disabled-elt="this"`,
+		`aria-controls="event-detail-7"`,
+		`hx-get="/logs/events/7"`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("History fragment missing %q", want)
@@ -155,6 +158,38 @@ func TestHistoryFragmentsRenderFocusedEscapedState(t *testing.T) {
 		!strings.Contains(appendBody, `hx-swap-oob="beforeend:#history-rows"`) ||
 		!strings.Contains(appendBody, `id="history-pagination"`) {
 		t.Fatalf("append fragment replaced the wrong boundary: %s", appendBody)
+	}
+}
+
+func TestEventDetailTemplateEscapesPayloadAndExposesSafeControls(t *testing.T) {
+	renderer := New()
+	response := httptest.NewRecorder()
+	view := EventDetailView{
+		ID: 4, DetailID: "event-detail-4", FullURL: "/logs/events/4?full=1",
+		Message: `<script>alert(1)</script>` + "\nnext", MessageBytes: 32,
+		MessageTruncated: true,
+		SourceFields:     []DetailField{{Label: "Application", Value: `API <unsafe>`}},
+		TimingFields:     []DetailField{{Label: "Event time", Value: "2026-07-28T00:00:00Z"}},
+		SeverityFields:   []DetailField{{Label: "Level", Value: "error"}},
+		CommonFields:     []DetailField{{Label: "HTTP path", Value: `/<img src=x>`}},
+		Attributes:       `{"a":"<b>"}`, AttributesBytes: 11,
+		Raw: `<raw>&`, RawBytes: 6,
+	}
+	if err := renderer.EventDetail(response, http.StatusOK, view); err != nil {
+		t.Fatal(err)
+	}
+	body := response.Body.String()
+	for _, want := range []string{
+		`tabindex="-1"`, `data-collapse-detail`, `data-copy-target="event-message-4"`,
+		`hx-get="/logs/events/4?full=1"`, `API &lt;unsafe&gt;`,
+		`&lt;script&gt;alert(1)&lt;/script&gt;`, `&lt;raw&gt;&amp;`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("detail missing %q", want)
+		}
+	}
+	if strings.Contains(body, "<script>alert") || strings.Contains(body, "<img src=x>") {
+		t.Fatal("detail emitted unescaped log content")
 	}
 }
 
@@ -207,7 +242,9 @@ func TestEmbeddedAssetsTypesIntegrityAndSafety(t *testing.T) {
 	}
 	if strings.Contains(string(appJS), "innerHTML") ||
 		!strings.Contains(string(appJS), "historyCacheSize = 0") ||
-		!strings.Contains(string(appJS), "rows.length > 1000") {
+		!strings.Contains(string(appJS), "rows.length > 1000") ||
+		!strings.Contains(string(appJS), "navigator.clipboard.writeText(source.textContent)") ||
+		!strings.Contains(string(appJS), "replaceChildren()") {
 		t.Fatal("application JavaScript violates DOM/history constraints")
 	}
 	css, err := files.ReadFile("assets/app.css")

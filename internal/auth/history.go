@@ -194,6 +194,8 @@ func buildHistoryView(
 		}
 		view.Rows[index] = webui.HistoryRowView{
 			ID:           event.ID,
+			DetailID:     fmt.Sprintf("event-detail-%d", event.ID),
+			DetailURL:    fmt.Sprintf("/logs/events/%d", event.ID),
 			TimestampUTC: eventTime.Format(time.RFC3339Nano),
 			Timestamp:    eventTime.Format("15:04:05.000") + " UTC",
 			ShowDate:     showDate,

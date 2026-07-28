@@ -141,11 +141,16 @@
 
 {{define "history-row"}}
 <article class="log-row level-{{.Level}}" data-event-id="{{.ID}}"{{if .OOB}} hx-swap-oob="beforeend:#history-rows"{{end}}>
+  <button class="event-toggle" type="button" aria-label="Show details for event {{.ID}}"
+          aria-expanded="false" aria-controls="{{.DetailID}}"
+          hx-get="{{.DetailURL}}" hx-target="#{{.DetailID}}" hx-swap="innerHTML"
+          hx-disabled-elt="this">›</button>
   <time datetime="{{.TimestampUTC}}" data-local-time{{if .ShowDate}} data-show-date{{end}}>{{.Timestamp}}</time>
   <span class="severity severity-{{.Level}}">{{.Level}}</span>
   <span class="row-source">{{.Source}}</span>
   <span class="row-message">{{.Message}}</span>
   <span class="row-stream">{{.Stream}}</span>
+  <div id="{{.DetailID}}" class="event-detail-slot"></div>
 </article>
 {{end}}
 

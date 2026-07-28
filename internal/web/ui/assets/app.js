@@ -96,6 +96,45 @@
   );
 
   document.addEventListener("click", (event) => {
+    const collapse = event.target.closest("[data-collapse-detail]");
+    if (collapse) {
+      const slot = collapse.closest(".event-detail-slot");
+      const row = slot?.closest(".log-row");
+      const toggle = row?.querySelector(".event-toggle");
+      slot?.replaceChildren();
+      if (toggle) {
+        toggle.setAttribute("aria-expanded", "false");
+        toggle.textContent = "›";
+        toggle.focus({ preventScroll: true });
+      }
+      return;
+    }
+    const copy = event.target.closest("[data-copy-target]");
+    if (copy) {
+      const source = document.getElementById(copy.dataset.copyTarget);
+      if (!source || !navigator.clipboard) return;
+      const original = copy.textContent;
+      navigator.clipboard.writeText(source.textContent).then(() => {
+        copy.textContent = "Copied";
+        window.setTimeout(() => {
+          copy.textContent = original;
+        }, 1500);
+      }).catch(() => {
+        copy.textContent = "Copy failed";
+      });
+      return;
+    }
+    const expandedToggle = event.target.closest(".event-toggle[aria-expanded='true']");
+    if (expandedToggle) {
+      event.preventDefault();
+      event.stopPropagation();
+      const slot = document.getElementById(expandedToggle.getAttribute("aria-controls"));
+      slot?.replaceChildren();
+      expandedToggle.setAttribute("aria-expanded", "false");
+      expandedToggle.textContent = "›";
+      expandedToggle.focus({ preventScroll: true });
+      return;
+    }
     const rangeButton = event.target.closest("[data-focus-range]");
     if (rangeButton) {
       rangeButton.closest("form")?.querySelector('input[name="from"]')?.focus();
@@ -176,6 +215,15 @@
     localizeTimes(event.target);
     prepareResponsiveHistory(event.target);
     updateHistoryCount();
+    if (event.target.matches?.(".event-detail-slot")) {
+      const row = event.target.closest(".log-row");
+      const toggle = row?.querySelector(".event-toggle");
+      if (toggle) {
+        toggle.setAttribute("aria-expanded", "true");
+        toggle.textContent = "⌄";
+      }
+      event.target.querySelector(".event-detail")?.focus({ preventScroll: true });
+    }
     if (
       event.detail.requestConfig?.elt?.id === "load-older" &&
       !document.querySelector("#load-older")

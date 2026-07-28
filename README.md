@@ -281,6 +281,16 @@ payload, attributes, and detail-only fields. The browser keeps at most 1,000
 History rows and announces when its presentation cap requires refinement;
 stored events remain unchanged.
 
+Each retained row can expand independently through the authenticated
+`/logs/events/{id}` route. The escaped inline view shows the message, full
+source hierarchy, event and receive timing, level and stream, normalized common
+fields, recursively ordered JSON attributes, and the raw payload. Initial
+message, attributes, and raw sections are each capped at 16 KiB and report the
+exact stored byte size; an explicit in-place action may retrieve the complete
+schema-bounded event. There is no detail download or export route. Copy actions
+read `textContent` through the browser clipboard API, and deletion or an unknown
+ID returns the same safe not-found fragment.
+
 ### Current dependency rationale
 
 - `github.com/mattn/go-sqlite3` v1.14.48 is the accepted SQLite driver. It

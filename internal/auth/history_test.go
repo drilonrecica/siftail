@@ -284,19 +284,22 @@ func seedBrowserHistory(t *testing.T, fixture *browserFixture) {
 		}
 		for _, event := range events {
 			var logger, requestID, errorType, method any
-			var status any
+			var status, path, duration, attributes any
 			if event.common {
 				logger, requestID, errorType, method, status =
 					"http", "request-1", "temporary", "POST", int64(503)
+				path, duration = "/v1/<unsafe>", 12.5
+				attributes = `{"z":{"d":"<script>nested</script>","b":2},"a":"first"}`
 			}
 			if _, err := tx.Exec(`INSERT INTO log_events(
 				event_at_us,received_at_us,source_id,container_instance_id,
 				stream,level_normalized,message_raw,message_text,
-				logger,request_id,error_type,http_method,http_status
-			) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+				attributes_json,logger,request_id,error_type,http_method,http_path,
+				http_status,duration_ms
+			) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 				event.at, event.at+1, 1, 1, event.stream, event.level,
 				[]byte(event.message), event.message,
-				logger, requestID, errorType, method, status,
+				attributes, logger, requestID, errorType, method, path, status, duration,
 			); err != nil {
 				return err
 			}

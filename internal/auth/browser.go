@@ -77,6 +77,7 @@ func (b *Browser) Register(mux *http.ServeMux) {
 	mux.Handle("POST /session/logout", b.Protect(http.HandlerFunc(b.logout)))
 	mux.Handle("GET /logs", b.Protect(http.HandlerFunc(b.historyPage)))
 	mux.Handle("GET /logs/rows", b.Protect(http.HandlerFunc(b.historyRows)))
+	mux.Handle("GET /logs/events/{id}", b.Protect(http.HandlerFunc(b.eventDetail)))
 }
 
 func (b *Browser) loginPage(w http.ResponseWriter, r *http.Request) {

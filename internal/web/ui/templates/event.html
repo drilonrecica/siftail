@@ -1,0 +1,81 @@
+{{define "event-detail.html"}}
+<section class="event-detail" tabindex="-1" aria-labelledby="event-detail-title-{{.ID}}">
+  <header class="event-detail-header">
+    <div>
+      <p class="eyebrow">Event {{.ID}}</p>
+      <h2 id="event-detail-title-{{.ID}}">Event details</h2>
+    </div>
+    <button class="button button-quiet" type="button" data-collapse-detail>Collapse details</button>
+  </header>
+
+  <section class="detail-section" aria-labelledby="event-message-title-{{.ID}}">
+    <div class="detail-section-heading">
+      <h3 id="event-message-title-{{.ID}}">Message</h3>
+      <span>{{.MessageBytes}} bytes{{if .MessageTruncated}}, preview truncated{{end}}</span>
+      <button class="button button-quiet copy-button" type="button"
+              data-copy-target="event-message-{{.ID}}">Copy message</button>
+    </div>
+    <pre id="event-message-{{.ID}}">{{.Message}}</pre>
+  </section>
+
+  <div class="detail-metadata">
+    <section class="detail-section">
+      <h3>Source</h3>
+      <dl>{{range .SourceFields}}<div><dt>{{.Label}}</dt><dd>{{.Value}}</dd></div>{{end}}</dl>
+    </section>
+    <section class="detail-section">
+      <h3>Timing</h3>
+      <dl>{{range .TimingFields}}<div><dt>{{.Label}}</dt><dd>{{.Value}}</dd></div>{{end}}</dl>
+    </section>
+    <section class="detail-section">
+      <h3>Level and stream</h3>
+      <dl>{{range .SeverityFields}}<div><dt>{{.Label}}</dt><dd>{{.Value}}</dd></div>{{end}}</dl>
+    </section>
+    {{if .CommonFields}}
+    <section class="detail-section">
+      <h3>Common fields</h3>
+      <dl>{{range .CommonFields}}<div><dt>{{.Label}}</dt><dd>{{.Value}}</dd></div>{{end}}</dl>
+    </section>
+    {{end}}
+  </div>
+
+  {{if .Attributes}}
+  <section class="detail-section">
+    <div class="detail-section-heading">
+      <h3>Attributes</h3>
+      <span>{{.AttributesBytes}} bytes{{if .AttributesTruncated}}, preview truncated{{end}}</span>
+      <button class="button button-quiet copy-button" type="button"
+              data-copy-target="event-attributes-{{.ID}}">Copy attributes</button>
+    </div>
+    <pre id="event-attributes-{{.ID}}">{{.Attributes}}</pre>
+  </section>
+  {{end}}
+
+  <section class="detail-section">
+    <div class="detail-section-heading">
+      <h3>Raw payload</h3>
+      <span>{{.RawBytes}} bytes{{if .RawTruncated}}, preview truncated{{end}}</span>
+      <button class="button button-quiet copy-button" type="button"
+              data-copy-target="event-raw-{{.ID}}">Copy raw payload</button>
+    </div>
+    <pre id="event-raw-{{.ID}}">{{.Raw}}</pre>
+  </section>
+
+  {{if or .MessageTruncated .AttributesTruncated .RawTruncated}}
+  <button class="button button-secondary" type="button"
+          hx-get="{{.FullURL}}" hx-target="#{{.DetailID}}" hx-swap="innerHTML"
+          hx-disabled-elt="this">Show complete stored content</button>
+  {{else if .Full}}
+  <p class="field-help">Complete stored content is shown.</p>
+  {{end}}
+</section>
+{{end}}
+
+{{define "event-error.html"}}
+<div class="event-detail event-detail-error" tabindex="-1" role="alert">
+  <strong>Event details could not be loaded.</strong>
+  <span>{{.Message}}</span>
+  {{if .RequestID}}<span>Request ID: <code>{{.RequestID}}</code></span>{{end}}
+  <button class="button button-quiet" type="button" data-collapse-detail>Close</button>
+</div>
+{{end}}
