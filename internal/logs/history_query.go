@@ -86,7 +86,7 @@ func ParseHistoryQuery(values url.Values, now time.Time) (HistoryQuery, error) {
 		"application": &query.Application, "service": &query.Service,
 	} {
 		*target = values.Get(name)
-		if err := validateQueryText(*target, 128, false); err != nil {
+		if err := validateQueryText(*target, 128, true); err != nil {
 			return HistoryQuery{}, fmt.Errorf("%s: %w", name, err)
 		}
 	}

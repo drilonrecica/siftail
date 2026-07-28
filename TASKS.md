@@ -807,10 +807,17 @@ dependency unless cryptographic key storage requires a documented addition.
 
 ### SFT-020 — Implement the historical SQLite query store
 
-**Status:** Planned  
+**Status:** Done
 **Milestone:** 0.2.0  
 **Depends on:** SFT-019  
-**Issue/PR:** —
+**Issue/PR:** — (direct maintainer implementation)
+**Completed:** 2026-07-28
+**Completion evidence:** Real migrated-SQLite tests cover canonical ordering,
+older/newer keysets at equal timestamps, every filter family, literal wildcard
+characters, ASCII/non-ASCII folding, null fields, event lookup, inactive
+cascading catalog options, cancellation, hostile cursors, and existing-index
+plans. The documented 100k and 1M benchmarks measure unfiltered, selective, and
+literal reads; the 10M review remains the stated pre-public gate.
 
 **Authoritative references:** `ARCHITECTURE.md` §§10.7–10.8, 16; `AGENTS.md`
 §18.2.

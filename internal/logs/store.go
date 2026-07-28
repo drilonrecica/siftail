@@ -6,10 +6,10 @@ import (
 	"fmt"
 )
 
-// Store owns read-only application-log SQL. Historical filtering is added in
-// SFT-020; this initial bounded read supports durable ingestion verification.
+// Store owns bounded read-only application-log SQL.
 type Store struct {
-	db *sql.DB
+	db          *sql.DB
+	cursorCodec *CursorCodec
 }
 
 func NewStore(db *sql.DB) *Store {

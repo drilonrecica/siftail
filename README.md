@@ -240,6 +240,15 @@ cursors and cursors reused with another query. A random 32-byte key is created
 through the database mutation coordinator and persisted in `settings`; this
 contract adds no schema migration, dependency, or external key service.
 
+Historical reads use explicit bound SQLite queries, fetch only `limit+1`, and
+retain the canonical `event_at_us DESC, id DESC` order across equal timestamps.
+Known filters compose without accepting SQL syntax; message search uses
+SQLite's ASCII-only `lower()` with `instr()`, so `%`, `_`, and backslash are
+literal and non-ASCII case variants remain distinct. Source-catalog reads
+include inactive retained sources and are capped at 10,000 options per level.
+The measured 100k/1M development baseline and query-plan review are recorded in
+[`docs/performance/history-queries.md`](docs/performance/history-queries.md).
+
 ### Current dependency rationale
 
 - `github.com/mattn/go-sqlite3` v1.14.48 is the accepted SQLite driver. It
