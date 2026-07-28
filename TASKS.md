@@ -597,10 +597,15 @@ contract mismatch must update authoritative docs before implementation changes.
 
 ### SFT-015 — Establish benchmarks and close the `0.1.0` gate
 
-**Status:** Planned  
+**Status:** Done
 **Milestone:** 0.1.0  
 **Depends on:** SFT-002, SFT-014  
-**Issue/PR:** —
+**Issue/PR:** — (direct maintainer implementation)
+**Completed:** 2026-07-28
+**Completion evidence:** The reproducible normalization, decode, admission,
+source-resolution, SQLite commit, idempotent retry, HTTP latency, sustained
+batch, queue-ledger, and RSS baselines plus the `PRODUCT.md` §19.1
+requirement-to-test matrix are recorded in `docs/performance/0.1.0.md`.
 
 **Authoritative references:** `PRODUCT.md` §§15, 19.1; `ARCHITECTURE.md` §§33,
 36; `AGENTS.md` §§17, 29.

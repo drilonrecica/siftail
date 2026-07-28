@@ -78,6 +78,10 @@ make build      # build the siftail binary
 make check      # formatting, vet, tests, and metadata-bearing build
 ```
 
+Measured engineering baselines are recorded under
+[`docs/performance/`](docs/performance/); they describe their exact hardware and
+method and are not cross-machine performance guarantees.
+
 No process secret environment variable exists yet. When one is introduced,
 direct and `_FILE` forms will be mutually exclusive; `_FILE` input removes only
 trailing CR/LF bytes and never appears in sanitized configuration or logs.
