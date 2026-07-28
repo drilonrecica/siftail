@@ -89,6 +89,8 @@ func newBrowserFixture(t *testing.T, publicURL string, administrator bool) *brow
 		RetentionStore:  retentionStore,
 		AuditStore:      auditStore,
 		BackupManager:   backupManager,
+		ExportStore:     logs.NewExportStore(db.Reader(), logs.ExportLimits{}),
+		ExportDataDir:   filepath.Dir(databasePath),
 		DatabaseChecker: databaseChecker,
 		StatusStore: statusstate.NewStore(
 			db.Reader(), databasePath, nil, retentionStore, operationalState,

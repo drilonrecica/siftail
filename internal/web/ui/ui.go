@@ -122,6 +122,7 @@ type EventErrorView struct {
 
 type HistoryView struct {
 	CanonicalURL   string
+	ExportURL      string
 	From           string
 	To             string
 	RangeSummary   string
@@ -154,6 +155,8 @@ type HistoryView struct {
 	Error          string
 	ErrorRequestID string
 	Announcement   string
+	ExportFilters  []DetailField
+	ExportError    string
 }
 
 type LiveView struct {

@@ -1284,6 +1284,26 @@ after restore. Export schema versions are explicit compatibility contracts;
 new fields or incompatible representation changes require a new version rather
 than silently changing version one.
 
+Historical export is a deliberate authenticated-administrator egress action,
+not a read-only navigation or public API. It requires a same-origin,
+CSRF-protected POST and an explicit confirmation after showing the absolute
+range, source scope, active filters, selected format, and hard limits. GET
+never initiates an export.
+
+Only one export workflow runs at a time. It creates a private mode-0600 staging
+file on the persistent local volume and does not send response headers until
+generation, synchronization, validation, and the mandatory success audit
+commit have completed. Limit, cancellation, deadline, storage, and audit
+failure delete the staging file and never expose a partial artifact. The
+artifact is deleted after delivery, including an interrupted delivery.
+
+Audit records contain only the closed result category, format, emitted event
+count when applicable, optional trusted Server ID, administrator attribution,
+and request ID. Source labels, message filters, other query text, payload,
+attributes, filesystem path, and filename are excluded. A client disconnect
+during delivery records a separate canceled outcome after the already-durable
+pre-delivery success record.
+
 Every attempt produces bounded safe operation metadata: requested format,
 Server ID when scoped, absolute range, configured row/byte maxima, emitted
 row/byte counts, and a closed result category. Filter text and event content

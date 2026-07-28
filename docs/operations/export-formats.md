@@ -1,11 +1,32 @@
 # History export format and store contract
 
 **Reviewed:** 2026-07-28
-**Scope:** SFT-045 version-one streaming formats and limits
+**Scope:** SFT-045/SFT-046 version-one formats, limits, and browser workflow
 
 SFT-045 defines the internal streaming store and stable payload formats.
-SFT-046 exposes the authenticated audited workflow. There is no public export
-route until that workflow is complete.
+SFT-046 exposes them only through the authenticated administrator History
+workflow. This is not a public API.
+
+## Browser workflow and security
+
+Open **Export matching History** from the History result view. Before
+generation, the dialog shows the exact source scope, inclusive-from/
+exclusive-to absolute UTC range, active filters, selected format, and all hard
+limits. Every export requires confirmation because Siftail deliberately avoids
+an expensive pre-export total count.
+
+Initiation is a same-origin, CSRF-protected POST under the current opaque
+administrator session. GET does not generate an artifact. One workflow runs
+at a time. Siftail generates a random mode-0600 staging file under the
+configured data directory, synchronizes and validates it, and durably records
+the sanitized success audit before sending download headers. It deletes the
+staging file after delivery or any limit, cancellation, deadline, storage,
+audit, or response-write failure. No partial artifact is offered.
+
+The fixed attachment name contains only `siftail-history`, the absolute UTC
+range, and `.txt` or `.ndjson`. Responses are `text/plain; charset=utf-8` or
+`application/x-ndjson`, with `Cache-Control: no-store` and
+`X-Content-Type-Options: nosniff`.
 
 ## Scope and limits
 
@@ -83,10 +104,13 @@ An empty text result contains only the two header lines.
 
 ## Safe operation metadata
 
-The store returns format, optional Server ID, absolute range, row/byte maxima,
-emitted row/byte count, and one closed failure category. This is enough for the
-mandatory SFT-046 security audit without copying source names, filter text,
-attributes, raw payload, or messages into audit/process logs.
+The workflow audits success, workflow rejection, cancellation, and operational
+failure. Records contain only format, optional trusted Server ID, emitted count
+when applicable, administrator/request attribution, and a closed result
+category. A delivery disconnect adds a canceled result after the mandatory
+pre-delivery success record. Source names, filter text, time values, filenames,
+filesystem paths, attributes, raw payload, and messages never enter audit or
+process logs.
 
 ## Development-host measurement
 

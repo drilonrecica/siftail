@@ -108,6 +108,53 @@ func TestShellTemplateUsesLocalCSPCompatibleAssets(t *testing.T) {
 	}
 }
 
+func TestHistoryExportDialogIsExplicitBoundedAndEscaped(t *testing.T) {
+	renderer := New()
+	response := httptest.NewRecorder()
+	if err := renderer.Shell(response, http.StatusOK, ShellView{
+		CSRFToken: "shell-csrf",
+		Mode:      "history",
+		History: HistoryView{
+			CanonicalURL:  "/logs?from=from&amp;to=to",
+			ExportURL:     `/logs/export?contains=%3Cscript%3E`,
+			From:          "2026-07-28T00:00:00Z",
+			To:            "2026-07-28T01:00:00Z",
+			RangeSummary:  "one hour",
+			SourceSummary: `<script>source</script>`,
+			ExportFilters: []DetailField{{
+				Label: "Contains", Value: `<script>payload</script>`,
+			}},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	body := response.Body.String()
+	for _, want := range []string{
+		`data-open-export`,
+		`data-export-dialog`,
+		`method="post"`,
+		`action="/logs/export?contains=%3Cscript%3E"`,
+		`Text (siftail-text-v1, .txt)`,
+		`NDJSON (schema 1, .ndjson)`,
+		`100,000 events`,
+		`256 MiB`,
+		`31-day range`,
+		`two minutes`,
+		`name="confirmation"`,
+		`required`,
+		`every matching event`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("History export dialog missing %q", want)
+		}
+	}
+	if strings.Contains(body, `<script>source`) ||
+		strings.Contains(body, `<script>payload`) ||
+		strings.Count(body, `name="csrf_token"`) != 1 {
+		t.Fatalf("History export dialog exposed unsafe content or fragment CSRF: %s", body)
+	}
+}
+
 func TestSettingsShellRendersBoundedAccessibleRetentionForm(t *testing.T) {
 	renderer := New()
 	response := httptest.NewRecorder()

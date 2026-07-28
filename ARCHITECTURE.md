@@ -1082,11 +1082,16 @@ payload and validated JSON attributes. Synchronous writer calls provide
 backpressure; caller cancellation and an internal maximum two-minute context
 stop SQLite iteration between writes.
 
-One export workflow may run at a time. SFT-046 writes store output to a private
-staging file under `/data`, verifies final row and byte limits, then serves the
-completed artifact. The streaming store can have written an invalid partial
-staging artifact when it returns a limit/cancellation/write error; callers must
-delete it and must never send it as a successful response.
+One synchronous export workflow may run at a time. The authenticated browser
+handler writes store output to a random mode-0600 staging file under `/data`,
+synchronizes it, verifies the final row and byte limits, commits a sanitized
+success audit, seeks to the beginning, and only then sends attachment headers
+and the completed artifact. The streaming store can have written an invalid
+partial staging artifact when it returns a limit/cancellation/write error; the
+handler deletes it and never sends it as a successful response. The completed
+staging artifact is also deleted after delivery. A failed response write adds
+a sanitized canceled-delivery audit without changing the earlier mandatory
+success audit.
 
 Requirements:
 
@@ -1108,8 +1113,12 @@ Initial export safety defaults:
 The store returns bounded `ExportAttempt`/`ExportResult` metadata even on
 ordinary failure: format, optional Server ID, absolute range, maxima, emitted
 rows/bytes, and a closed category (`canceled`, `timeout`, `row_limit`,
-`byte_limit`, or `failed`). SFT-046 uses only this safe metadata for mandatory
-audit; it never records filters or content.
+`byte_limit`, or `failed`). The browser workflow uses only this safe metadata for mandatory
+audit; it never records filters or content. The protected POST route requires
+the ordinary browser session, same-origin check, CSRF token, bounded exact
+form, and explicit confirmation. A GET cannot initiate generation. Attachment
+names contain only the fixed product prefix, absolute UTC range, and fixed
+format extension; responses use no-store and nosniff headers.
 
 ---
 
@@ -1288,7 +1297,7 @@ GET  /logs
 GET  /logs/rows
 GET  /logs/events/{id}
 GET  /logs/live/stream
-GET  /logs/export
+POST /logs/export
 
 GET  /servers
 POST /servers

@@ -138,6 +138,7 @@ func buildHistoryView(
 	to := time.UnixMicro(query.ToUS).UTC()
 	view := webui.HistoryView{
 		CanonicalURL: historyURL(query),
+		ExportURL:    "/logs/export?" + query.CanonicalQuery(),
 		From:         from.Format(time.RFC3339Nano),
 		To:           to.Format(time.RFC3339Nano),
 		RangeSummary: from.Format("02 Jan 2006 15:04") + "–" +
@@ -155,6 +156,7 @@ func buildHistoryView(
 		LevelsValue:   joinLevels(query.Levels),
 		StreamsValue:  joinStreams(query.Streams),
 	}
+	view.ExportFilters = historyExportFilters(query)
 	if len(page.Events) == 1 {
 		view.LoadedLabel = "event"
 	}
@@ -215,6 +217,37 @@ func buildHistoryView(
 		view.NextURL = "/logs/rows?" + values.Encode()
 	}
 	return view
+}
+
+func historyExportFilters(query logs.HistoryQuery) []webui.DetailField {
+	filters := make([]webui.DetailField, 0, 14)
+	add := func(label, value string) {
+		if value != "" {
+			filters = append(filters, webui.DetailField{Label: label, Value: value})
+		}
+	}
+	if query.ServerID > 0 {
+		add("Server ID", strconv.FormatInt(query.ServerID, 10))
+	}
+	add("Project", query.Project)
+	add("Environment", query.Environment)
+	add("Application", query.Application)
+	add("Service", query.Service)
+	if query.ContainerID > 0 {
+		add("Container instance ID", strconv.FormatInt(query.ContainerID, 10))
+	}
+	add("Levels", joinLevels(query.Levels))
+	add("Streams", joinStreams(query.Streams))
+	add("Contains", query.Contains)
+	add("Does not contain", query.Excludes)
+	add("Request ID", query.RequestID)
+	add("Logger", query.Logger)
+	add("HTTP method", query.HTTPMethod)
+	if query.HTTPStatus != nil {
+		add("HTTP status", strconv.FormatInt(*query.HTTPStatus, 10))
+	}
+	add("Error type", query.ErrorType)
+	return filters
 }
 
 func historyHasFilters(query logs.HistoryQuery) bool {

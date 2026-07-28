@@ -794,6 +794,76 @@ code {
   font-size: 0.85rem;
 }
 
+.history-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  justify-content: flex-end;
+}
+
+.export-dialog {
+  background: var(--surface-raised);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  color: var(--text-primary);
+  inline-size: min(42rem, calc(100% - 2rem));
+  max-block-size: calc(100% - 2rem);
+  padding: var(--space-6);
+}
+
+.export-dialog::backdrop {
+  background: rgb(0 0 0 / 68%);
+}
+
+.export-dialog form {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.export-dialog h2,
+.export-dialog p {
+  margin: 0;
+}
+
+.export-scope {
+  border-block: 1px solid var(--border-subtle);
+  display: grid;
+  margin: 0;
+  max-block-size: 15rem;
+  overflow: auto;
+  padding-block: var(--space-2);
+}
+
+.export-scope div {
+  display: grid;
+  gap: var(--space-2);
+  grid-template-columns: minmax(8rem, 0.35fr) 1fr;
+  padding-block: var(--space-1);
+}
+
+.export-scope dt {
+  color: var(--text-muted);
+}
+
+.export-scope dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.export-confirmation {
+  align-items: start;
+  display: flex;
+  gap: var(--space-2);
+}
+
+.dialog-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  justify-content: flex-end;
+}
+
 .live-form {
   grid-template-columns: repeat(10, minmax(0, 1fr));
 }

@@ -1349,15 +1349,24 @@ Page direction, loaded-row count, and `Load older` cursor do not change export
 scope. Active filter text appears only in the authenticated dialog, never in
 audit metadata or the suggested filename.
 
-### 22.3 Large export
+### 22.3 Export confirmation
 
-Require explicit confirmation.
+Require explicit confirmation for every export because the complete matching
+count is deliberately not calculated before generation. This is stronger than
+confirming only known-large results and keeps the egress decision consistent.
 
-During streaming:
+During preparation and delivery:
 
-- button shows progress state;
+- an accessible status beside the export action states that the complete
+  artifact is being prepared and will download only after auditing succeeds;
 - cancellation is possible through browser download behavior;
 - UI does not freeze.
+
+Generation uses native download navigation rather than replacing the History
+region. Validation and limit failures render the authenticated History view
+again with the exact filters preserved and a localized error. Session expiry
+uses the ordinary sign-in redirect. Closing the dialog restores focus to its
+trigger.
 
 ---
 

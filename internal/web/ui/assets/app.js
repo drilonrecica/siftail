@@ -96,6 +96,24 @@
   );
 
   document.addEventListener("click", (event) => {
+    const openExport = event.target.closest("[data-open-export]");
+    if (openExport) {
+      const dialog = document.querySelector("[data-export-dialog]");
+      if (dialog instanceof HTMLDialogElement) {
+        dialog.showModal();
+        dialog.querySelector("select")?.focus();
+      }
+      return;
+    }
+    const closeExport = event.target.closest("[data-close-export]");
+    if (closeExport) {
+      const dialog = closeExport.closest("dialog");
+      if (dialog instanceof HTMLDialogElement) {
+        dialog.close();
+        document.querySelector("[data-open-export]")?.focus();
+      }
+      return;
+    }
     const collapse = event.target.closest("[data-collapse-detail]");
     if (collapse) {
       const slot = collapse.closest(".event-detail-slot");
@@ -156,6 +174,33 @@
     if (!hidden) return;
     hidden.value = requested === null ? "" : Array.from(requested).join(",");
     hidden.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+
+  document.addEventListener("submit", (event) => {
+    const form = event.target;
+    if (!(form instanceof HTMLFormElement) || !form.matches("[data-export-form]")) {
+      return;
+    }
+    const csrfSource = document.querySelector(
+      '.header-actions form[action="/session/logout"] input[name="csrf_token"]',
+    );
+    if (csrfSource instanceof HTMLInputElement) {
+      let csrfInput = form.querySelector('input[name="csrf_token"]');
+      if (!(csrfInput instanceof HTMLInputElement)) {
+        csrfInput = document.createElement("input");
+        csrfInput.type = "hidden";
+        csrfInput.name = "csrf_token";
+        form.append(csrfInput);
+      }
+      csrfInput.value = csrfSource.value;
+    }
+    const status = document.querySelector("#history-export-status");
+    if (status) {
+      status.textContent =
+        "Preparing the complete export. The download starts only after generation and auditing succeed.";
+    }
+    const dialog = form.closest("dialog");
+    if (dialog instanceof HTMLDialogElement) dialog.close();
   });
 
   const localizeTimes = (root) => {

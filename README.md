@@ -369,11 +369,15 @@ schema-bounded event. There is no detail download or export route. Copy actions
 read `textContent` through the browser clipboard API, and deletion or an unknown
 ID returns the same safe not-found fragment.
 
-The bounded export store and stable `siftail-text-v1`/NDJSON schema-1 contracts
-are implemented for the next audited workflow, but remain unexposed until that
-workflow is complete. They reuse the typed History filters, stream canonical
-newest-first events with one-row encoder state, and fail rather than return a
-partial result at 100,000 events, 256 MiB, 31 days, or the query deadline. See
+History offers an authenticated **Export matching History** action for the
+stable `siftail-text-v1` and NDJSON schema-1 formats. The confirmation shows
+the exact source scope, absolute range, active filters, format, and limits.
+Export reuses the typed History filters, includes the complete matching range
+rather than only loaded rows, and fails without a partial download at 100,000
+events, 256 MiB, 31 days, or the query deadline. It is a deliberate local-data
+egress action protected by the administrator session, Origin validation, CSRF,
+private staging, and sanitized mandatory audit records; there is no public
+export API. See
 [`docs/operations/export-formats.md`](docs/operations/export-formats.md).
 
 ### Source catalog

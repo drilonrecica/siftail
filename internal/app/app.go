@@ -160,6 +160,8 @@ func (a *App) Run(ctx context.Context) error {
 		StatusStore:       statusStore,
 		AuditStore:        auditStore,
 		BackupManager:     backupManager,
+		ExportStore:       logs.NewExportStore(db.Reader(), logs.ExportLimits{}),
+		ExportDataDir:     a.cfg.DataDir,
 		DatabaseChecker:   databaseChecker,
 		LiveBroker:        liveBroker,
 	})

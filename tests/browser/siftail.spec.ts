@@ -178,6 +178,61 @@ test("primary filters update and restore URL-owned History state", async ({ page
   await expect(page.locator(".log-row")).toHaveCount(1);
 });
 
+test("confirmed History export preserves filters, focus, themes, mobile, and expiry", async ({
+  page,
+}) => {
+  await login(page);
+  await page.locator("#contains-filter").fill("needle-hostile");
+  await expect(page).toHaveURL(/contains=needle-hostile/);
+  const open = page.getByRole("button", { name: "Export matching History" });
+  await open.focus();
+  await open.press("Enter");
+  const dialog = page.getByRole("dialog", { name: "Export matching History" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByText("needle-hostile", { exact: true })).toBeVisible();
+  await expect(dialog.getByText(/100,000 events/)).toBeVisible();
+  await expect(dialog.locator("select[name='format']")).toBeFocused();
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+  await expect(open).toBeFocused();
+
+  await page.locator("[data-theme-select]").selectOption("dark");
+  await open.click();
+  await dialog.locator("select[name='format']").selectOption("ndjson");
+  await dialog.getByRole("checkbox").check();
+  const downloadPromise = page.waitForEvent("download");
+  await dialog.getByRole("button", { name: "Create download" }).click();
+  const download = await downloadPromise;
+  expect(download.suggestedFilename()).toMatch(
+    /^siftail-history-\d{8}T\d{6}Z-\d{8}T\d{6}Z\.ndjson$/,
+  );
+  expect(await download.failure()).toBeNull();
+  await expect(page.locator("#history-export-status")).toContainText(
+    "download starts only after generation and auditing succeed",
+  );
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.locator("[data-theme-select]").selectOption("light");
+  await open.click();
+  expect(await page.evaluate(
+    () => document.documentElement.scrollWidth > window.innerWidth,
+  )).toBe(false);
+  const results = await new AxeBuilder({ page })
+    .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"])
+    .analyze();
+  expect(results.violations.map((violation) => violation.id)).toEqual([]);
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+
+  const state = readState();
+  execFileSync(state.binary, ["sessions", "revoke-all"], {
+    env: siftailEnvironment({ SIFTAIL_DATA_DIR: state.dataDirectory }),
+    encoding: "utf8",
+  });
+  await open.click();
+  await dialog.getByRole("checkbox").check();
+  await dialog.getByRole("button", { name: "Create download" }).click();
+  await expect(page).toHaveURL(/\/login\?.*expired=1/);
+});
+
 test("cursor pagination appends without replacing existing rows", async ({ page }) => {
   await login(page);
   const firstID = await page.locator(".log-row").first().getAttribute("data-event-id");

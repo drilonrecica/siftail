@@ -39,6 +39,8 @@ type BrowserConfig struct {
 	StatusStore       *statusstate.Store
 	AuditStore        *audit.Store
 	BackupManager     *backup.Manager
+	ExportStore       *logs.ExportStore
+	ExportDataDir     string
 	DatabaseChecker   *database.ActiveChecker
 	LiveBroker        *logs.LiveBroker
 	LiveHeartbeat     time.Duration
@@ -61,6 +63,9 @@ type Browser struct {
 	status           *statusstate.Store
 	audit            *audit.Store
 	backups          *backup.Manager
+	exports          *logs.ExportStore
+	exportDataDir    string
+	exportSlot       chan struct{}
 	databaseChecker  *database.ActiveChecker
 	live             *logs.LiveBroker
 	liveHeartbeat    time.Duration
@@ -94,6 +99,9 @@ func NewBrowser(administrators *Store, sessionStore *sessions.Store, config Brow
 		status:           config.StatusStore,
 		audit:            config.AuditStore,
 		backups:          config.BackupManager,
+		exports:          config.ExportStore,
+		exportDataDir:    config.ExportDataDir,
+		exportSlot:       make(chan struct{}, 1),
 		databaseChecker:  config.DatabaseChecker,
 		live:             config.LiveBroker,
 		liveHeartbeat:    config.LiveHeartbeat,
@@ -131,6 +139,7 @@ func (b *Browser) Register(mux *http.ServeMux) {
 	mux.Handle("GET /logs", b.Protect(http.HandlerFunc(b.historyPage)))
 	mux.Handle("GET /logs/rows", b.Protect(http.HandlerFunc(b.historyRows)))
 	mux.Handle("GET /logs/events/{id}", b.Protect(http.HandlerFunc(b.eventDetail)))
+	mux.Handle("POST /logs/export", b.Protect(http.HandlerFunc(b.historyExport)))
 	mux.Handle("GET /logs/live/stream", b.Protect(http.HandlerFunc(b.liveStream)))
 	mux.Handle("GET /sources", b.Protect(http.HandlerFunc(b.sourcesPage)))
 	mux.Handle("GET /sources/{id}", b.Protect(http.HandlerFunc(b.sourceDetailPage)))

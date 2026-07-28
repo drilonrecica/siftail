@@ -123,6 +123,43 @@
     {{if .Excludes}}<span>Excludes “{{.Excludes}}”</span>{{end}}
     {{if .HasMore}}<span data-more-summary>More older events available</span>{{end}}
   </div>
+  {{if .ExportError}}
+  <div class="history-error history-inline-error" role="alert">
+    <strong>Export was not created.</strong>
+    <span>{{.ExportError}}</span>
+  </div>
+  {{end}}
+  <div class="history-actions">
+    <button class="button button-quiet" type="button" data-open-export>Export matching History</button>
+    <span id="history-export-status" role="status" aria-live="polite"></span>
+  </div>
+  <dialog class="export-dialog" data-export-dialog aria-labelledby="export-dialog-title">
+    <form method="post" action="{{.ExportURL}}" data-export-form>
+      <h2 id="export-dialog-title">Export matching History</h2>
+      <p>This deliberate download includes every matching event in canonical History order, not only the rows currently loaded.</p>
+      <dl class="export-scope">
+        <div><dt>Source scope</dt><dd>{{.SourceSummary}}</dd></div>
+        <div><dt>Absolute range</dt><dd><time datetime="{{.From}}">{{.From}}</time> to <time datetime="{{.To}}">{{.To}}</time></dd></div>
+        {{range .ExportFilters}}<div><dt>{{.Label}}</dt><dd>{{.Value}}</dd></div>{{end}}
+        {{if not .ExportFilters}}<div><dt>Additional filters</dt><dd>None</dd></div>{{end}}
+      </dl>
+      <label for="history-export-format">Format
+        <select id="history-export-format" name="format">
+          <option value="text">Text (siftail-text-v1, .txt)</option>
+          <option value="ndjson">NDJSON (schema 1, .ndjson)</option>
+        </select>
+      </label>
+      <p class="field-help">Hard limits: 100,000 events, 256 MiB, a 31-day range, and two minutes. If any limit is reached, no partial file is sent.</p>
+      <label class="export-confirmation">
+        <input type="checkbox" name="confirmation" value="export matching history" required>
+        I confirm this complete matching range will leave Siftail.
+      </label>
+      <div class="dialog-actions">
+        <button class="button button-primary" type="submit">Create download</button>
+        <button class="button button-quiet" type="button" data-close-export>Cancel</button>
+      </div>
+    </form>
+  </dialog>
   <div id="history-rows" class="log-list" tabindex="-1">
     {{if .Rows}}
       {{range .Rows}}{{template "history-row" .}}{{end}}
