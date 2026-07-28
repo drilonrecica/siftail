@@ -449,6 +449,84 @@ code {
   padding: var(--space-4);
 }
 
+.audit-workspace {
+  min-width: 0;
+  padding: var(--space-4);
+}
+
+.audit-workspace > h2 {
+  margin-top: 0;
+}
+
+.audit-filters {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(10rem, 1fr));
+  gap: var(--space-3);
+  align-items: end;
+}
+
+.audit-filters .field-help {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
+.audit-filters label {
+  display: grid;
+  gap: var(--space-1);
+  font-weight: 650;
+}
+
+.audit-retention-notice {
+  margin: var(--space-4) 0;
+  padding: var(--space-3);
+  border-left: 0.2rem solid var(--accent-secondary);
+  background: var(--surface-base);
+}
+
+.audit-table-scroll {
+  max-width: 100%;
+  overflow: auto;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+}
+
+.audit-table {
+  width: 100%;
+  min-width: 72rem;
+  border-collapse: collapse;
+}
+
+.audit-table th,
+.audit-table td {
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border-subtle);
+  text-align: left;
+  vertical-align: top;
+}
+
+.audit-category {
+  display: block;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+.audit-outcome {
+  font-weight: 700;
+}
+
+.audit-outcome[data-outcome="succeeded"] {
+  color: var(--status-success);
+}
+
+.audit-outcome[data-outcome="failed"],
+.audit-outcome[data-outcome="rejected"] {
+  color: var(--status-error);
+}
+
+.audit-outcome[data-outcome="canceled"] {
+  color: var(--status-warning);
+}
+
 .status-summary {
   display: flex;
   align-items: center;
@@ -1431,6 +1509,10 @@ code {
     grid-template-columns: minmax(0, 1fr);
   }
 
+  .audit-filters {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .token-secret-control {
     grid-template-columns: 1fr;
   }
@@ -1494,6 +1576,10 @@ code {
 
   .workspace {
     padding: var(--space-3);
+  }
+
+  .audit-filters {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .history-filter-disclosure > summary {

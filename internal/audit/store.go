@@ -127,7 +127,10 @@ type Event struct {
 
 type Query struct {
 	Category           Category
+	Action             string
 	Outcome            Outcome
+	FromOccurredAtUS   int64
+	ToOccurredAtUS     int64
 	BeforeOccurredAtUS int64
 	BeforeID           int64
 	Limit              int
@@ -215,12 +218,18 @@ func (s *Store) List(ctx context.Context, query Query) (Page, error) {
 		coalesce(request_id, '')
 		FROM security_audit_events
 		WHERE (? = '' OR category = ?)
+		AND (? = '' OR action = ?)
 		AND (? = '' OR outcome = ?)
+		AND (? = 0 OR occurred_at_us >= ?)
+		AND (? = 0 OR occurred_at_us < ?)
 		AND (? = 0 OR occurred_at_us < ?
 			OR (occurred_at_us = ? AND id < ?))
 		ORDER BY occurred_at_us DESC, id DESC
 		LIMIT ?`,
-		query.Category, query.Category, query.Outcome, query.Outcome,
+		query.Category, query.Category, query.Action, query.Action,
+		query.Outcome, query.Outcome,
+		query.FromOccurredAtUS, query.FromOccurredAtUS,
+		query.ToOccurredAtUS, query.ToOccurredAtUS,
 		query.BeforeOccurredAtUS, query.BeforeOccurredAtUS,
 		query.BeforeOccurredAtUS, query.BeforeID, query.Limit+1)
 	if err != nil {
@@ -418,6 +427,17 @@ func validateQuery(query *Query) error {
 		return ErrInvalidQuery
 	}
 	if query.Outcome != "" && !validOutcome(query.Outcome) {
+		return ErrInvalidQuery
+	}
+	if query.Action != "" && !validAction(query.Action) {
+		return ErrInvalidQuery
+	}
+	if (query.FromOccurredAtUS == 0) != (query.ToOccurredAtUS == 0) ||
+		query.FromOccurredAtUS < 0 || query.ToOccurredAtUS < 0 ||
+		(query.FromOccurredAtUS != 0 &&
+			(query.FromOccurredAtUS >= query.ToOccurredAtUS ||
+				query.ToOccurredAtUS-query.FromOccurredAtUS >
+					int64(366*24*time.Hour/time.Microsecond))) {
 		return ErrInvalidQuery
 	}
 	if (query.BeforeOccurredAtUS == 0) != (query.BeforeID == 0) ||

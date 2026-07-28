@@ -1497,9 +1497,10 @@ deletes audit records.
 The audit store enforces the count cap in the same transaction as every insert,
 keeping the newest 100,000 events by `(occurred_at_us, id)`. Explicit cleanup
 deletes at most 1,000 rows per coordinator transaction, applying the age limit
-first and then repairing any count overflow. The storage and cleanup
-primitives exist after migration `0004`; application lifecycle scheduling and
-privileged-action wiring belong to their tracked audit tasks.
+first and then repairing any count overflow. The application root owns one
+recoverable cleanup worker that runs once at startup and then hourly. A
+cleanup error is logged by safe component/category only and retried on the
+next interval.
 
 ### 23.5 Vacuum and checkpoint
 

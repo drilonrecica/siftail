@@ -714,6 +714,96 @@ test("status is authenticated, refreshable, sanitized, responsive, and accessibl
   });
 });
 
+test("audit filters, pagination, escaping, keyboard, themes, and mobile remain bounded", async ({
+  page,
+}) => {
+  test.setTimeout(45_000);
+  await login(page);
+  const hostileAlias = "<img src=x onerror=window.siftailSourceXSS=true> API";
+  await page.getByRole("link", { name: "Sources", exact: true }).click();
+  const sourceRow = page.locator("tr", {
+    has: page.locator(".source-path", { hasText: "api / web" }),
+  }).first();
+  await sourceRow.getByRole("link").click();
+  await page.locator("#source-alias").fill(hostileAlias);
+  await page.getByRole("button", { name: "Save alias" }).click();
+  await expect(page.getByRole("heading", { name: hostileAlias })).toBeVisible();
+  const csrfToken = await page.locator("input[name=csrf_token]").first().inputValue();
+  const statuses = await page.evaluate(async (csrf) => {
+    const results: number[] = [];
+    for (let index = 0; index < 101; index += 1) {
+      const body = new URLSearchParams({
+        csrf_token: csrf,
+        retention_days: String(30 + (index % 2)),
+        maximum_database_gib: "8",
+      });
+      const response = await fetch("/settings/retention", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
+        body,
+        redirect: "manual",
+      });
+      results.push(response.status);
+    }
+    return results;
+  }, csrfToken);
+  // Fetch exposes a same-origin manual redirect as an opaque redirect in
+  // Chromium, whose status is zero rather than the underlying 303.
+  expect(statuses.every((status) => status === 0 || status === 303)).toBe(true);
+
+  const auditNow = Date.now();
+  const auditQuery = new URLSearchParams({
+    from: new Date(auditNow - 60 * 60 * 1000).toISOString().replace(".000Z", "Z"),
+    to: new Date(auditNow + 60 * 60 * 1000).toISOString().replace(".000Z", "Z"),
+  });
+  const response = await page.goto(`/audit?${auditQuery.toString()}`);
+  expect(response?.headers()["cache-control"]).toBe("no-store");
+  await expect(page.getByRole("heading", {
+    name: "Security audit events",
+    exact: true,
+  })).toBeVisible();
+  await expect(page.getByText(
+    "Security audit events are retained separately from application logs.",
+  )).toBeVisible();
+  expect(await page.locator(".audit-table tbody tr").count()).toBe(100);
+  const older = page.getByRole("link", { name: "Load older audit events" });
+  await expect(older).toBeVisible();
+  await older.click();
+  await expect(page.locator(".audit-table tbody tr")).not.toHaveCount(0);
+
+  await page.getByLabel("Category").selectOption("source_administration");
+  await page.getByLabel("Outcome").selectOption("succeeded");
+  await page.getByLabel("Exact action").fill("source.alias_set");
+  await page.getByRole("button", { name: "Apply audit filters" }).click();
+  await expect(page.locator("code", { hasText: "source.alias_set" })).toBeVisible();
+  await expect(page.getByText(hostileAlias)).toBeVisible();
+  await expect(page.locator(".audit-table img")).toHaveCount(0);
+  expect(await page.evaluate(
+    () => (window as Window & { siftailSourceXSS?: boolean }).siftailSourceXSS,
+  )).toBeUndefined();
+
+  await page.locator(".audit-table-scroll").focus();
+  await expect(page.locator(".audit-table-scroll")).toBeFocused();
+  await page.locator("[data-theme-select]").selectOption("dark");
+  let results = await new AxeBuilder({ page })
+    .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"])
+    .analyze();
+  expect(results.violations.map((violation) => violation.id)).toEqual([]);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.locator("[data-theme-select]").selectOption("light");
+  expect(await page.evaluate(
+    () => document.documentElement.scrollWidth > window.innerWidth,
+  )).toBe(false);
+  results = await new AxeBuilder({ page })
+    .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"])
+    .analyze();
+  expect(results.violations.map((violation) => violation.id)).toEqual([]);
+  await page.screenshot({
+    path: ".playwright-artifacts/audit-mobile-light.png",
+    fullPage: true,
+  });
+});
+
 test("keyboard, themes, reduced motion, mobile inspection, and axe smoke", async ({ page }) => {
   await login(page);
   await page.locator("[data-theme-select]").selectOption("dark");

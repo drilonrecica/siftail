@@ -5,7 +5,10 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
+
+	"github.com/drilonrecica/siftail/internal/audit"
 )
 
 const purgeChunkEvents = 10_000
@@ -43,7 +46,20 @@ func (s *Store) SetAlias(ctx context.Context, sourceID int64, alias string) erro
 		if affected == 0 {
 			return ErrSourceNotFound
 		}
-		return nil
+		metadata := audit.Metadata{}
+		action := "source.alias_remove"
+		if alias != "" {
+			action = "source.alias_set"
+			metadata[audit.MetadataCurrentValue] = alias
+		}
+		auditInput := audit.InputFromContext(
+			ctx, audit.CategorySourceAdministration, action,
+			audit.OutcomeSucceeded, metadata,
+		)
+		auditInput.OccurredAt = s.now()
+		auditInput.SourceID = &sourceID
+		_, err = audit.RecordTx(context.WithoutCancel(ctx), tx, auditInput)
+		return err
 	})
 }
 
@@ -52,7 +68,9 @@ func (s *Store) ClearLogs(ctx context.Context, sourceID int64) (PurgeResult, err
 	if err != nil {
 		return PurgeResult{}, err
 	}
-	deleted, err := s.deleteSourceEvents(ctx, sourceID, watermark)
+	deleted, err := s.deleteSourceEvents(
+		ctx, sourceID, watermark, "source.clear_logs",
+	)
 	if err != nil {
 		return PurgeResult{}, err
 	}
@@ -66,7 +84,7 @@ func (s *Store) RemoveSource(ctx context.Context, sourceID int64) (PurgeResult, 
 	if err != nil {
 		return PurgeResult{}, err
 	}
-	deleted, err := s.deleteSourceEvents(ctx, sourceID, watermark)
+	deleted, err := s.deleteSourceEvents(ctx, sourceID, watermark, "")
 	if err != nil {
 		return PurgeResult{}, err
 	}
@@ -102,7 +120,18 @@ func (s *Store) RemoveSource(ctx context.Context, sourceID int64) (PurgeResult, 
 			if affected == 0 {
 				return ErrSourceNotFound
 			}
-			return nil
+			auditInput := audit.InputFromContext(
+				ctx, audit.CategorySourceAdministration, "source.remove",
+				audit.OutcomeSucceeded,
+				audit.Metadata{
+					audit.MetadataAffectedCount:  strconv.FormatInt(deleted, 10),
+					audit.MetadataResultCategory: "new_events_remain",
+				},
+			)
+			auditInput.OccurredAt = s.now()
+			auditInput.SourceID = &sourceID
+			_, err = audit.RecordTx(context.WithoutCancel(ctx), tx, auditInput)
+			return err
 		}
 		deletion, err := tx.ExecContext(ctx, `DELETE FROM sources WHERE id = ?`, sourceID)
 		if err != nil {
@@ -116,7 +145,18 @@ func (s *Store) RemoveSource(ctx context.Context, sourceID int64) (PurgeResult, 
 			return ErrSourceNotFound
 		}
 		result.Removed = true
-		return nil
+		auditInput := audit.InputFromContext(
+			ctx, audit.CategorySourceAdministration, "source.remove",
+			audit.OutcomeSucceeded,
+			audit.Metadata{
+				audit.MetadataAffectedCount:  strconv.FormatInt(deleted, 10),
+				audit.MetadataResultCategory: "removed",
+			},
+		)
+		auditInput.OccurredAt = s.now()
+		auditInput.SourceID = &sourceID
+		_, err = audit.RecordTx(context.WithoutCancel(ctx), tx, auditInput)
+		return err
 	})
 	if err != nil {
 		return PurgeResult{}, err
@@ -155,6 +195,7 @@ func (s *Store) captureSourceWatermark(ctx context.Context, sourceID int64) (int
 func (s *Store) deleteSourceEvents(
 	ctx context.Context,
 	sourceID, watermark int64,
+	auditAction string,
 ) (int64, error) {
 	var total int64
 	for {
@@ -173,6 +214,21 @@ func (s *Store) deleteSourceEvents(
 			deleted, err = result.RowsAffected()
 			if err != nil {
 				return fmt.Errorf("read source purge result: %w", err)
+			}
+			if deleted < purgeChunkEvents && auditAction != "" {
+				auditInput := audit.InputFromContext(
+					ctx, audit.CategorySourceAdministration, auditAction,
+					audit.OutcomeSucceeded,
+					audit.Metadata{
+						audit.MetadataAffectedCount: strconv.FormatInt(
+							total+deleted, 10,
+						),
+					},
+				)
+				auditInput.OccurredAt = s.now()
+				auditInput.SourceID = &sourceID
+				_, err = audit.RecordTx(context.WithoutCancel(ctx), tx, auditInput)
+				return err
 			}
 			return nil
 		})

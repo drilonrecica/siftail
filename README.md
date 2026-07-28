@@ -399,9 +399,9 @@ after either watermark remain, and an active sender may rediscover a removed
 source.
 
 Both destructive actions notify connected Live clients without waiting for
-them and clearly avoid any promise of forensic erasure. Security-audit storage
-exists in schema version 4, but privileged-action wiring is the next audit
-task; these pre-audit operations do not yet claim a persisted audit record.
+them and clearly avoid any promise of forensic erasure. Their successful
+mutations and immutable audit records share the relevant coordinator
+transaction.
 
 ### Browser Server and token management
 
@@ -429,13 +429,17 @@ and is never touched by application-log retention. Safe metadata is limited to
 whitelisted nonsecret fields and 2 KiB of JSON; passwords, tokens, hashes,
 authorization headers, and application payloads have no accepted metadata
 field. See [`docs/security/audit.md`](docs/security/audit.md) for the schema,
-atomic-write contract, measurements, and current wiring boundary.
+atomic-write contract, recorded action taxonomy, measurements, and limitations.
 
 The migration is additive and automatic. It preserves schema-1/2/3 data, but
 an older Siftail binary correctly refuses the resulting schema-4 database.
-Audit storage alone does not claim that existing privileged workflows are
-already recorded; that integration and the authenticated Audit view remain the
-next tracked task.
+The application records sign-in/session, administrator recovery, Server/token,
+source lifecycle, and retention actions. Successful mutations are recorded
+atomically; rejected sign-ins use their own bounded transaction. The
+authenticated, no-store `/audit` workspace provides a maximum 366-day range,
+exact category/action/outcome filters, and 100-row keyset pages without
+exposing credentials or application payloads. A recoverable worker applies the
+365-day audit retention independently at startup and hourly.
 
 ### Browser retention settings
 

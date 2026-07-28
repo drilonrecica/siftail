@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/drilonrecica/siftail/internal/audit"
 	"github.com/drilonrecica/siftail/internal/auth"
 	"github.com/drilonrecica/siftail/internal/config"
 	"github.com/drilonrecica/siftail/internal/database"
@@ -98,6 +99,7 @@ func (a *App) Run(ctx context.Context) error {
 	administratorStore := auth.NewCoordinatedStore(db.Reader(), coordinator)
 	sessionStore := sessions.NewCoordinatedStore(db.Reader(), coordinator)
 	retentionStore := retention.NewStore(db.Reader(), coordinator)
+	auditStore := audit.NewStore(db.Reader(), coordinator)
 	operationalState := statusstate.NewState(time.Now())
 	a.status = operationalState
 	defer func() { a.status = nil }()
@@ -121,6 +123,7 @@ func (a *App) Run(ctx context.Context) error {
 		SourceStore:       sourceStore,
 		RetentionStore:    retentionStore,
 		StatusStore:       statusStore,
+		AuditStore:        auditStore,
 		LiveBroker:        liveBroker,
 	})
 	defer func() { a.browser = nil }()
@@ -161,6 +164,14 @@ func (a *App) Run(ctx context.Context) error {
 			a.logger.Warn("session cleanup failed",
 				"component", "sessions",
 				"error_category", "session_cleanup",
+			)
+		}).Run(serverCtx)
+	})
+	g.Go(func() error {
+		return audit.NewCleanupWorker(auditStore, audit.DefaultCleanupInterval, func(error) {
+			a.logger.Warn("security audit cleanup failed",
+				"component", "audit",
+				"error_category", "audit_cleanup",
 			)
 		}).Run(serverCtx)
 	})
@@ -311,7 +322,15 @@ func (a *App) controlMux() *http.ServeMux {
 }
 
 func (a *App) runControlServer(ctx context.Context, l net.Listener) error {
-	srv := a.newServer(a.controlMux(), "control")
+	mux := a.controlMux()
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		auditCtx := audit.ContextWithAttribution(r.Context(), audit.Attribution{
+			ActorType: audit.ActorLocalOperator,
+			RequestID: web.RequestIDFromContext(r.Context()),
+		})
+		mux.ServeHTTP(w, r.WithContext(auditCtx))
+	})
+	srv := a.newServer(handler, "control")
 
 	a.logger.Info("component started", "component", "control")
 	return a.serveHTTP(ctx, srv, l, "control")

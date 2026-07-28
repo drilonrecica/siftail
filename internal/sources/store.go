@@ -15,6 +15,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/drilonrecica/siftail/internal/audit"
 )
 
 type Store struct {
@@ -107,7 +109,15 @@ func (s *Store) CreateServer(ctx context.Context, name, hostname string) (Server
 		if err != nil {
 			return fmt.Errorf("read server ID: %w", err)
 		}
-		return nil
+		auditInput := audit.InputFromContext(
+			ctx, audit.CategoryIngestionToken, "server.create",
+			audit.OutcomeSucceeded,
+			audit.Metadata{audit.MetadataServerName: name},
+		)
+		auditInput.OccurredAt = time.UnixMicro(created)
+		auditInput.ServerID = &id
+		_, err = audit.RecordTx(context.WithoutCancel(ctx), tx, auditInput)
+		return err
 	})
 	if err != nil {
 		return Server{}, err
@@ -160,6 +170,7 @@ func (s *Store) CreateToken(ctx context.Context, serverID int64, name string) (C
 	hash := sha256.Sum256([]byte(plaintext))
 	fingerprint := hex.EncodeToString(hash[:6])
 	var id int64
+	created := s.now().UnixMicro()
 	err := s.mutator.Do(ctx, func(tx *sql.Tx) error {
 		var serverExists, nameExists int
 		if err := tx.QueryRowContext(ctx, `SELECT
@@ -178,7 +189,7 @@ func (s *Store) CreateToken(ctx context.Context, serverID int64, name string) (C
 		}
 		result, err := tx.ExecContext(ctx, `INSERT INTO ingestion_tokens(
 			server_id, name, token_hash, fingerprint, created_at_us
-		) VALUES (?, ?, ?, ?, ?)`, serverID, name, hash[:], fingerprint, s.now().UnixMicro())
+		) VALUES (?, ?, ?, ?, ?)`, serverID, name, hash[:], fingerprint, created)
 		if err != nil {
 			return fmt.Errorf("create token: %w", err)
 		}
@@ -186,7 +197,18 @@ func (s *Store) CreateToken(ctx context.Context, serverID int64, name string) (C
 		if err != nil {
 			return fmt.Errorf("read token ID: %w", err)
 		}
-		return nil
+		auditInput := audit.InputFromContext(
+			ctx, audit.CategoryIngestionToken, "ingestion_token.create",
+			audit.OutcomeSucceeded,
+			audit.Metadata{
+				audit.MetadataTokenName:        name,
+				audit.MetadataTokenFingerprint: fingerprint,
+			},
+		)
+		auditInput.OccurredAt = time.UnixMicro(created)
+		auditInput.ServerID = &serverID
+		_, err = audit.RecordTx(context.WithoutCancel(ctx), tx, auditInput)
+		return err
 	})
 	if err != nil {
 		return CreatedToken{}, err
@@ -202,9 +224,19 @@ func (s *Store) RevokeToken(ctx context.Context, id int64) error {
 		return ErrTokenNotFound
 	}
 	return s.mutator.Do(ctx, func(tx *sql.Tx) error {
+		var serverID int64
+		var name, fingerprint string
+		if err := tx.QueryRowContext(ctx, `SELECT server_id,name,fingerprint
+			FROM ingestion_tokens WHERE id=? AND revoked_at_us IS NULL`, id).
+			Scan(&serverID, &name, &fingerprint); errors.Is(err, sql.ErrNoRows) {
+			return ErrTokenNotFound
+		} else if err != nil {
+			return fmt.Errorf("read token for revocation: %w", err)
+		}
+		revokedAt := s.now().UnixMicro()
 		result, err := tx.ExecContext(ctx,
 			"UPDATE ingestion_tokens SET revoked_at_us=? WHERE id=? AND revoked_at_us IS NULL",
-			s.now().UnixMicro(), id)
+			revokedAt, id)
 		if err != nil {
 			return fmt.Errorf("revoke token: %w", err)
 		}
@@ -215,7 +247,18 @@ func (s *Store) RevokeToken(ctx context.Context, id int64) error {
 		if affected == 0 {
 			return ErrTokenNotFound
 		}
-		return nil
+		auditInput := audit.InputFromContext(
+			ctx, audit.CategoryIngestionToken, "ingestion_token.revoke",
+			audit.OutcomeSucceeded,
+			audit.Metadata{
+				audit.MetadataTokenName:        name,
+				audit.MetadataTokenFingerprint: fingerprint,
+			},
+		)
+		auditInput.OccurredAt = time.UnixMicro(revokedAt)
+		auditInput.ServerID = &serverID
+		_, err = audit.RecordTx(context.WithoutCancel(ctx), tx, auditInput)
+		return err
 	})
 }
 

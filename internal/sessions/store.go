@@ -9,10 +9,12 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
 
+	"github.com/drilonrecica/siftail/internal/audit"
 	"github.com/drilonrecica/siftail/internal/database"
 )
 
@@ -152,7 +154,19 @@ func (s *Store) Issue(
 		if err != nil {
 			return database.Classify("read session ID", err)
 		}
-		return nil
+		var auditMetadata audit.Metadata
+		if clientIdentitySummary != "" {
+			auditMetadata = audit.Metadata{
+				audit.MetadataClientAddress: clientIdentitySummary,
+			}
+		}
+		auditInput := audit.InputFromContext(
+			ctx, audit.CategoryAuthentication, "sign_in",
+			audit.OutcomeSucceeded, auditMetadata,
+		)
+		auditInput.OccurredAt = now
+		_, err = audit.RecordTx(mutationCtx, tx, auditInput)
+		return err
 	})
 	if err != nil {
 		return Issued{}, err
@@ -240,7 +254,13 @@ func (s *Store) Revoke(ctx context.Context, token string) error {
 		if affected != 1 {
 			return ErrSessionNotFound
 		}
-		return nil
+		auditInput := audit.InputFromContext(
+			ctx, audit.CategorySession, "session.revoke",
+			audit.OutcomeSucceeded, nil,
+		)
+		auditInput.OccurredAt = time.UnixMicro(now)
+		_, err = audit.RecordTx(context.WithoutCancel(ctx), tx, auditInput)
+		return err
 	})
 }
 
@@ -258,7 +278,16 @@ func (s *Store) RevokeAll(ctx context.Context, administratorID int64) (int64, er
 		if err != nil {
 			return database.Classify("read session revocations", err)
 		}
-		return nil
+		auditInput := audit.InputFromContext(
+			ctx, audit.CategorySession, "session.revoke_all",
+			audit.OutcomeSucceeded,
+			audit.Metadata{
+				audit.MetadataSessionCount: strconv.FormatInt(affected, 10),
+			},
+		)
+		auditInput.OccurredAt = time.UnixMicro(now)
+		_, err = audit.RecordTx(context.WithoutCancel(ctx), tx, auditInput)
+		return err
 	})
 	return affected, err
 }

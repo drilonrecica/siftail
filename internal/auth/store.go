@@ -5,8 +5,10 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strconv"
 	"time"
 
+	"github.com/drilonrecica/siftail/internal/audit"
 	"github.com/drilonrecica/siftail/internal/database"
 )
 
@@ -77,7 +79,14 @@ func (s *Store) Create(ctx context.Context, username string, password []byte) (A
 			}
 			return classified
 		}
-		return nil
+		auditInput := audit.InputFromContext(
+			ctx, audit.CategoryAdministratorCredential,
+			"administrator.create", audit.OutcomeSucceeded,
+			audit.Metadata{audit.MetadataActorName: username},
+		)
+		auditInput.OccurredAt = time.UnixMicro(now)
+		_, err = audit.RecordTx(context.WithoutCancel(ctx), tx, auditInput)
+		return err
 	})
 	if err != nil {
 		return Administrator{}, err
@@ -105,12 +114,26 @@ func (s *Store) ResetPassword(ctx context.Context, password []byte) error {
 		if affected != 1 {
 			return ErrAdministratorNotFound
 		}
-		if _, err := tx.ExecContext(context.WithoutCancel(ctx), `UPDATE sessions
+		revoked, err := tx.ExecContext(context.WithoutCancel(ctx), `UPDATE sessions
 			SET revoked_at_us=? WHERE administrator_id=1 AND revoked_at_us IS NULL`,
-			changed); err != nil {
+			changed)
+		if err != nil {
 			return database.Classify("revoke sessions after password reset", err)
 		}
-		return nil
+		sessionCount, err := revoked.RowsAffected()
+		if err != nil {
+			return database.Classify("read password-reset session revocations", err)
+		}
+		auditInput := audit.InputFromContext(
+			ctx, audit.CategoryAdministratorCredential,
+			"administrator.password_reset", audit.OutcomeSucceeded,
+			audit.Metadata{
+				audit.MetadataSessionCount: strconv.FormatInt(sessionCount, 10),
+			},
+		)
+		auditInput.OccurredAt = time.UnixMicro(changed)
+		_, err = audit.RecordTx(context.WithoutCancel(ctx), tx, auditInput)
+		return err
 	})
 }
 

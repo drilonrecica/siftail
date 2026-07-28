@@ -14,12 +14,14 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/drilonrecica/siftail/internal/audit"
 	"github.com/drilonrecica/siftail/internal/ingest"
 	"github.com/drilonrecica/siftail/internal/logs"
 	"github.com/drilonrecica/siftail/internal/retention"
 	"github.com/drilonrecica/siftail/internal/sessions"
 	"github.com/drilonrecica/siftail/internal/sources"
 	statusstate "github.com/drilonrecica/siftail/internal/status"
+	"github.com/drilonrecica/siftail/internal/web"
 	webui "github.com/drilonrecica/siftail/internal/web/ui"
 )
 
@@ -33,6 +35,7 @@ type BrowserConfig struct {
 	SourceStore       *sources.Store
 	RetentionStore    *retention.Store
 	StatusStore       *statusstate.Store
+	AuditStore        *audit.Store
 	LiveBroker        *logs.LiveBroker
 	LiveHeartbeat     time.Duration
 	LiveSessionCheck  time.Duration
@@ -52,6 +55,7 @@ type Browser struct {
 	sources          *sources.Store
 	retention        *retention.Store
 	status           *statusstate.Store
+	audit            *audit.Store
 	live             *logs.LiveBroker
 	liveHeartbeat    time.Duration
 	liveSessionCheck time.Duration
@@ -82,6 +86,7 @@ func NewBrowser(administrators *Store, sessionStore *sessions.Store, config Brow
 		sources:          config.SourceStore,
 		retention:        config.RetentionStore,
 		status:           config.StatusStore,
+		audit:            config.AuditStore,
 		live:             config.LiveBroker,
 		liveHeartbeat:    config.LiveHeartbeat,
 		liveSessionCheck: config.LiveSessionCheck,
@@ -133,6 +138,7 @@ func (b *Browser) Register(mux *http.ServeMux) {
 	mux.Handle("GET /settings", b.Protect(http.HandlerFunc(b.settingsPage)))
 	mux.Handle("POST /settings/retention", b.Protect(http.HandlerFunc(b.retentionSettingsSave)))
 	mux.Handle("GET /status", b.Protect(http.HandlerFunc(b.statusPage)))
+	mux.Handle("GET /audit", b.Protect(http.HandlerFunc(b.auditPage)))
 }
 
 func (b *Browser) loginPage(w http.ResponseWriter, r *http.Request) {
@@ -174,6 +180,10 @@ func (b *Browser) login(w http.ResponseWriter, r *http.Request) {
 	clientKey := clientThrottleKey(b.proxies.clientIdentity(r))
 	accountKey := accountThrottleKey(username)
 	if delay := b.throttle.Check(clientKey, accountKey); delay > 0 {
+		if err := b.recordLoginAudit(r, audit.OutcomeRejected); err != nil {
+			http.Error(w, "Sign-in is temporarily unavailable.", http.StatusServiceUnavailable)
+			return
+		}
 		b.writeRateLimitedLogin(w, r, delay)
 		return
 	}
@@ -183,6 +193,10 @@ func (b *Browser) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !matched {
+		if err := b.recordLoginAudit(r, audit.OutcomeRejected); err != nil {
+			http.Error(w, "Sign-in is temporarily unavailable.", http.StatusServiceUnavailable)
+			return
+		}
 		if delay := b.throttle.Failure(clientKey, accountKey); delay > 0 {
 			b.writeRateLimitedLogin(w, r, delay)
 			return
@@ -191,7 +205,15 @@ func (b *Browser) login(w http.ResponseWriter, r *http.Request) {
 			"Sign-in failed. Check your credentials and try again.")
 		return
 	}
-	issued, err := b.sessions.Issue(r.Context(), administrator.ID, summarizeUserAgent(r.UserAgent()), b.proxies.clientIdentity(r))
+	administratorID := administrator.ID
+	loginCtx := audit.ContextWithAttribution(r.Context(), audit.Attribution{
+		ActorType: audit.ActorAdministrator, AdministratorID: &administratorID,
+		RequestID: web.RequestIDFromContext(r.Context()),
+	})
+	issued, err := b.sessions.Issue(
+		loginCtx, administrator.ID, summarizeUserAgent(r.UserAgent()),
+		b.proxies.clientIdentity(r),
+	)
 	if err != nil {
 		http.Error(w, "Sign-in is temporarily unavailable.", http.StatusServiceUnavailable)
 		return
@@ -246,9 +268,31 @@ func (b *Browser) Protect(next http.Handler) http.Handler {
 				return
 			}
 		}
-		ctx := context.WithValue(r.Context(), browserContextKey{}, browserSession)
+		administratorID := session.AdministratorID
+		ctx := audit.ContextWithAttribution(r.Context(), audit.Attribution{
+			ActorType: audit.ActorAdministrator, AdministratorID: &administratorID,
+			RequestID: web.RequestIDFromContext(r.Context()),
+		})
+		ctx = context.WithValue(ctx, browserContextKey{}, browserSession)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+func (b *Browser) recordLoginAudit(r *http.Request, outcome audit.Outcome) error {
+	if b.audit == nil {
+		return nil
+	}
+	metadata := audit.Metadata{}
+	if client := b.proxies.clientIdentity(r); client != "" {
+		metadata[audit.MetadataClientAddress] = client
+	}
+	_, err := b.audit.Record(r.Context(), audit.Input{
+		OccurredAt: b.now(), Category: audit.CategoryAuthentication,
+		Action: "sign_in", Outcome: outcome,
+		ActorType: audit.ActorUnauthenticated, Metadata: metadata,
+		RequestID: web.RequestIDFromContext(r.Context()),
+	})
+	return err
 }
 
 func (b *Browser) logout(w http.ResponseWriter, r *http.Request) {

@@ -37,6 +37,7 @@ type ShellView struct {
 	Token     OneTimeTokenView
 	Settings  SettingsView
 	Status    StatusView
+	Audit     AuditView
 }
 
 type SelectOption struct {
@@ -310,6 +311,28 @@ type StatusDiagnosticView struct {
 	Time     string
 	Category string
 	Summary  string
+}
+
+type AuditView struct {
+	From           string
+	To             string
+	Action         string
+	Categories     []SelectOption
+	Outcomes       []SelectOption
+	Rows           []AuditRowView
+	NextURL        string
+	Error          string
+	ErrorRequestID string
+}
+
+type AuditRowView struct {
+	Time      string
+	Category  string
+	Action    string
+	Outcome   string
+	Actor     string
+	Summary   string
+	RequestID string
 }
 
 func New() *Renderer {

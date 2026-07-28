@@ -80,7 +80,9 @@ func TestStoreRecordsListsFiltersAndKeepsEventsImmutable(t *testing.T) {
 		t.Fatalf("second page = %#v", second)
 	}
 	filtered, err := store.List(context.Background(), Query{
-		Category: CategoryAuthentication, Outcome: OutcomeRejected,
+		Category: CategoryAuthentication, Action: "sign_in",
+		Outcome: OutcomeRejected, FromOccurredAtUS: at.UnixMicro(),
+		ToOccurredAtUS: at.Add(time.Microsecond).UnixMicro(),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -88,6 +90,13 @@ func TestStoreRecordsListsFiltersAndKeepsEventsImmutable(t *testing.T) {
 	if len(filtered.Events) != 1 ||
 		filtered.Events[0].Metadata[MetadataClientAddress] != "192.0.2.1" {
 		t.Fatalf("filtered page = %#v", filtered)
+	}
+	outside, err := store.List(context.Background(), Query{
+		Action: "sign_in", FromOccurredAtUS: at.Add(time.Microsecond).UnixMicro(),
+		ToOccurredAtUS: at.Add(2 * time.Microsecond).UnixMicro(),
+	})
+	if err != nil || len(outside.Events) != 0 {
+		t.Fatalf("outside time range = %#v, err=%v", outside, err)
 	}
 
 	if _, err := db.Writer().Exec(

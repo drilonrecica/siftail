@@ -1,0 +1,56 @@
+{{define "audit.html"}}
+<section class="workspace-panel audit-workspace" aria-labelledby="audit-heading">
+  <h2 id="audit-heading">Security audit events</h2>
+  {{if .Error}}<div class="form-error" role="alert">
+    <p>{{.Error}}</p>
+    {{if .ErrorRequestID}}<p>Request ID: <code>{{.ErrorRequestID}}</code></p>{{end}}
+  </div>{{else}}
+  <form class="audit-filters" method="get" action="/audit">
+    <label>From (UTC)
+      <input name="from" value="{{.From}}" required aria-describedby="audit-time-help">
+    </label>
+    <label>To (UTC, exclusive)
+      <input name="to" value="{{.To}}" required aria-describedby="audit-time-help">
+    </label>
+    <label>Category
+      <select name="category">{{range .Categories}}
+        <option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>
+      {{end}}</select>
+    </label>
+    <label>Outcome
+      <select name="outcome">{{range .Outcomes}}
+        <option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>
+      {{end}}</select>
+    </label>
+    <label>Exact action
+      <input name="action" value="{{.Action}}" placeholder="session.revoke">
+    </label>
+    <p id="audit-time-help" class="field-help">Use exact UTC timestamps such as 2026-07-28T12:00:00Z. The range may cover at most 366 days.</p>
+    <button class="button button-primary" type="submit">Apply audit filters</button>
+  </form>
+
+  <p class="audit-retention-notice">Security audit events are retained separately from application logs.</p>
+  {{if .Rows}}<div class="audit-table-scroll" tabindex="0" aria-label="Security audit event table">
+    <table class="audit-table">
+      <thead><tr>
+        <th scope="col">Time</th><th scope="col">Action</th>
+        <th scope="col">Outcome</th><th scope="col">Actor / context</th>
+        <th scope="col">Safe summary</th><th scope="col">Request ID</th>
+      </tr></thead>
+      <tbody>{{range .Rows}}<tr>
+        <td><time>{{.Time}}</time><span class="audit-category">{{.Category}}</span></td>
+        <td><code>{{.Action}}</code></td>
+        <td><span class="audit-outcome" data-outcome="{{.Outcome}}">{{.Outcome}}</span></td>
+        <td>{{.Actor}}</td>
+        <td>{{.Summary}}</td>
+        <td>{{if .RequestID}}<code>{{.RequestID}}</code>{{else}}—{{end}}</td>
+      </tr>{{end}}</tbody>
+    </table>
+  </div>
+  {{else}}<div class="empty-state"><h2>No audit events</h2>
+    <p>No security audit events match this range.</p>
+  </div>{{end}}
+  {{if .NextURL}}<p><a class="button button-quiet" href="{{.NextURL}}">Load older audit events</a></p>{{end}}
+  {{end}}
+</section>
+{{end}}

@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/drilonrecica/siftail/internal/audit"
 	"github.com/drilonrecica/siftail/internal/auth"
 	"github.com/drilonrecica/siftail/internal/config"
 	"github.com/drilonrecica/siftail/internal/database"
@@ -168,20 +169,24 @@ func runAdminOperation(method, path string, input, output any) error {
 		return errors.New("cannot inspect control socket")
 	}
 	store := sources.NewStore(db.Writer())
+	operationCtx := audit.ContextWithAttribution(
+		context.Background(),
+		audit.Attribution{ActorType: audit.ActorLocalOperator},
+	)
 	switch path {
 	case "/administrator":
 		value := input.(map[string]any)
 		administrator, err := auth.NewStore(db.Writer()).Create(
-			context.Background(), value["username"].(string), []byte(value["password"].(string)),
+			operationCtx, value["username"].(string), []byte(value["password"].(string)),
 		)
 		return assignJSON(administrator, output, err)
 	case "/administrator/reset-password":
 		value := input.(map[string]any)
 		return auth.NewStore(db.Writer()).ResetPassword(
-			context.Background(), []byte(value["password"].(string)),
+			operationCtx, []byte(value["password"].(string)),
 		)
 	case "/sessions/revoke-all":
-		affected, err := sessions.NewStore(db.Writer()).RevokeAll(context.Background(), 1)
+		affected, err := sessions.NewStore(db.Writer()).RevokeAll(operationCtx, 1)
 		return assignJSON(struct {
 			Revoked int64 `json:"revoked"`
 		}{Revoked: affected}, output, err)
@@ -191,15 +196,15 @@ func runAdminOperation(method, path string, input, output any) error {
 			return assignJSON(servers, output, err)
 		}
 		value := input.(map[string]any)
-		server, err := store.CreateServer(context.Background(), value["name"].(string), value["hostname"].(string))
+		server, err := store.CreateServer(operationCtx, value["name"].(string), value["hostname"].(string))
 		return assignJSON(server, output, err)
 	case "/tokens":
 		value := input.(map[string]any)
-		token, err := store.CreateToken(context.Background(), value["server_id"].(int64), value["name"].(string))
+		token, err := store.CreateToken(operationCtx, value["server_id"].(int64), value["name"].(string))
 		return assignJSON(token, output, err)
 	case "/tokens/revoke":
 		value := input.(map[string]any)
-		return store.RevokeToken(context.Background(), value["id"].(int64))
+		return store.RevokeToken(operationCtx, value["id"].(int64))
 	default:
 		return errors.New("unsupported administrative operation")
 	}

@@ -9,8 +9,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strconv"
 	"time"
 
+	"github.com/drilonrecica/siftail/internal/audit"
 	"github.com/drilonrecica/siftail/internal/database"
 )
 
@@ -129,7 +131,19 @@ func (s *Store) Save(ctx context.Context, input Input) (Settings, error) {
 		if err != nil {
 			return database.Classify("save application-log retention settings", err)
 		}
-		return nil
+		auditInput := audit.InputFromContext(
+			ctx, audit.CategoryRetentionSettings, "retention.update",
+			audit.OutcomeSucceeded,
+			audit.Metadata{
+				audit.MetadataRetentionAgeDays: strconv.Itoa(input.AgeDays),
+				audit.MetadataMaximumDatabaseGiB: strconv.Itoa(
+					input.MaxDatabaseGiB,
+				),
+			},
+		)
+		auditInput.OccurredAt = time.UnixMicro(settings.UpdatedAtUS)
+		_, err = audit.RecordTx(context.WithoutCancel(ctx), tx, auditInput)
+		return err
 	}); err != nil {
 		return Settings{}, fmt.Errorf("save application-log retention settings: %w", err)
 	}

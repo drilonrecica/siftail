@@ -1,8 +1,8 @@
 # Security-audit storage boundary
 
 **Reviewed:** 2026-07-28
-**Scope:** SFT-038 storage and migration; privileged-action/UI wiring follows
-in SFT-039
+**Scope:** SFT-038 storage and migration plus SFT-039 privileged-action
+attribution, cleanup lifecycle, and authenticated inspection
 
 ## Stored model
 
@@ -53,8 +53,8 @@ anything. Errors do not echo rejected values.
 `audit.RecordTx` inserts into a caller-owned coordinator transaction so a
 successful privileged mutation and its success audit event commit or roll back
 together. `Store.Record` handles outcomes that require their own coordinated
-transaction, such as a rejected attempt. Wiring those calls into privileged
-features is SFT-039 scope.
+transaction, such as a rejected sign-in attempt. A privileged mutation is not
+reported as successful when its required audit insert fails.
 
 Every insertion applies the 100,000-record cap in its transaction, deleting the
 oldest `(occurred_at_us, id)` record when required. Explicit cleanup applies
@@ -62,6 +62,47 @@ the configured age first, then count overflow, and deletes no more than 1,000
 records per transaction. Default and maximum audit age are 365 days.
 Application-log age/size cleanup, Clear logs, and application-event retention
 do not delete audit rows.
+
+The application root runs one owned audit cleanup worker immediately at
+startup and then hourly. Each pass uses the database coordinator and deletes
+at most 1,000 rows. Cleanup failure is reported only as a sanitized component
+and error category; it neither terminates the process nor emits record
+contents.
+
+## Recorded actions
+
+The current implementation records these normalized actions:
+
+| Action | Outcome and actor |
+| --- | --- |
+| `sign_in` | successful administrator sign-in or rejected unauthenticated attempt |
+| `session.revoke`, `session.revoke_all` | successful administrator or local-operator revocation |
+| `administrator.create`, `administrator.password_reset` | successful local-operator recovery action |
+| `server.create` | successful administrator or local-operator creation |
+| `ingestion_token.create`, `ingestion_token.revoke` | successful administrator or local-operator token lifecycle action |
+| `source.alias_set`, `source.alias_remove` | successful administrator presentation change |
+| `source.clear_logs`, `source.remove` | successful administrator destructive source action with a bounded affected count |
+| `retention.update` | successful administrator retention-policy change |
+
+Browser attribution carries the authenticated administrator ID and internal
+request ID. Maintenance CLI and control-socket actions are attributed to the
+local operator. Internal direct store calls with no explicit attribution are
+classified as system actions.
+
+Backup, restore, export, and proxy-auth configuration actions have reserved
+categories and safe metadata but no current mutation path. Their later
+implementation tasks must use `RecordTx` for transactional success events and
+must record only the defined nonsecret outcome; this task does not create
+placeholder events for operations that do not exist.
+
+## Authenticated inspection
+
+`GET /audit` is session-protected and always `no-store`. Its canonical query
+requires an explicit UTC `[from,to)` range of no more than 366 days and
+optionally accepts one exact category, action, and outcome. Results are newest
+first and keyset-paginated at 100 rows; the table has its own focusable
+horizontal scroll region for narrow emergency inspection. The page renders
+only typed identifiers and validated safe metadata through `html/template`.
 
 ## Migration and compatibility
 
@@ -100,9 +141,15 @@ measurements remain far below ordinary interactive latency targets on this
 host. These microbenchmarks exclude HTTP/template work and are not guarantees
 for other storage or hardware.
 
+The SFT-039 regression run used `-benchtime=1s -count=3`: median record-at-cap
+latency was 1.300 ms, the newest 100-row page was 349.295 µs, and the deliberate
+oldest category scan was 24.859 ms. Privileged-action wiring did not alter the
+store algorithm or add an index.
+
 ## Current limitation
 
-No existing sign-in, token, source, retention, backup, restore, or export
-workflow claims an audit event from SFT-038 alone. The following tracked task
-must wire defined privileged outcomes atomically and add the authenticated,
-paginated Audit view before the product claims end-to-end audit coverage.
+Audit history is an operational accountability record, not a forensic
+tamper-proof ledger. A user with filesystem access can alter or remove the
+database, and the bounded age/count policy intentionally deletes old entries.
+Failed requests rejected by shared browser security middleware before a
+feature action is reached are not separately audited.
