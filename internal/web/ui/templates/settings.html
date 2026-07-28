@@ -1,0 +1,60 @@
+{{define "settings.html"}}
+<section class="workspace-panel settings-workspace" aria-labelledby="retention-settings-heading">
+  {{if .Notice}}<div class="notice notice-info" role="status" tabindex="-1" data-settings-notice>
+    <h2>Saved</h2>
+    <p>{{.Notice}}</p>
+  </div>{{end}}
+  {{if .Error}}<div class="form-error" role="alert">
+    <p>{{.Error}}</p>
+    {{if .ErrorRequestID}}<p>Request ID: <code>{{.ErrorRequestID}}</code></p>{{end}}
+  </div>{{end}}
+
+  <div class="settings-grid">
+    <form class="settings-form" method="post" action="/settings/retention" novalidate>
+      <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+      <header>
+        <p class="eyebrow">Application logs</p>
+        <h2 id="retention-settings-heading">Retention limits</h2>
+        <p>Whichever limit is reached first starts oldest-first cleanup.</p>
+      </header>
+
+      <div class="field">
+        <label for="retention-days">Retention age (days)</label>
+        <input id="retention-days" name="retention_days" type="number"
+          inputmode="numeric" min="1" max="3650" step="1" required
+          value="{{.RetentionDays}}"{{if .RetentionError}} aria-invalid="true"
+          aria-describedby="retention-days-error retention-days-help" autofocus{{else}}
+          aria-describedby="retention-days-help"{{end}}>
+        <p class="field-help" id="retention-days-help">Whole days from 1 to 3,650. Default: 14 days.</p>
+        {{if .RetentionError}}<p class="field-error" id="retention-days-error">{{.RetentionError}}</p>{{end}}
+      </div>
+
+      <div class="field">
+        <label for="maximum-database-gib">Maximum database size (GiB)</label>
+        <input id="maximum-database-gib" name="maximum_database_gib" type="number"
+          inputmode="numeric" min="1" max="1024" step="1" required
+          value="{{.MaxDatabaseGiB}}"{{if .DatabaseError}} aria-invalid="true"
+          aria-describedby="maximum-database-error maximum-database-help"{{if not .RetentionError}} autofocus{{end}}{{else}}
+          aria-describedby="maximum-database-help"{{end}}>
+        <p class="field-help" id="maximum-database-help">Whole GiB from 1 to 1,024. Default: 4 GiB. The target includes the database, WAL, and shared-memory files.</p>
+        {{if .DatabaseError}}<p class="field-error" id="maximum-database-error">{{.DatabaseError}}</p>{{end}}
+      </div>
+
+      <div>
+        <button class="button button-primary" type="submit">Save retention settings</button>
+      </div>
+    </form>
+
+    <aside class="settings-explanation" aria-labelledby="retention-scope-heading">
+      <h2 id="retention-scope-heading">Scope and deletion order</h2>
+      <p>These limits apply globally to retained application events. They do not delete Servers, ingestion-token metadata, aliases, administrator sessions, settings, or security audit history.</p>
+      <p>Cleanup removes the oldest eligible events first, ordered by the earlier of event time and receive time, then internal event ID. Work is performed in bounded transactions.</p>
+      <p>Size cleanup starts near 95% of the configured target and works toward 90%. One admitted batch and transient WAL activity can temporarily exceed the target.</p>
+      <div class="notice notice-warning">
+        <h2>Deletion limitation</h2>
+        <p>Retention reduces Siftail's application-log history. It is not forensic erasure and does not control backups, snapshots, or unrelated host files.</p>
+      </div>
+    </aside>
+  </div>
+</section>
+{{end}}

@@ -366,6 +366,23 @@ batch commit. Successful batch commit updates token last-use metadata in the
 same transaction. The complete threat and exposure boundary is documented in
 [`docs/security/ingestion-tokens.md`](docs/security/ingestion-tokens.md).
 
+### Browser retention settings
+
+The protected `/settings` workspace configures the two global application-log
+retention thresholds as one atomic policy. Age accepts 1–3,650 whole days and
+the active SQLite footprint target accepts 1–1,024 whole GiB; defaults are 14
+days and 4 GiB. An invalid or failed save leaves both prior values unchanged,
+and settings survive process restart in the existing SQLite `settings` table.
+
+Whichever threshold is reached first is authoritative. Cleanup is oldest-first
+by the earlier of event time and receive time, then event ID, and size cleanup
+measures the main database plus WAL and shared-memory files. These controls
+apply only to application events: they do not remove Servers, tokens, aliases,
+sessions, settings, or security audit history. Retention is not forensic
+erasure and does not control backups, snapshots, or unrelated host files. The
+bounded cleanup worker that enforces the persisted policy is implemented by
+the next tracked retention task.
+
 ### Current dependency rationale
 
 - `github.com/mattn/go-sqlite3` v1.14.48 is the accepted SQLite driver. It

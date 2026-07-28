@@ -657,10 +657,15 @@ The administrator can configure:
 Defaults:
 
 - application logs: 14 days;
-- maximum database size: 4 GB;
+- maximum database size: 4 GiB;
 - audit records: 365 days;
 - audit record cap: 100,000;
 - cleanup interval: one hour.
+
+Application-log age accepts whole values from 1 through 3,650 days. The maximum
+active database footprint accepts whole values from 1 through 1,024 GiB. These
+two values are saved atomically; partial retention-policy updates are not
+supported.
 
 When either application-log threshold is reached, oldest application logs are deleted in bounded chunks.
 Size retention starts when the active SQLite footprint reaches 95% of the configured

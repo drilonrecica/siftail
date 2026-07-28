@@ -19,6 +19,7 @@ import (
 	"github.com/drilonrecica/siftail/internal/database"
 	"github.com/drilonrecica/siftail/internal/ingest"
 	"github.com/drilonrecica/siftail/internal/logs"
+	"github.com/drilonrecica/siftail/internal/retention"
 	"github.com/drilonrecica/siftail/internal/sessions"
 	"github.com/drilonrecica/siftail/internal/sources"
 	"github.com/drilonrecica/siftail/internal/web"
@@ -96,9 +97,10 @@ func (a *App) Run(ctx context.Context) error {
 	sessionStore := sessions.NewCoordinatedStore(db.Reader(), coordinator)
 	a.browser = auth.NewBrowser(administratorStore, sessionStore, auth.BrowserConfig{
 		PublicURL: a.cfg.PublicURL, TrustedProxyCIDRs: a.cfg.TrustedProxyCIDRs,
-		HistoryStore: logs.NewHistoryStore(db.Reader(), cursorCodec),
-		SourceStore:  sources.NewCoordinatedStore(db.Reader(), coordinator),
-		LiveBroker:   liveBroker,
+		HistoryStore:   logs.NewHistoryStore(db.Reader(), cursorCodec),
+		SourceStore:    sources.NewCoordinatedStore(db.Reader(), coordinator),
+		RetentionStore: retention.NewStore(db.Reader(), coordinator),
+		LiveBroker:     liveBroker,
 	})
 	defer func() { a.browser = nil }()
 

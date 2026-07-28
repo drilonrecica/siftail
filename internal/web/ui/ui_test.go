@@ -100,6 +100,43 @@ func TestShellTemplateUsesLocalCSPCompatibleAssets(t *testing.T) {
 	}
 }
 
+func TestSettingsShellRendersBoundedAccessibleRetentionForm(t *testing.T) {
+	renderer := New()
+	response := httptest.NewRecorder()
+	if err := renderer.Shell(response, http.StatusUnprocessableEntity, ShellView{
+		CSRFToken: "csrf",
+		Mode:      "settings",
+		Settings: SettingsView{
+			CSRFToken:      "csrf",
+			RetentionDays:  `<script>alert("unsafe")</script>`,
+			MaxDatabaseGiB: "0",
+			RetentionError: "Retention error",
+			DatabaseError:  "Database error",
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	body := response.Body.String()
+	for _, want := range []string{
+		`aria-current="page">Settings</a>`,
+		`action="/settings/retention"`,
+		`min="1" max="3650" step="1"`,
+		`min="1" max="1024" step="1"`,
+		`aria-invalid="true"`,
+		`id="retention-days-error"`,
+		`id="maximum-database-error"`,
+		`not forensic erasure`,
+		`security audit history`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("Settings shell missing %q", want)
+		}
+	}
+	if strings.Contains(body, `<script>alert`) {
+		t.Fatal("Settings shell emitted unsafe field content")
+	}
+}
+
 func TestLiveShellRendersExplicitEscapedBoundedWorkspace(t *testing.T) {
 	renderer := New()
 	response := httptest.NewRecorder()

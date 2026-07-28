@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="dark light">
   <meta name="htmx-config" content='{"historyCacheSize":0,"responseHandling":[{"code":"204","swap":false},{"code":"[23]..","swap":true},{"code":"[45]..","swap":true,"error":true}]}'>
-  <title>{{if or (eq .Mode "sources") (eq .Mode "source-detail")}}Sources{{else if or (eq .Mode "servers") (eq .Mode "server-detail") (eq .Mode "token-created")}}Servers{{else}}Logs{{end}} · Siftail</title>
+  <title>{{if or (eq .Mode "sources") (eq .Mode "source-detail")}}Sources{{else if or (eq .Mode "servers") (eq .Mode "server-detail") (eq .Mode "token-created")}}Servers{{else if eq .Mode "settings"}}Settings{{else}}Logs{{end}} · Siftail</title>
   <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/assets/app.css">
   <script src="/assets/htmx-2.0.10.min.js" defer></script>
@@ -24,6 +24,7 @@
       <a href="/logs"{{if or (eq .Mode "history") (eq .Mode "live")}} aria-current="page"{{end}}>Logs</a>
       <a href="/sources"{{if or (eq .Mode "sources") (eq .Mode "source-detail")}} aria-current="page"{{end}}>Sources</a>
       <a href="/servers"{{if or (eq .Mode "servers") (eq .Mode "server-detail") (eq .Mode "token-created")}} aria-current="page"{{end}}>Servers</a>
+      <a href="/settings"{{if eq .Mode "settings"}} aria-current="page"{{end}}>Settings</a>
     </nav>
     <div class="header-actions">
       <label class="compact-control" for="theme">Theme</label>
@@ -46,8 +47,8 @@
   <main id="main-content" class="workspace">
     <header class="workspace-heading">
       <div>
-        <p class="eyebrow">{{if eq .Mode "live"}}Live{{else if eq .Mode "history"}}History{{else if or (eq .Mode "sources") (eq .Mode "source-detail")}}Source catalog{{else}}Ingestion administration{{end}}</p>
-        <h1>{{if or (eq .Mode "sources") (eq .Mode "source-detail")}}Sources{{else if or (eq .Mode "servers") (eq .Mode "server-detail") (eq .Mode "token-created")}}Servers{{else}}Logs{{end}}</h1>
+        <p class="eyebrow">{{if eq .Mode "live"}}Live{{else if eq .Mode "history"}}History{{else if or (eq .Mode "sources") (eq .Mode "source-detail")}}Source catalog{{else if eq .Mode "settings"}}Runtime settings{{else}}Ingestion administration{{end}}</p>
+        <h1>{{if or (eq .Mode "sources") (eq .Mode "source-detail")}}Sources{{else if or (eq .Mode "servers") (eq .Mode "server-detail") (eq .Mode "token-created")}}Servers{{else if eq .Mode "settings"}}Settings{{else}}Logs{{end}}</h1>
       </div>
       {{if eq .Mode "live"}}<p class="workspace-context">{{.Live.SourceSummary}}</p>
       {{else if eq .Mode "history"}}<p class="workspace-context">{{.History.SourceSummary}} · {{.History.RangeSummary}}</p>
@@ -55,6 +56,7 @@
       {{else if eq .Mode "server-detail"}}<p class="workspace-context">{{.Server.Name}}</p>
       {{else if eq .Mode "token-created"}}<p class="workspace-context">{{.Token.ServerName}} · token shown once</p>
       {{else if eq .Mode "servers"}}<p class="workspace-context">Trusted identities for authenticated ingestion</p>
+      {{else if eq .Mode "settings"}}<p class="workspace-context">Bounded local storage controls</p>
       {{else}}<p class="workspace-context">Stable sources discovered from committed logs</p>{{end}}
     </header>
     {{if eq .Mode "live"}}{{template "live-region.html" .Live}}
@@ -63,6 +65,7 @@
     {{else if eq .Mode "servers"}}{{template "servers.html" .Servers}}
     {{else if eq .Mode "server-detail"}}{{template "server-detail.html" .Server}}
     {{else if eq .Mode "token-created"}}{{template "token-created.html" .Token}}
+    {{else if eq .Mode "settings"}}{{template "settings.html" .Settings}}
     {{else}}{{template "sources.html" .Sources}}{{end}}
   </main>
 </body>

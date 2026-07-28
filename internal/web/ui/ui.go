@@ -35,6 +35,7 @@ type ShellView struct {
 	Servers   ServersView
 	Server    ServerDetailView
 	Token     OneTimeTokenView
+	Settings  SettingsView
 }
 
 type SelectOption struct {
@@ -252,6 +253,17 @@ type OneTimeTokenView struct {
 	Fingerprint string
 	Token       string
 	DoneURL     string
+}
+
+type SettingsView struct {
+	CSRFToken      string
+	RetentionDays  string
+	MaxDatabaseGiB string
+	RetentionError string
+	DatabaseError  string
+	Notice         string
+	Error          string
+	ErrorRequestID string
 }
 
 func New() *Renderer {

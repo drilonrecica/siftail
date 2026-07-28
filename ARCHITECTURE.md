@@ -426,6 +426,14 @@ SQLite-backed settings include:
 - token metadata and lifecycle;
 - export limits where operationally adjustable.
 
+Application-log retention uses one `application_retention` settings row with a
+strict JSON object containing age days and maximum database bytes. The browser
+accepts whole age values from 1 through 3,650 days and whole database values
+from 1 through 1,024 GiB. Saves validate before entering the coordinator and
+upsert both fields in one short transaction. An absent row resolves to 14 days
+and 4 GiB without writing during a read; malformed or out-of-range stored data
+fails explicitly instead of silently restoring defaults.
+
 Browser-personal preferences such as theme and density should remain browser-local unless there is a clear cross-device requirement.
 
 ### 9.5 Validation

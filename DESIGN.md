@@ -1179,9 +1179,13 @@ Server-side errors appear next to field and in a summary when needed.
 
 Examples:
 
-> Retention must be at least 1 day.
+> Retention must be a whole number from 1 to 3,650 days.
 
-> Maximum database size must be larger than the configured request and maintenance safety minimum.
+> Maximum database size must be a whole number from 1 to 1,024 GiB.
+
+Both fields are submitted as one retention-policy change. A field error keeps
+both submitted values visible, focuses the first invalid field, and does not
+change either stored value.
 
 ### 19.4 Save behavior
 

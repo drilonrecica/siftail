@@ -14,6 +14,7 @@ import (
 
 	"github.com/drilonrecica/siftail/internal/database"
 	"github.com/drilonrecica/siftail/internal/logs"
+	"github.com/drilonrecica/siftail/internal/retention"
 	"github.com/drilonrecica/siftail/internal/sessions"
 	"github.com/drilonrecica/siftail/internal/sources"
 	"github.com/drilonrecica/siftail/internal/web"
@@ -54,7 +55,8 @@ func newBrowserFixture(t *testing.T, publicURL string, administrator bool) *brow
 	}
 	browser := NewBrowser(adminStore, sessionStore, BrowserConfig{
 		PublicURL: publicURL, HistoryStore: logs.NewHistoryStore(db.Reader(), codec),
-		SourceStore: sources.NewCoordinatedStore(db.Reader(), coordinator),
+		SourceStore:    sources.NewCoordinatedStore(db.Reader(), coordinator),
+		RetentionStore: retention.NewStore(db.Reader(), coordinator),
 	})
 	fixture := &browserFixture{
 		db: db, browser: browser, sessions: sessionStore,

@@ -855,7 +855,16 @@ The first threshold reached triggers oldest-first deletion.
 Defaults:
 
 - 14 days;
-- 4 GB.
+- 4 GiB.
+
+Supported operator values are whole units:
+
+- age: 1 through 3,650 days;
+- maximum active database footprint: 1 through 1,024 GiB.
+
+Both limits are persisted and changed as one retention policy. A validation or
+storage failure leaves the complete prior policy active; Siftail never applies
+one field from a failed update.
 
 ### 16.2 Age eligibility
 

@@ -15,6 +15,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/drilonrecica/siftail/internal/logs"
+	"github.com/drilonrecica/siftail/internal/retention"
 	"github.com/drilonrecica/siftail/internal/sessions"
 	"github.com/drilonrecica/siftail/internal/sources"
 	webui "github.com/drilonrecica/siftail/internal/web/ui"
@@ -27,6 +28,7 @@ type BrowserConfig struct {
 	TrustedProxyCIDRs []string
 	HistoryStore      *logs.Store
 	SourceStore       *sources.Store
+	RetentionStore    *retention.Store
 	LiveBroker        *logs.LiveBroker
 	LiveHeartbeat     time.Duration
 	LiveSessionCheck  time.Duration
@@ -42,6 +44,7 @@ type Browser struct {
 	ui               *webui.Renderer
 	history          *logs.Store
 	sources          *sources.Store
+	retention        *retention.Store
 	live             *logs.LiveBroker
 	liveHeartbeat    time.Duration
 	liveSessionCheck time.Duration
@@ -68,6 +71,7 @@ func NewBrowser(administrators *Store, sessionStore *sessions.Store, config Brow
 		ui:               webui.New(),
 		history:          config.HistoryStore,
 		sources:          config.SourceStore,
+		retention:        config.RetentionStore,
 		live:             config.LiveBroker,
 		liveHeartbeat:    config.LiveHeartbeat,
 		liveSessionCheck: config.LiveSessionCheck,
@@ -114,6 +118,8 @@ func (b *Browser) Register(mux *http.ServeMux) {
 	mux.Handle("GET /servers/{id}", b.Protect(http.HandlerFunc(b.serverDetailPage)))
 	mux.Handle("POST /servers/{id}/tokens", b.Protect(http.HandlerFunc(b.tokenCreate)))
 	mux.Handle("POST /tokens/{id}/revoke", b.Protect(http.HandlerFunc(b.tokenRevoke)))
+	mux.Handle("GET /settings", b.Protect(http.HandlerFunc(b.settingsPage)))
+	mux.Handle("POST /settings/retention", b.Protect(http.HandlerFunc(b.retentionSettingsSave)))
 }
 
 func (b *Browser) loginPage(w http.ResponseWriter, r *http.Request) {

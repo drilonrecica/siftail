@@ -582,6 +582,62 @@ test("Server token creation, one-time copy, rotation, navigation loss, and revoc
   });
 });
 
+test("retention settings validate, persist, remain responsive, and expire safely", async ({
+  page,
+}) => {
+  await login(page);
+  await page.getByRole("link", { name: "Settings", exact: true }).click();
+  await expect(page).toHaveURL(/\/settings$/);
+  await expect(page.getByRole("heading", { name: "Retention limits" })).toBeVisible();
+  const retentionDays = page.locator("#retention-days");
+  const maximumDatabaseGiB = page.locator("#maximum-database-gib");
+  await expect(retentionDays).toHaveValue("14");
+  await expect(maximumDatabaseGiB).toHaveValue("4");
+
+  await retentionDays.fill("0");
+  await page.getByRole("button", { name: "Save retention settings" }).click();
+  await expect(page.getByText(
+    "Retention must be a whole number from 1 to 3,650 days.",
+  )).toBeVisible();
+  await expect(retentionDays).toBeFocused();
+
+  await retentionDays.fill("30");
+  await maximumDatabaseGiB.fill("8");
+  await page.getByRole("button", { name: "Save retention settings" }).press("Enter");
+  await expect(page).toHaveURL(/\/settings\?notice=retention-saved$/);
+  await expect(page.getByText("Retention settings saved.")).toBeVisible();
+  await page.reload();
+  await expect(retentionDays).toHaveValue("30");
+  await expect(maximumDatabaseGiB).toHaveValue("8");
+
+  await page.locator("[data-theme-select]").selectOption("dark");
+  let results = await new AxeBuilder({ page })
+    .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"])
+    .analyze();
+  expect(results.violations.map((violation) => violation.id)).toEqual([]);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.locator("[data-theme-select]").selectOption("light");
+  expect(await page.evaluate(
+    () => document.documentElement.scrollWidth > window.innerWidth,
+  )).toBe(false);
+  results = await new AxeBuilder({ page })
+    .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"])
+    .analyze();
+  expect(results.violations.map((violation) => violation.id)).toEqual([]);
+  await page.screenshot({
+    path: ".playwright-artifacts/settings-mobile-light.png",
+    fullPage: true,
+  });
+
+  const state = readState();
+  execFileSync(state.binary, ["sessions", "revoke-all"], {
+    env: siftailEnvironment({ SIFTAIL_DATA_DIR: state.dataDirectory }),
+    encoding: "utf8",
+  });
+  await page.reload();
+  await expect(page).toHaveURL(/\/login\?return=.*expired=1/);
+});
+
 test("keyboard, themes, reduced motion, mobile inspection, and axe smoke", async ({ page }) => {
   await login(page);
   await page.locator("[data-theme-select]").selectOption("dark");
