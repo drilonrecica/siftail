@@ -1,4 +1,4 @@
-.PHONY: fmt fmt-check vet test race-test build check frontend-check playwright clean
+.PHONY: fmt fmt-check vet test race-test build compose-check check frontend-check playwright clean
 
 GO       := go
 BINARY   := siftail
@@ -34,7 +34,10 @@ race-test:
 build:
 	$(GO) build -ldflags "$(LDFLAGS)" -o $(BINARY) ./cmd/siftail
 
-check: fmt-check vet test build
+compose-check:
+	scripts/compose-validate.sh
+
+check: fmt-check vet test build compose-check
 
 frontend-check:
 	npm run frontend-check

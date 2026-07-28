@@ -1,0 +1,32 @@
+services:
+  siftail:
+    image: "${SIFTAIL_IMAGE:-ghcr.io/drilonrecica/siftail:0.5.0}"
+    entrypoint: ["/siftail"]
+    command: ["serve"]
+    restart: unless-stopped
+    stop_grace_period: "${SIFTAIL_STOP_GRACE_PERIOD:-40s}"
+    environment:
+      COOLIFY_APP_NAME: siftail-self
+      SIFTAIL_DATA_DIR: /data
+      SIFTAIL_UI_ADDR: :8080
+      SIFTAIL_INGEST_ADDR: :8081
+      SIFTAIL_PUBLIC_URL: "${SIFTAIL_PUBLIC_URL:?set SIFTAIL_PUBLIC_URL to the browser-facing HTTP(S) origin}"
+      SIFTAIL_INGEST_PUBLIC_URL: "${SIFTAIL_INGEST_PUBLIC_URL:?set SIFTAIL_INGEST_PUBLIC_URL to the complete HTTP(S) /api/v1/ingest URL}"
+      SIFTAIL_LOG_LEVEL: "${SIFTAIL_LOG_LEVEL:-info}"
+      SIFTAIL_LOG_FORMAT: "${SIFTAIL_LOG_FORMAT:-text}"
+      SIFTAIL_SHUTDOWN_TIMEOUT: "${SIFTAIL_SHUTDOWN_TIMEOUT:-30s}"
+      SIFTAIL_TRUSTED_PROXY_CIDRS: "${SIFTAIL_TRUSTED_PROXY_CIDRS:-}"
+    expose:
+      - "8080"
+      - "8081"
+    volumes:
+      - siftail-data:/data
+    healthcheck:
+      test: ["CMD", "/siftail", "healthcheck"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
+volumes:
+  siftail-data:

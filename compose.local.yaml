@@ -1,0 +1,5 @@
+services:
+  siftail:
+    ports:
+      - "${SIFTAIL_LOCAL_UI_BIND:-127.0.0.1}:${SIFTAIL_LOCAL_UI_PORT:-8080}:8080"
+      - "${SIFTAIL_LOCAL_INGEST_BIND:-127.0.0.1}:${SIFTAIL_LOCAL_INGEST_PORT:-8081}:8081"

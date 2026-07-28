@@ -79,6 +79,7 @@ make vet        # go vet ./...
 make test       # go test ./...
 make race-test  # go test -race ./...
 make build      # build the siftail binary
+make compose-check # validate base/local Compose and required interpolation
 make check      # formatting, vet, tests, and metadata-bearing build
 make frontend-check # list and validate development-only browser tests
 make playwright     # run the Chromium browser/security suite
@@ -102,6 +103,40 @@ behavior, runtime dependency/license ownership, image scans, footprint
 measurements, and both-architecture smoke commands are recorded in
 [`docs/operations/container-image.md`](docs/operations/container-image.md).
 No public image is implied until the release workflow publishes one.
+
+### Supported Docker Compose deployment
+
+[`compose.yaml`](compose.yaml) runs exactly one Siftail service against one
+named `/data` volume. It uses the future versioned
+`ghcr.io/drilonrecica/siftail:0.5.0` image by default, permits an explicit
+`SIFTAIL_IMAGE` override, exposes internal ports `8080` and `8081`, requires
+both public URLs, checks readiness, restarts unless stopped, and allows the
+default 30-second Siftail drain 40 seconds before forced container
+termination. It publishes no host ports, so Coolify and container-network
+reverse proxies should use the base file alone.
+
+For local access or a host-network reverse proxy,
+[`compose.local.yaml`](compose.local.yaml) binds both listeners to configurable
+loopback addresses. Start from the nonsecret example:
+
+```bash
+cp .env.example .env
+docker compose -f compose.yaml -f compose.local.yaml config --quiet
+docker compose -f compose.yaml -f compose.local.yaml run --rm siftail \
+  admin create --username Admin
+docker compose -f compose.yaml -f compose.local.yaml up -d --wait
+```
+
+Administrator passwords and ingestion tokens do not belong in Compose or
+`.env`. Create the administrator through the no-echo CLI, then create Servers
+and one-time tokens in the authenticated UI. Trusted proxy CIDRs are empty by
+default; never use a broad trust boundary such as `0.0.0.0/0` or `::/0`.
+
+`docker compose down` preserves the named data volume.
+`docker compose down --volumes` intentionally deletes it. The complete
+deployment, reverse-proxy, ownership, shutdown, backup-before-upgrade,
+upgrade/rollback, and removal procedure is in
+[`docs/operations/docker-compose.md`](docs/operations/docker-compose.md).
 
 Browser verification requires Node.js 22 or newer only on the development/CI
 host:

@@ -2429,6 +2429,50 @@ Publish:
 
 Cross-builds must be tested because CGO is used.
 
+### 34.5 Docker Compose deployment
+
+The supported `compose.yaml` is a production-shaped deployment boundary:
+
+- exactly one `siftail` service and one named volume mounted at `/data`;
+- the versioned `ghcr.io/drilonrecica/siftail:0.5.0` image by default, with an
+  explicit `SIFTAIL_IMAGE` interpolation override for verification or a
+  deliberate release selection;
+- no published host ports in the base file; container-network reverse proxies
+  and Coolify route separately to internal ports `8080` and `8081`;
+- a separate `compose.local.yaml` publishes both listeners to configurable
+  loopback addresses for local access or a host-network reverse proxy;
+- the direct `/siftail serve` process, readiness health check,
+  `restart: unless-stopped`, the non-root image identity, and one shutdown
+  grace period;
+- a default 40-second container stop grace period around Siftail's default
+  30-second bounded drain; an operator changing one timeout must keep the
+  container grace period longer than the application timeout; and
+- `COOLIFY_APP_NAME=siftail-self` fixed on the Siftail service so the tested
+  Coolify drain exclusion can prevent recursive ingestion.
+
+Compose interpolation requires both `SIFTAIL_PUBLIC_URL` and the complete
+`SIFTAIL_INGEST_PUBLIC_URL` before any container is created. Trusted proxy
+CIDRs remain empty unless the operator identifies the exact networks whose
+forwarded metadata is trusted. A broad value such as `0.0.0.0/0` or `::/0` is
+unsafe and does not enable identity-header authentication.
+
+Compose files contain no administrator password, ingestion token, secret
+environment value, privileged mode, custom network, host bind mount, Docker
+socket, init process, or external service. Administrator initialization uses
+the no-echo CLI through a focused `compose run` or `compose exec`; Server and
+token setup then uses the authenticated UI or the focused CLI. The named
+volume is initialized for numeric identity `65532:65532`. A host bind mount is
+outside the supported files and must already be writable by that identity;
+running the application as root or making data world-writable is not a
+permission fix.
+
+`docker compose down` removes containers and the implicit project network but
+retains the named data volume. Only an explicit
+`docker compose down --volumes` intentionally removes that state. Upgrades
+recreate the service against the same volume after a verified backup; an older
+binary continues to refuse a newer schema, so rollback may require restoring
+the compatible pre-upgrade backup.
+
 ---
 
 ## 35. Release architecture
