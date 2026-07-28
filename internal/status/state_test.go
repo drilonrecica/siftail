@@ -198,3 +198,23 @@ func TestStateGatesKnownDatabaseFailureAndRecordsProbeRecovery(t *testing.T) {
 		t.Fatalf("healthy probe added diagnostics: %d", got)
 	}
 }
+
+func TestBackupDiagnosticsUseClosedPayloadFreeSummaries(t *testing.T) {
+	state := NewState(time.Now())
+	at := time.Date(2026, 7, 28, 14, 0, 0, 0, time.UTC)
+	for _, category := range []string{"backup_succeeded", "backup_failed"} {
+		if err := state.RecordDiagnostic(DiagnosticInput{
+			At: at, Component: "backup", Category: category,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	diagnostics := state.Snapshot(at).Diagnostics
+	if len(diagnostics) != 2 ||
+		diagnostics[0].Summary !=
+			"A full backup did not produce a verified artifact." ||
+		diagnostics[1].Summary !=
+			"A full backup completed and passed verification." {
+		t.Fatalf("backup diagnostics = %#v", diagnostics)
+	}
+}

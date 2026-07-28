@@ -1266,6 +1266,21 @@ Explain:
 > application logs, diagnostics, and audit history. All backups exclude browser
 > sessions, so restore requires a new sign-in.
 
+The Backup workspace starts at most one asynchronous operation and shows typed
+process-local state:
+
+- no backup run;
+- full backup in progress with copied/total SQLite pages;
+- backup verified with safe basename, byte size, and SHA-256;
+- canceled before publication; or
+- failed with destination-capacity/permission guidance and no raw path or
+  SQLite error.
+
+While running, the output input and action are disabled and only the focused
+region polls once per second. Existing page content remains visible. The
+server-side output path is never echoed after submission; only its safe
+basename may appear in the result and security audit.
+
 ### 21.3 Restore warning
 
 Browser documentation/status copy:

@@ -1,0 +1,37 @@
+{{define "backup.html"}}
+<section id="backup-region" class="workspace-panel settings-workspace" aria-label="Backup"
+  {{if eq .State "running"}}hx-get="/backup/region" hx-trigger="every 1s" hx-swap="outerHTML"{{end}}>
+  {{if .Error}}<div class="form-error" role="alert"><p>{{.Error}}</p></div>{{end}}
+  <section aria-labelledby="full-backup-heading">
+    <h2 id="full-backup-heading">Full backup</h2>
+    <p>Full backups include retained application logs, configuration, credential hashes, source metadata, and security audit history. Browser sessions are always excluded, so restore requires a fresh sign-in.</p>
+    <p>Choose a server-side path on protected storage. Existing files are never overwritten. Scheduling and copying the verified artifact off-host remain operator responsibilities.</p>
+    <form method="post" action="/backup/full">
+      <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+      <label for="backup-output-path">Output path</label>
+      <input id="backup-output-path" name="output_path" type="text" maxlength="4096"
+        placeholder="/backups/siftail-full.sqlite" required autocomplete="off" autofocus
+        {{if eq .State "running"}}disabled{{end}}>
+      <button class="button button-primary" type="submit" {{if eq .State "running"}}disabled{{end}}>Create verified full backup</button>
+    </form>
+  </section>
+
+  <section aria-labelledby="backup-result-heading" aria-live="polite">
+    <h2 id="backup-result-heading">Latest process result</h2>
+    <p><strong>{{.StateLabel}}</strong></p>
+    {{if .StartedAt}}<p>Started: <time>{{.StartedAt}}</time></p>{{end}}
+    {{if .CompletedAt}}<p>Completed: <time>{{.CompletedAt}}</time></p>{{end}}
+    {{if eq .State "running"}}<p>Copied pages: {{.PagesCopied}} / {{.PageCount}}</p>{{end}}
+    {{if .Name}}<dl class="status-facts">
+      <div><dt>Artifact</dt><dd>{{.Name}}</dd></div>
+      <div><dt>Size</dt><dd>{{.Size}}</dd></div>
+      <div><dt>SHA-256</dt><dd><code>{{.Checksum}}</code></dd></div>
+    </dl>{{end}}
+  </section>
+
+  <section aria-labelledby="restore-heading">
+    <h2 id="restore-heading">Restore</h2>
+    <p>Restoring replaces the active database and requires maintenance mode. Use the Siftail CLI on the host. Never copy only the live main database file while WAL mode is active.</p>
+  </section>
+</section>
+{{end}}

@@ -38,12 +38,27 @@ type ShellView struct {
 	Settings  SettingsView
 	Status    StatusView
 	Audit     AuditView
+	Backup    BackupView
 }
 
 type SelectOption struct {
 	Value    string
 	Label    string
 	Selected bool
+}
+
+type BackupView struct {
+	CSRFToken   string
+	State       string
+	StateLabel  string
+	StartedAt   string
+	CompletedAt string
+	PageCount   string
+	PagesCopied string
+	Name        string
+	Size        string
+	Checksum    string
+	Error       string
 }
 
 type FilterChoice struct {
@@ -357,6 +372,10 @@ func (r *Renderer) Login(w http.ResponseWriter, status int, view LoginView) erro
 
 func (r *Renderer) Shell(w http.ResponseWriter, status int, view ShellView) error {
 	return r.render(w, status, "shell.html", view)
+}
+
+func (r *Renderer) Backup(w http.ResponseWriter, status int, view BackupView) error {
+	return r.render(w, status, "backup.html", view)
 }
 
 func (r *Renderer) HistoryRegion(w http.ResponseWriter, status int, view HistoryView) error {

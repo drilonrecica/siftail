@@ -1295,7 +1295,9 @@ Contains all database state required for complete restoration:
 
 A full backup does not contain recoverable plaintext tokens because Siftail never stores them.
 Active and historical session rows are excluded. Restore always requires a
-fresh login.
+fresh login. A full artifact also carries versioned backup metadata identifying
+its type, source schema, creation time, format version, and completed state.
+That artifact metadata is not ordinary application configuration.
 
 ### 26.2 Configuration-only backup
 
@@ -1325,7 +1327,15 @@ Verification confirms:
 - supported schema metadata;
 - expected required tables;
 - backup type;
-- no incomplete backup marker.
+- exactly one compatible backup-metadata record;
+- no incomplete backup marker;
+- absence of browser session rows; and
+- a complete bounded-memory checksum of the artifact.
+
+A backup is not an accepted artifact until verification succeeds and the
+completed file is atomically published without replacing an existing path.
+Hidden partial files are not backups and are removed after failure or
+cancellation.
 
 ### 26.4 Restore
 

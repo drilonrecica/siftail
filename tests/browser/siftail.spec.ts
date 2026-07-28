@@ -1,4 +1,6 @@
 import { execFileSync } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 import {
@@ -729,6 +731,48 @@ test("status is authenticated, refreshable, sanitized, responsive, and accessibl
   expect(results.violations.map((violation) => violation.id)).toEqual([]);
   await page.screenshot({
     path: ".playwright-artifacts/status-mobile-light.png",
+    fullPage: true,
+  });
+});
+
+test("full backup reports bounded progress and a verified session-free artifact", async ({
+  page,
+}) => {
+  test.setTimeout(45_000);
+  await login(page);
+  const state = readState();
+  const output = path.join(state.runDirectory, "browser-full.sqlite");
+  await page.getByRole("link", { name: "Backup", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Backup", exact: true })).toBeVisible();
+  await expect(page.locator("#backup-output-path")).toBeFocused();
+  await expect(page.getByText("Browser sessions are always excluded")).toBeVisible();
+  await page.locator("#backup-output-path").fill(output);
+  await page.getByRole("button", { name: "Create verified full backup" }).click();
+  await expect(page).toHaveURL(/\/backup$/);
+  await expect(page.getByText("Backup verified.", { exact: true })).toBeVisible({
+    timeout: 15_000,
+  });
+  await expect(page.getByText("browser-full.sqlite", { exact: true })).toBeVisible();
+  await expect(page.getByText("SHA-256", { exact: true })).toBeVisible();
+  expect(await page.content()).not.toContain(state.runDirectory);
+  expect(fs.statSync(output).mode & 0o777).toBe(0o600);
+
+  await page.locator("[data-theme-select]").selectOption("dark");
+  let results = await new AxeBuilder({ page })
+    .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"])
+    .analyze();
+  expect(results.violations.map((violation) => violation.id)).toEqual([]);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.locator("[data-theme-select]").selectOption("light");
+  expect(await page.evaluate(
+    () => document.documentElement.scrollWidth > window.innerWidth,
+  )).toBe(false);
+  results = await new AxeBuilder({ page })
+    .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"])
+    .analyze();
+  expect(results.violations.map((violation) => violation.id)).toEqual([]);
+  await page.screenshot({
+    path: ".playwright-artifacts/backup-mobile-light.png",
     fullPage: true,
   });
 });

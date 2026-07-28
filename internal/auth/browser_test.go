@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/drilonrecica/siftail/internal/audit"
+	"github.com/drilonrecica/siftail/internal/backup"
 	"github.com/drilonrecica/siftail/internal/database"
 	"github.com/drilonrecica/siftail/internal/ingest"
 	"github.com/drilonrecica/siftail/internal/logs"
@@ -31,6 +32,8 @@ type browserFixture struct {
 	operational *statusstate.State
 	cancel      context.CancelFunc
 	done        chan error
+	backupDone  chan error
+	backupStop  context.CancelFunc
 }
 
 func newBrowserFixture(t *testing.T, publicURL string, administrator bool) *browserFixture {
@@ -60,6 +63,13 @@ func newBrowserFixture(t *testing.T, publicURL string, administrator bool) *brow
 	}
 	retentionStore := retention.NewStore(db.Reader(), coordinator)
 	auditStore := audit.NewStore(db.Reader(), coordinator)
+	backupManager := backup.NewManager(
+		backup.NewService(db, databasePath, auditStore),
+	)
+	backupCtx, backupStop := context.WithCancel(context.Background())
+	backupDone := make(chan error, 1)
+	go func() { backupDone <- backupManager.Run(backupCtx) }()
+	<-backupManager.Ready()
 	operationalState := statusstate.NewState(time.Now())
 	operationalState.SetWriterReady(true)
 	databaseChecker := database.NewActiveChecker(
@@ -78,6 +88,7 @@ func newBrowserFixture(t *testing.T, publicURL string, administrator bool) *brow
 		SourceStore:     sourceStore,
 		RetentionStore:  retentionStore,
 		AuditStore:      auditStore,
+		BackupManager:   backupManager,
 		DatabaseChecker: databaseChecker,
 		StatusStore: statusstate.NewStore(
 			db.Reader(), databasePath, nil, retentionStore, operationalState,
@@ -86,9 +97,12 @@ func newBrowserFixture(t *testing.T, publicURL string, administrator bool) *brow
 	fixture := &browserFixture{
 		db: db, browser: browser, sessions: sessionStore,
 		coordinator: coordinator, operational: operationalState,
-		cancel: cancel, done: done,
+		cancel: cancel, done: done, backupDone: backupDone,
+		backupStop: backupStop,
 	}
 	t.Cleanup(func() {
+		backupStop()
+		<-backupDone
 		coordinator.Close()
 		cancel()
 		<-done

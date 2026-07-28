@@ -16,6 +16,7 @@ import (
 
 	"github.com/drilonrecica/siftail/internal/audit"
 	"github.com/drilonrecica/siftail/internal/auth"
+	"github.com/drilonrecica/siftail/internal/backup"
 	"github.com/drilonrecica/siftail/internal/config"
 	"github.com/drilonrecica/siftail/internal/database"
 	"github.com/drilonrecica/siftail/internal/ingest"
@@ -42,6 +43,7 @@ type App struct {
 	liveBroker    *logs.LiveBroker
 	status        *statusstate.State
 	databaseCheck *database.ActiveChecker
+	backupManager *backup.Manager
 	shuttingDown  atomic.Bool
 }
 
@@ -104,6 +106,19 @@ func (a *App) Run(ctx context.Context) error {
 	operationalState := statusstate.NewState(time.Now())
 	a.status = operationalState
 	defer func() { a.status = nil }()
+	backupManager := backup.NewManager(
+		backup.NewService(db, a.cfg.DatabasePath, auditStore),
+	).WithObserver(func(result backup.Status) {
+		category := "backup_failed"
+		if result.State == backup.StateSucceeded {
+			category = "backup_succeeded"
+		}
+		_ = operationalState.RecordDiagnostic(statusstate.DiagnosticInput{
+			At: time.Now(), Component: "backup", Category: category,
+		})
+	})
+	a.backupManager = backupManager
+	defer func() { a.backupManager = nil }()
 	statusStore := statusstate.NewStore(
 		db.Reader(), a.cfg.DatabasePath, nil, retentionStore, operationalState,
 	)
@@ -130,6 +145,7 @@ func (a *App) Run(ctx context.Context) error {
 		RetentionStore:    retentionStore,
 		StatusStore:       statusStore,
 		AuditStore:        auditStore,
+		BackupManager:     backupManager,
 		DatabaseChecker:   databaseChecker,
 		LiveBroker:        liveBroker,
 	})
@@ -163,6 +179,8 @@ func (a *App) Run(ctx context.Context) error {
 		).WithObserver(operationalState).Run(writerCtx)
 	}()
 
+	g.Go(func() error { return backupManager.Run(serverCtx) })
+	<-backupManager.Ready()
 	g.Go(func() error { return a.runControlServer(serverCtx, controlListener) })
 	g.Go(func() error { return a.runUIServer(serverCtx) })
 	g.Go(func() error { return a.runIngestServer(serverCtx) })
@@ -368,6 +386,23 @@ func (a *App) controlMux() *http.ServeMux {
 			return
 		}
 		writeControlJSON(w, a.status.Snapshot(time.Now()).Diagnostics, nil)
+	})
+	mux.HandleFunc("POST /backup/full", func(w http.ResponseWriter, r *http.Request) {
+		var input struct {
+			OutputPath string `json:"output_path"`
+		}
+		if !decodeControlJSON(w, r, &input) {
+			return
+		}
+		status, err := a.backupManager.Start(r.Context(), input.OutputPath)
+		writeControlJSON(w, status, err)
+	})
+	mux.HandleFunc("GET /backup", func(w http.ResponseWriter, r *http.Request) {
+		if len(r.URL.Query()) != 0 {
+			writeControlJSON(w, struct{}{}, errors.New("invalid backup query"))
+			return
+		}
+		writeControlJSON(w, a.backupManager.Snapshot(), nil)
 	})
 	return mux
 }

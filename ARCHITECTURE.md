@@ -1580,21 +1580,40 @@ Use SQLite's online backup API through the selected driver or a carefully valida
 
 Do not copy the live main database file alone while WAL writes are active.
 
+The active process owns one bounded asynchronous backup manager. It accepts at
+most one job, uses a separate source reader and destination connection, copies
+at most 256 pages per step, yields between steps, and stops with application
+cancellation. Ingestion continues through the ordinary writer coordinator;
+SQLite defines whether a concurrent committed write is before or after the
+consistent snapshot boundary.
+
 ### 25.2 Full backup flow
 
 ```text
-1. Validate output path and available space.
-2. Open destination exclusively.
-3. Run online backup in bounded steps if supported.
-4. Delete session rows from the destination in a committed transaction.
-5. Close destination safely.
-6. Run quick/integrity verification.
-7. Record checksum and metadata if desired.
-8. Atomically expose final backup filename.
-9. Report success and audit.
+1. Validate an existing destination directory, a non-source output path, and
+   available space for the logical page count plus 5% or 1 MiB slack.
+2. Refuse every existing destination and create a random same-directory hidden
+   staging file exclusively with mode 0600.
+3. Run the SQLite online backup API in 256-page steps.
+4. Switch only the staged artifact to a self-contained delete journal, enable
+   secure deletion, delete every session row, and write exactly one format-1
+   completed full-backup metadata record in a committed transaction.
+5. Close and synchronize the staged artifact.
+6. Run full SQLite integrity, schema compatibility, required-table,
+   backup-metadata, completed-state, and zero-session verification.
+7. Stream SHA-256 calculation with bounded memory.
+8. Atomically hard-link the verified inode to the final non-existing filename,
+   remove the staging link, and synchronize the parent directory.
+9. Reopen and verify the final path, then report success and audit only the
+   safe basename/type. Remove the final link if final verification or success
+   audit recording fails.
 ```
 
 Every backup type excludes the `sessions` table contents.
+The manager retains only the latest process-local typed progress/outcome and
+never retains the requested full path after completion. CLI and authenticated
+browser requests start a job quickly and poll that bounded state; they do not
+hold a multi-gigabyte backup in an HTTP response.
 
 ### 25.3 Configuration-only backup
 

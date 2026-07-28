@@ -550,6 +550,35 @@ This prints at most 100 validated entries through the owner-only control
 socket. There is no arbitrary SQL command, raw process-log export, support
 bundle, public administration endpoint, or outbound reporting.
 
+### Verified online full backup
+
+With Siftail running, create a full backup through the owner-only control
+socket:
+
+```bash
+./siftail backup --output /backups/siftail-full.sqlite
+```
+
+The authenticated Backup workspace exposes the same single-job operation with
+bounded page progress and a sanitized final result. The destination directory
+must already exist on protected storage and have room for the logical database
+plus 5% or at least 1 MiB of slack. Existing output files are never overwritten.
+Siftail creates a hidden mode-`0600` staging file in the same directory, copies
+the active WAL database with SQLite's online backup API, removes all browser
+sessions from the artifact, writes versioned completion metadata, runs full
+integrity/schema/table/session verification, streams a SHA-256 checksum, syncs
+the data, and only then atomically exposes the final filename.
+
+Ingestion may continue during the snapshot. A concurrent committed batch is
+captured wholly before or after SQLite's consistent snapshot boundary. Failure,
+cancellation, full destination, invalid path, failed verification, or a
+no-overwrite race removes Siftail's partial output. Scheduling, off-host
+copying, lifecycle, and encryption of the verified artifact remain operator
+responsibilities. Full backups contain retained application logs, password and
+token hashes, configuration, sources, and audit history, so protect them as
+sensitive data. See
+[`docs/operations/full-backups.md`](docs/operations/full-backups.md).
+
 ### Current dependency rationale
 
 - `github.com/mattn/go-sqlite3` v1.14.48 is the accepted SQLite driver. It
