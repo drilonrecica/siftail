@@ -132,7 +132,7 @@ func Normalize(record ReceivedRecord, server TrustedServer, receivedAt time.Time
 	if err != nil {
 		return CanonicalEvent{}, err
 	}
-	stream := normalizeStream(takeString(fields, "stream"))
+	stream := normalizeStream(firstString(fields, "stream", "source"))
 	eventID, err := takeBoundedString(fields, maxEventIDBytes, "source_event_id")
 	if err != nil {
 		return CanonicalEvent{}, fmt.Errorf("source event ID: %w", err)
@@ -225,8 +225,8 @@ func parseTimestamp(raw json.RawMessage) (time.Time, error) {
 }
 
 func normalizeSource(fields map[string]json.RawMessage, serverID int64) (SourceIdentity, *ContainerIdentity, error) {
-	project := firstString(fields, "coolify_project_name", "project_name", "com.docker.compose.project", "project")
-	environment := firstString(fields, "coolify_environment_name", "environment_name", "environment", "env")
+	project := firstString(fields, "coolify_project_name", "coolify.project_name", "project_name", "com.docker.compose.project", "project")
+	environment := firstString(fields, "coolify_environment_name", "coolify.environment_name", "environment_name", "environment", "env")
 	application := firstString(fields, "coolify_application_name", "application_name", "application", "app")
 	service := firstString(fields, "coolify_service_name", "coolify.app_name", "service_name", "com.docker.compose.service", "service")
 	containerID := firstString(fields, "container_id", "container.id")
@@ -473,11 +473,13 @@ func canonicalAttributes(fields, structured map[string]json.RawMessage) ([]byte,
 
 func isTransportField(key string) bool {
 	switch key {
-	case "date", "timestamp", "@timestamp", "time", "tag", "stream",
+	case "date", "timestamp", "@timestamp", "time", "tag", "stream", "source",
 		"source_event_id", "container_id", "container.id",
 		"container_name", "container.name", "project", "project_name",
-		"coolify_project_name", "environment", "environment_name", "env",
-		"coolify_environment_name", "application", "application_name", "app",
+		"coolify_project_name", "coolify.project_name",
+		"environment", "environment_name", "env",
+		"coolify_environment_name", "coolify.environment_name",
+		"application", "application_name", "app",
 		"coolify_application_name", "service", "service_name",
 		"coolify_service_name", "coolify.app_name", "com.docker.compose.project",
 		"com.docker.compose.service", "compose_project":

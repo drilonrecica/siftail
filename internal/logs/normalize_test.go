@@ -52,6 +52,42 @@ func TestNormalizeCanonicalEvent(t *testing.T) {
 	}
 }
 
+func TestNormalizeCoolifyFluentdAliases(t *testing.T) {
+	event, err := Normalize(testRecord(`{
+		"date":"2026-07-28T10:00:00.123456Z",
+		"log":"request complete",
+		"source":"stderr",
+		"coolify.project_name":"storefront",
+		"coolify.environment_name":"production",
+		"coolify.app_name":"web",
+		"container_id":"abc123",
+		"container_name":"checkout-42",
+		"coolify.server_ip":"192.0.2.10"
+	}`), TrustedServer{ID: 17}, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if event.Source.ServerID != 17 ||
+		event.Source.Project != "storefront" ||
+		event.Source.Environment != "production" ||
+		event.Source.Application != "web" ||
+		event.Source.Service != "web" {
+		t.Fatalf("source = %#v", event.Source)
+	}
+	if event.Stream != StreamStderr {
+		t.Fatalf("stream = %q", event.Stream)
+	}
+	if event.Container == nil ||
+		event.Container.ID != "abc123" ||
+		event.Container.Name != "checkout-42" {
+		t.Fatalf("container = %#v", event.Container)
+	}
+	if strings.Contains(string(event.Attributes), `"source"`) ||
+		!strings.Contains(string(event.Attributes), `"coolify.server_ip"`) {
+		t.Fatalf("attributes = %s", event.Attributes)
+	}
+}
+
 func TestTimestampPrecedenceAndFailure(t *testing.T) {
 	received := time.Date(2026, 7, 28, 0, 0, 0, 0, time.UTC)
 	tests := []struct {

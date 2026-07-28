@@ -1767,9 +1767,12 @@ Use Fluent Bit HTTP output:
 
 ### 28.3 Illustrative configuration
 
-Before implementation, pin the supported Coolify and Fluent Bit release range and
-store representative payload/configuration fixtures from that range. Exact keys must
-be validated against those versions and Coolify's custom drain environment.
+Compatibility evidence is pinned on 2026-07-28 to Coolify `v4.1.1` with its
+shipped `cr.fluentbit.io/fluent/fluent-bit:2.0` image reference, and to generic
+Fluent Bit `v5.0.9`. The fixtures and exact limitations are recorded in
+`docs/integrations/coolify-fluent-bit-compatibility.md`. This does not imply a
+broader supported release range. Exact keys are validated against Coolify's
+custom drain source and representative production-path payloads.
 
 ```ini
 [SERVICE]
@@ -1788,9 +1791,9 @@ be validated against those versions and Coolify's custom drain environment.
     storage.type      filesystem
 
 [FILTER]
-    Name   grep
-    Match  *
-    Exclude container_name siftail
+    Name    grep
+    Match   *
+    Exclude COOLIFY_APP_NAME ^siftail-self$
 
 [OUTPUT]
     Name           http
@@ -1802,6 +1805,7 @@ be validated against those versions and Coolify's custom drain environment.
     json_date_key  date
     json_date_format iso8601
     Compress       gzip
+    Header         Content-Type application/x-ndjson
     Header         Authorization Bearer <TOKEN>
     tls            On
     Retry_Limit    False
@@ -1812,7 +1816,8 @@ The 256 MiB filesystem buffer is a bounded retry cushion, not a lossless-deliver
 promise. The generator must refuse to present a configuration as ready when the
 supported Coolify version cannot provide a tested self-container exclusion.
 
-This sample is conceptual. Generated configuration must account for:
+This sample remains conceptual; the pinned fixture is the tested configuration
+shape. Generated configuration must account for:
 
 - public HTTPS vs private networking;
 - exact exclusion fields available from Coolify;

@@ -284,11 +284,54 @@ func TestDurableIngestionSubprocessSmoke(t *testing.T) {
 	}
 	postSmokeFixture(t, ingestAddr, token, "application/json", "gzip", compressed.Bytes())
 
+	coolify, err := os.ReadFile(filepath.Join(
+		root, "internal/ingest/testdata/coolify-v4.1.1-json-lines.ndjson",
+	))
+	if err != nil {
+		t.Fatal(err)
+	}
+	compressed.Reset()
+	gzipWriter = gzip.NewWriter(&compressed)
+	if _, err := gzipWriter.Write(coolify); err != nil {
+		t.Fatal(err)
+	}
+	if err := gzipWriter.Close(); err != nil {
+		t.Fatal(err)
+	}
+	postSmokeFixture(
+		t, ingestAddr, token, "application/x-ndjson", "gzip", compressed.Bytes(),
+	)
+
+	generic, err := os.ReadFile(filepath.Join(
+		root, "internal/ingest/testdata/fluent-bit-v5.0.9-json-array.json",
+	))
+	if err != nil {
+		t.Fatal(err)
+	}
+	postSmokeFixture(t, ingestAddr, token, "application/json", "", generic)
+	postSmokeFixture(t, ingestAddr, token, "application/json", "", generic)
+
 	if err := serve.Process.Signal(syscall.SIGTERM); err != nil {
 		t.Fatal(err)
 	}
 	if err := serve.Wait(); err != nil {
 		t.Fatalf("smoke server shutdown: %v\n%s", err, processOutput.String())
+	}
+	serve = exec.Command(binary, "serve")
+	serve.Env = environment
+	serve.Stdout = &processOutput
+	serve.Stderr = &processOutput
+	if err := serve.Start(); err != nil {
+		t.Fatal(err)
+	}
+	waitForHTTP(t, "http://"+uiAddr+"/health/live", serve, &processOutput)
+	postSmokeFixture(t, ingestAddr, token, "application/json", "", generic)
+	postSmokeFixture(t, ingestAddr, token, "application/x-ndjson", "", coolify)
+	if err := serve.Process.Signal(syscall.SIGTERM); err != nil {
+		t.Fatal(err)
+	}
+	if err := serve.Wait(); err != nil {
+		t.Fatalf("restarted smoke server shutdown: %v\n%s", err, processOutput.String())
 	}
 	waited = true
 	if _, err := os.Stat(filepath.Join(dataDir, "siftail-control.sock")); !os.IsNotExist(err) {
@@ -300,21 +343,28 @@ func TestDurableIngestionSubprocessSmoke(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	events, err := logs.NewStore(db.Reader()).Recent(context.Background(), 10)
+	events, err := logs.NewStore(db.Reader()).Recent(context.Background(), 20)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(events) != 2 {
-		t.Fatalf("committed smoke events = %d, want 2", len(events))
+	if len(events) != 8 {
+		t.Fatalf("committed smoke events = %d, want 8", len(events))
 	}
-	messages := map[string]bool{}
+	messages := map[string]int{}
 	for _, event := range events {
-		messages[event.MessageText] = true
+		messages[event.MessageText]++
 		if string(event.MessageRaw) != event.MessageText {
-			t.Fatalf("raw payload was not preserved for %q", event.MessageText)
+			if event.MessageText != "structured generic record" {
+				t.Fatalf("raw payload was not preserved for %q", event.MessageText)
+			}
 		}
 	}
-	if !messages["plain smoke event"] || !messages["gzip smoke event"] {
+	if messages["plain smoke event"] != 1 ||
+		messages["gzip smoke event"] != 1 ||
+		messages["checkout request complete"] != 2 ||
+		messages["payment failed\n  at charge (payments.go:42)"] != 2 ||
+		messages["generic forward input"] != 1 ||
+		messages["structured generic record"] != 1 {
 		t.Fatalf("smoke messages = %#v", messages)
 	}
 }

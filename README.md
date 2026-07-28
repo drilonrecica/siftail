@@ -120,12 +120,13 @@ request committed durably to SQLite. Capacity and temporary database failures
 return `503`; storage-full failures return `507`; a conflicting reuse of a
 stable source event ID returns `409`.
 
-The fixtures track Fluent Bit's official
-[HTTP output](https://docs.fluentbit.io/manual/data-pipeline/outputs/http) and
-Coolify's documented
-[custom Fluent Bit drain](https://coolify.io/docs/knowledge-base/drain-logs).
-Coolify aliases are compile-time compatibility rules, including the documented
-`coolify.app_name` field.
+The date-stamped fixtures pin Coolify `v4.1.1` with its shipped Fluent Bit
+`2.0` image reference (observed as `v2.0.14`) and generic Fluent Bit `v5.0.9`;
+they do not imply support for every release. Coolify's dotted hierarchy aliases
+and Docker's `source` stream field are compile-time compatibility rules. The
+tested configuration, upstream evidence, retry/buffering limits, and mandatory
+Siftail self-exclusion are recorded in
+[`docs/integrations/coolify-fluent-bit-compatibility.md`](docs/integrations/coolify-fluent-bit-compatibility.md).
 
 ### Command-line ingestion smoke test
 

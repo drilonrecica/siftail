@@ -1,0 +1,25 @@
+[
+  {
+    "date": "2026-07-28T10:05:00.123456Z",
+    "log": "generic forward input",
+    "stream": "stdout",
+    "project": "generic-project",
+    "environment": "production",
+    "application": "orders",
+    "service": "api",
+    "container_id": "generic-01",
+    "container_name": "orders-api-1",
+    "source_event_id": "generic-event-1"
+  },
+  {
+    "date": "2026-07-28T10:05:01.123456Z",
+    "message": "structured generic record",
+    "level": "warn",
+    "project": "generic-project",
+    "environment": "production",
+    "application": "orders",
+    "service": "worker",
+    "source_event_id": "generic-event-2",
+    "custom_number": 42
+  }
+]
