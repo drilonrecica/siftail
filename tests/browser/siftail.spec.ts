@@ -338,6 +338,58 @@ test("Live keyboard, themes, reduced motion, mobile, axe, and online invalidatio
   await expect(page).toHaveURL(/\/login\?return=.*expired=1/, { timeout: 10_000 });
 });
 
+test("source catalog preserves hierarchy, observations, responsive layout, and log navigation", async ({
+  page,
+}) => {
+  await login(page);
+  await page.getByRole("link", { name: "Sources", exact: true }).click();
+  await expect(page).toHaveURL(/\/sources$/);
+  await expect(page.getByRole("heading", { name: "Discovered sources" })).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "Primary" })
+    .getByRole("link", { name: "Sources" })).toHaveAttribute("aria-current", "page");
+
+  const apiRow = page.getByRole("row").filter({ hasText: "api / web" }).first();
+  await expect(apiRow).toContainText("Browser");
+  await expect(apiRow).toContainText("browser-project / test");
+  await expect(apiRow).toContainText("Active");
+  await expect(apiRow).toContainText("Retained logs");
+  await apiRow.getByRole("link", { name: "api/web" }).click();
+
+  await expect(page.getByRole("heading", { name: "api/web" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Stable identity" })).toBeVisible();
+  await expect(page.getByText(
+    "Containers are ephemeral observations of this stable source, not separate sources.",
+  )).toBeVisible();
+  await expect(page.getByRole("row").filter({ hasText: "api-1" })).toContainText("Active");
+
+  await page.locator("[data-theme-select]").selectOption("dark");
+  let results = await new AxeBuilder({ page })
+    .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"])
+    .analyze();
+  expect(results.violations.map((violation) => violation.id)).toEqual([]);
+  await page.screenshot({
+    path: ".playwright-artifacts/sources-desktop-dark.png",
+    fullPage: true,
+  });
+  await page.locator("[data-theme-select]").selectOption("light");
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await page.evaluate(
+    () => document.documentElement.scrollWidth > window.innerWidth,
+  )).toBe(false);
+  results = await new AxeBuilder({ page })
+    .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"])
+    .analyze();
+  expect(results.violations.map((violation) => violation.id)).toEqual([]);
+  await page.screenshot({
+    path: ".playwright-artifacts/sources-mobile-light.png",
+    fullPage: true,
+  });
+
+  await page.getByRole("link", { name: "Open logs" }).click();
+  await expect(page).toHaveURL(/\/logs\?.*application=api.*service=web/);
+  await expect(page.locator(".log-row")).not.toHaveCount(0);
+});
+
 test("keyboard, themes, reduced motion, mobile inspection, and axe smoke", async ({ page }) => {
   await login(page);
   await page.locator("[data-theme-select]").selectOption("dark");

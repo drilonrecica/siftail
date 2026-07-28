@@ -1,4 +1,5 @@
-// Package sources owns Server and ingestion-token administration.
+// Package sources owns Server and ingestion-token administration plus the
+// bounded read-only catalog of discovered stable sources.
 package sources
 
 import (

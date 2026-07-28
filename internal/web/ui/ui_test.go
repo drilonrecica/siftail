@@ -137,6 +137,41 @@ func TestLiveShellRendersExplicitEscapedBoundedWorkspace(t *testing.T) {
 	}
 }
 
+func TestSourceCatalogShellEscapesHierarchyAndMarksLifecycle(t *testing.T) {
+	renderer := New()
+	response := httptest.NewRecorder()
+	view := SourcesView{
+		LoadedCount: 1,
+		NextURL:     `/sources?after=1&limit=100`,
+		Rows: []SourceRowView{{
+			ID: 1, DetailURL: "/sources/1", DisplayName: `<script>source</script>`,
+			Server: "Production", Project: "Project", Environment: "Environment",
+			Application: "API", Service: "Web", Alias: true,
+			Status: "Inactive", LastSeen: "28 Jul 2026", Retained: "Retained logs",
+		}},
+	}
+	if err := renderer.Shell(response, http.StatusOK, ShellView{
+		Mode: "sources", Sources: view,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	body := response.Body.String()
+	for _, want := range []string{
+		`<title>Sources · Siftail</title>`,
+		`aria-current="page">Sources</a>`,
+		`&lt;script&gt;source&lt;/script&gt;`,
+		`<span class="alias-indicator">Alias</span>`,
+		`href="/sources?after=1&amp;limit=100"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("source shell missing %q", want)
+		}
+	}
+	if strings.Contains(body, `<script>source</script>`) {
+		t.Fatal("source shell emitted unescaped metadata")
+	}
+}
+
 func TestHistoryFragmentsRenderFocusedEscapedState(t *testing.T) {
 	renderer := New()
 	view := HistoryView{

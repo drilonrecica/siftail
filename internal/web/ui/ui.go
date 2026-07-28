@@ -30,6 +30,8 @@ type ShellView struct {
 	Mode      string
 	History   HistoryView
 	Live      LiveView
+	Sources   SourcesView
+	Source    SourceDetailView
 }
 
 type SelectOption struct {
@@ -141,6 +143,52 @@ type LiveView struct {
 	LevelsValue   string
 	StreamsValue  string
 	Contains      string
+}
+
+type SourcesView struct {
+	Rows           []SourceRowView
+	LoadedCount    int
+	NextURL        string
+	Error          string
+	ErrorRequestID string
+}
+
+type SourceRowView struct {
+	ID          int64
+	DetailURL   string
+	DisplayName string
+	Server      string
+	Project     string
+	Environment string
+	Application string
+	Service     string
+	Alias       bool
+	Status      string
+	Active      bool
+	FirstSeen   string
+	LastSeen    string
+	Retained    string
+}
+
+type SourceDetailView struct {
+	SourceRowView
+	ServerHostname      string
+	ProjectKey          string
+	EnvironmentKey      string
+	ApplicationKey      string
+	ServiceKey          string
+	CleanupEligible     bool
+	Containers          []ContainerObservationView
+	ContainersTruncated bool
+	LogsURL             string
+}
+
+type ContainerObservationView struct {
+	Identity  string
+	Status    string
+	Active    bool
+	FirstSeen string
+	LastSeen  string
 }
 
 func New() *Renderer {

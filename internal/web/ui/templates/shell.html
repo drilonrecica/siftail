@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="dark light">
   <meta name="htmx-config" content='{"historyCacheSize":0,"responseHandling":[{"code":"204","swap":false},{"code":"[23]..","swap":true},{"code":"[45]..","swap":true,"error":true}]}'>
-  <title>Logs · Siftail</title>
+  <title>{{if or (eq .Mode "sources") (eq .Mode "source-detail")}}Sources{{else}}Logs{{end}} · Siftail</title>
   <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/assets/app.css">
   <script src="/assets/htmx-2.0.10.min.js" defer></script>
@@ -20,7 +20,8 @@
       <span>Siftail</span>
     </a>
     <nav class="primary-nav" aria-label="Primary">
-      <a href="/logs" aria-current="page">Logs</a>
+      <a href="/logs"{{if or (eq .Mode "history") (eq .Mode "live")}} aria-current="page"{{end}}>Logs</a>
+      <a href="/sources"{{if or (eq .Mode "sources") (eq .Mode "source-detail")}} aria-current="page"{{end}}>Sources</a>
     </nav>
     <div class="header-actions">
       <label class="compact-control" for="theme">Theme</label>
@@ -43,14 +44,18 @@
   <main id="main-content" class="workspace">
     <header class="workspace-heading">
       <div>
-        <p class="eyebrow">{{if eq .Mode "live"}}Live{{else}}History{{end}}</p>
-        <h1>Logs</h1>
+        <p class="eyebrow">{{if eq .Mode "live"}}Live{{else if eq .Mode "history"}}History{{else}}Source catalog{{end}}</p>
+        <h1>{{if or (eq .Mode "sources") (eq .Mode "source-detail")}}Sources{{else}}Logs{{end}}</h1>
       </div>
       {{if eq .Mode "live"}}<p class="workspace-context">{{.Live.SourceSummary}}</p>
-      {{else}}<p class="workspace-context">{{.History.SourceSummary}} · {{.History.RangeSummary}}</p>{{end}}
+      {{else if eq .Mode "history"}}<p class="workspace-context">{{.History.SourceSummary}} · {{.History.RangeSummary}}</p>
+      {{else if eq .Mode "source-detail"}}<p class="workspace-context">{{.Source.Server}} · {{.Source.Project}} / {{.Source.Environment}}</p>
+      {{else}}<p class="workspace-context">Stable sources discovered from committed logs</p>{{end}}
     </header>
     {{if eq .Mode "live"}}{{template "live-region.html" .Live}}
-    {{else}}{{template "history-region.html" .History}}{{end}}
+    {{else if eq .Mode "history"}}{{template "history-region.html" .History}}
+    {{else if eq .Mode "source-detail"}}{{template "source-detail.html" .Source}}
+    {{else}}{{template "sources.html" .Sources}}{{end}}
   </main>
 </body>
 </html>{{end}}

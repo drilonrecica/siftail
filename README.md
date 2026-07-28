@@ -315,6 +315,23 @@ schema-bounded event. There is no detail download or export route. Copy actions
 read `textContent` through the browser clipboard API, and deletion or an unknown
 ID returns the same safe not-found fragment.
 
+### Source catalog
+
+The authenticated `/sources` page lists every discovered stable source,
+including inactive sources and sources with no retained events. Each row shows
+its trusted Server, exact project/environment/application/service hierarchy,
+alias state, fixed 24-hour active/inactive state, first/last observation, and
+whether retained logs remain. Reads use source-ID keyset pagination with 100
+rows by default and at most 200; they do not run an event count.
+
+Source detail keeps stable identity keys separate from display labels and
+aliases. Container IDs and names appear only as ephemeral observations under
+their source. At most the 200 most recently seen container observations are
+loaded, with an explicit notice when older observations exist. “Open logs”
+returns to History with the exact Server and four stable source-key dimensions.
+The measured 10,000-source plan and latency baseline is recorded in
+[`docs/performance/source-catalog.md`](docs/performance/source-catalog.md).
+
 ### Current dependency rationale
 
 - `github.com/mattn/go-sqlite3` v1.14.48 is the accepted SQLite driver. It

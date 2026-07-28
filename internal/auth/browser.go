@@ -16,6 +16,7 @@ import (
 
 	"github.com/drilonrecica/siftail/internal/logs"
 	"github.com/drilonrecica/siftail/internal/sessions"
+	"github.com/drilonrecica/siftail/internal/sources"
 	webui "github.com/drilonrecica/siftail/internal/web/ui"
 )
 
@@ -25,6 +26,7 @@ type BrowserConfig struct {
 	PublicURL         string
 	TrustedProxyCIDRs []string
 	HistoryStore      *logs.Store
+	SourceStore       *sources.Store
 	LiveBroker        *logs.LiveBroker
 	LiveHeartbeat     time.Duration
 	LiveSessionCheck  time.Duration
@@ -39,6 +41,7 @@ type Browser struct {
 	throttle         *loginThrottle
 	ui               *webui.Renderer
 	history          *logs.Store
+	sources          *sources.Store
 	live             *logs.LiveBroker
 	liveHeartbeat    time.Duration
 	liveSessionCheck time.Duration
@@ -64,6 +67,7 @@ func NewBrowser(administrators *Store, sessionStore *sessions.Store, config Brow
 		throttle:         newLoginThrottle(),
 		ui:               webui.New(),
 		history:          config.HistoryStore,
+		sources:          config.SourceStore,
 		live:             config.LiveBroker,
 		liveHeartbeat:    config.LiveHeartbeat,
 		liveSessionCheck: config.LiveSessionCheck,
@@ -100,6 +104,8 @@ func (b *Browser) Register(mux *http.ServeMux) {
 	mux.Handle("GET /logs/rows", b.Protect(http.HandlerFunc(b.historyRows)))
 	mux.Handle("GET /logs/events/{id}", b.Protect(http.HandlerFunc(b.eventDetail)))
 	mux.Handle("GET /logs/live/stream", b.Protect(http.HandlerFunc(b.liveStream)))
+	mux.Handle("GET /sources", b.Protect(http.HandlerFunc(b.sourcesPage)))
+	mux.Handle("GET /sources/{id}", b.Protect(http.HandlerFunc(b.sourceDetailPage)))
 }
 
 func (b *Browser) loginPage(w http.ResponseWriter, r *http.Request) {

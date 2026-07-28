@@ -1,0 +1,110 @@
+{{define "sources.html"}}
+<section class="workspace-panel source-catalog" aria-labelledby="source-catalog-title">
+  <header class="catalog-heading">
+    <div>
+      <h2 id="source-catalog-title">Discovered sources</h2>
+      <p>Stable services are grouped by their trusted Server and source identity.</p>
+    </div>
+    {{if .Rows}}<p>{{.LoadedCount}} sources on this page</p>{{end}}
+  </header>
+  {{if .Error}}
+  <div class="history-error" role="alert">
+    <strong>{{.Error}}</strong>
+    {{if .ErrorRequestID}}<span>Request ID: <code>{{.ErrorRequestID}}</code></span>{{end}}
+  </div>
+  {{else if .Rows}}
+  <div class="source-table-scroll" tabindex="0" aria-label="Source catalog table">
+    <table class="source-table">
+      <thead><tr>
+        <th scope="col">Source</th>
+        <th scope="col">Server</th>
+        <th scope="col">Project / environment</th>
+        <th scope="col">State</th>
+        <th scope="col">Last seen</th>
+        <th scope="col">Retained data</th>
+      </tr></thead>
+      <tbody>
+      {{range .Rows}}<tr>
+        <th scope="row">
+          <a href="{{.DetailURL}}">{{.DisplayName}}</a>
+          <span class="source-path">{{.Application}} / {{.Service}}</span>
+          {{if .Alias}}<span class="alias-indicator">Alias</span>{{end}}
+        </th>
+        <td>{{.Server}}</td>
+        <td>{{.Project}} / {{.Environment}}</td>
+        <td><span class="lifecycle-state{{if .Active}} lifecycle-active{{end}}">{{.Status}}</span></td>
+        <td>{{.LastSeen}}</td>
+        <td>{{.Retained}}</td>
+      </tr>{{end}}
+      </tbody>
+    </table>
+  </div>
+  <nav class="history-pagination" aria-label="Source catalog pagination">
+    {{if .NextURL}}<a class="button" href="{{.NextURL}}">Next sources</a>
+    {{else}}<span class="pagination-end">End of source catalog</span>{{end}}
+  </nav>
+  {{else}}
+  <div class="empty-state">
+    <h2>No sources discovered</h2>
+    <p>Sources appear after an authenticated ingestion request commits its first event.</p>
+  </div>
+  {{end}}
+</section>
+{{end}}
+
+{{define "source-detail.html"}}
+<section class="workspace-panel source-detail" aria-labelledby="source-detail-title">
+  <header class="catalog-heading">
+    <div>
+      <a href="/sources">← All sources</a>
+      <h2 id="source-detail-title">{{.DisplayName}}</h2>
+      <p>{{.Application}} / {{.Service}}{{if .Alias}} · administrator alias{{end}}</p>
+    </div>
+    <div class="source-detail-actions">
+      <span class="lifecycle-state{{if .Active}} lifecycle-active{{end}}">{{.Status}}</span>
+      <a class="button" href="{{.LogsURL}}">Open logs</a>
+    </div>
+  </header>
+  {{if .CleanupEligible}}<div class="notice notice-info">
+    <p>This source has been inactive for at least 90 days. Retained logs or administrative metadata may still protect it from cleanup.</p>
+  </div>{{end}}
+  <div class="source-detail-grid">
+    <section>
+      <h3>Stable identity</h3>
+      <dl>
+        <div><dt>Server</dt><dd>{{.Server}}{{if .ServerHostname}} · {{.ServerHostname}}{{end}}</dd></div>
+        <div><dt>Project</dt><dd>{{.Project}} <code>{{.ProjectKey}}</code></dd></div>
+        <div><dt>Environment</dt><dd>{{.Environment}} <code>{{.EnvironmentKey}}</code></dd></div>
+        <div><dt>Application</dt><dd>{{.Application}} <code>{{.ApplicationKey}}</code></dd></div>
+        <div><dt>Service</dt><dd>{{.Service}} <code>{{.ServiceKey}}</code></dd></div>
+      </dl>
+      <p class="field-help">Container observations and aliases do not change this identity.</p>
+    </section>
+    <section>
+      <h3>Lifecycle</h3>
+      <dl>
+        <div><dt>First seen</dt><dd>{{.FirstSeen}}</dd></div>
+        <div><dt>Last seen</dt><dd>{{.LastSeen}}</dd></div>
+        <div><dt>Retained data</dt><dd>{{.Retained}}</dd></div>
+      </dl>
+    </section>
+  </div>
+  <section class="container-observations">
+    <h3>Container observations</h3>
+    <p>Containers are ephemeral observations of this stable source, not separate sources.</p>
+    {{if .Containers}}
+    <div class="source-table-scroll" tabindex="0" aria-label="Container observation table">
+      <table class="source-table">
+        <thead><tr><th scope="col">Container</th><th scope="col">State</th><th scope="col">First seen</th><th scope="col">Last seen</th></tr></thead>
+        <tbody>{{range .Containers}}<tr>
+          <th scope="row"><code>{{.Identity}}</code></th>
+          <td><span class="lifecycle-state{{if .Active}} lifecycle-active{{end}}">{{.Status}}</span></td>
+          <td>{{.FirstSeen}}</td><td>{{.LastSeen}}</td>
+        </tr>{{end}}</tbody>
+      </table>
+    </div>
+    {{if .ContainersTruncated}}<p class="notice notice-info">Showing the 200 most recently seen container observations.</p>{{end}}
+    {{else}}<p>No container identity has been observed for this source.</p>{{end}}
+  </section>
+</section>
+{{end}}
