@@ -1133,11 +1133,34 @@ The payload is compact JSON interpreted by the focused client module. Message an
 attribute previews are capped at 8 KiB per event; the browser fetches complete event
 details through the authenticated event-detail route.
 
+The endpoint accepts only `source`, `level`, `stream`, and `contains` query
+parameters. Source, level, and stream are repeatable exact filters; `contains`
+occurs at most once, is at most 512 UTF-8 bytes, and follows the same literal
+ASCII-case-insensitive/non-ASCII-exact semantics as History. Unknown or invalid
+parameters reject the connection. The initial stream sets a three-second native
+reconnect delay.
+
+Transport-owned control types are:
+
+- `heartbeat` every 15 seconds;
+- `possible_gap` when a valid `Last-Event-ID` identifies a reconnect that
+  version one cannot replay;
+- `truncated` for subscriber or broker overflow;
+- `source_purged` and `source_removed` for source-scoped lifecycle changes;
+- `session_invalid` or `unavailable` when periodic session validation fails;
+- `shutdown` when the application-owned broker stops.
+
+Every frame flush uses a five-second write deadline. Proxy response buffering
+and response compression are disabled for the stream.
+
 ### 17.4 Reconnection
 
 Native `EventSource` reconnects automatically. Version one does not replay
 `Last-Event-ID`; reconnection starts from newly committed events and always displays a
 possible-gap notice with a link to an absolute History range.
+
+An open stream revalidates its server-side session every five seconds, so expiry
+or online revocation closes the connection without waiting for browser activity.
 
 Purge and source-removal control events are also delivered through a lightweight
 authenticated History control stream so an open historical view cannot silently show
@@ -1145,7 +1168,10 @@ deleted rows.
 
 ### 17.5 Security
 
-SSE requires normal authenticated browser session and CSRF is not required for the read-only GET stream. Origin/session protections still apply.
+SSE requires a normal authenticated browser session, an exact same-origin
+`Origin`, and `Accept: text/event-stream`. CSRF is not required for the read-only
+GET stream. Responses are `no-store` and carry the ordinary browser security
+headers.
 
 ---
 

@@ -91,11 +91,13 @@ func (a *App) Run(ctx context.Context) error {
 	}
 	a.cursorCodec = cursorCodec
 	defer func() { a.cursorCodec = nil }()
+	liveBroker := logs.NewLiveBroker(logs.LiveBrokerOptions{})
 	administratorStore := auth.NewCoordinatedStore(db.Reader(), coordinator)
 	sessionStore := sessions.NewCoordinatedStore(db.Reader(), coordinator)
 	a.browser = auth.NewBrowser(administratorStore, sessionStore, auth.BrowserConfig{
 		PublicURL: a.cfg.PublicURL, TrustedProxyCIDRs: a.cfg.TrustedProxyCIDRs,
 		HistoryStore: logs.NewHistoryStore(db.Reader(), cursorCodec),
+		LiveBroker:   liveBroker,
 	})
 	defer func() { a.browser = nil }()
 
@@ -110,7 +112,6 @@ func (a *App) Run(ctx context.Context) error {
 		a.queue = nil
 		a.ingestHTTP = nil
 	}()
-	liveBroker := logs.NewLiveBroker(logs.LiveBrokerOptions{})
 	brokerDone := make(chan error, 1)
 	go func() { brokerDone <- liveBroker.Run(context.Background()) }()
 	<-liveBroker.Ready()
@@ -135,7 +136,15 @@ func (a *App) Run(ctx context.Context) error {
 		}).Run(serverCtx)
 	})
 
-	serverErr := g.Wait()
+	serverDone := make(chan error, 1)
+	go func() { serverDone <- g.Wait() }()
+	var serverErr error
+	serverFinished := false
+	select {
+	case serverErr = <-serverDone:
+		serverFinished = true
+	case <-serverCtx.Done():
+	}
 	a.shuttingDown.Store(true)
 	a.admission.Close()
 	a.queue.Close()
@@ -149,6 +158,9 @@ func (a *App) Run(ctx context.Context) error {
 	cancelWriter()
 	liveBroker.Stop()
 	brokerErr := <-brokerDone
+	if !serverFinished {
+		serverErr = <-serverDone
+	}
 	coordinator.Close()
 	cancelCoordinator()
 	coordinatorErr := <-coordinatorDone

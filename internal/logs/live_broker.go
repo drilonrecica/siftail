@@ -5,8 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
+	"unicode/utf8"
 )
 
 const (
@@ -43,11 +45,33 @@ type LiveFilter struct {
 	SourceIDs []int64
 	Levels    []Level
 	Streams   []Stream
+	Contains  string
 }
 
-// LiveMessage is one committed event delivered in assigned-ID order.
+type LiveMessageType uint8
+
+const (
+	LiveMessageLog LiveMessageType = iota
+	LiveMessageControl
+)
+
+type LiveControlType string
+
+const (
+	LiveControlSourcePurged  LiveControlType = "source_purged"
+	LiveControlSourceRemoved LiveControlType = "source_removed"
+)
+
+type LiveControl struct {
+	Type     LiveControlType
+	SourceID int64
+}
+
+// LiveMessage is one committed event or lifecycle control message.
 type LiveMessage struct {
-	Event CommittedEvent
+	Type    LiveMessageType
+	Event   CommittedEvent
+	Control LiveControl
 }
 
 type LiveBrokerOptions struct {
@@ -92,6 +116,7 @@ type liveCommandKind uint8
 
 const (
 	livePublish liveCommandKind = iota
+	livePublishControl
 	liveSubscribe
 	liveUnsubscribe
 )
@@ -99,6 +124,7 @@ const (
 type liveCommand struct {
 	kind         liveCommandKind
 	events       []CommittedEvent
+	control      LiveControl
 	filter       compiledLiveFilter
 	subscription *LiveSubscription
 	reply        chan subscribeResult
@@ -110,9 +136,10 @@ type subscribeResult struct {
 }
 
 type compiledLiveFilter struct {
-	sources map[int64]struct{}
-	levels  map[Level]struct{}
-	streams map[Stream]struct{}
+	sources  map[int64]struct{}
+	levels   map[Level]struct{}
+	streams  map[Stream]struct{}
+	contains string
 }
 
 func (f compiledLiveFilter) matches(event CommittedEvent) bool {
@@ -130,6 +157,9 @@ func (f compiledLiveFilter) matches(event CommittedEvent) bool {
 		if _, ok := f.streams[event.Event.Stream]; !ok {
 			return false
 		}
+	}
+	if f.contains != "" && !asciiContainsFold(event.Event.MessageText, f.contains) {
+		return false
 	}
 	return true
 }
@@ -218,9 +248,25 @@ func (b *LiveBroker) handleCommand(subscriptions map[uint64]*LiveSubscription, c
 				if !subscription.filter.matches(event) {
 					continue
 				}
-				if !subscription.enqueue(LiveMessage{Event: event}, liveMessageBytes(event)) {
+				if !subscription.enqueue(
+					LiveMessage{Type: LiveMessageLog, Event: event},
+					liveMessageBytes(event),
+				) {
 					delete(subscriptions, id)
 				}
+			}
+		}
+	case livePublishControl:
+		for id, subscription := range subscriptions {
+			if command.control.SourceID > 0 && len(subscription.filter.sources) > 0 {
+				if _, ok := subscription.filter.sources[command.control.SourceID]; !ok {
+					continue
+				}
+			}
+			if !subscription.enqueue(
+				LiveMessage{Type: LiveMessageControl, Control: command.control}, 128,
+			) {
+				delete(subscriptions, id)
 			}
 		}
 	case liveSubscribe:
@@ -387,6 +433,39 @@ func (b *LiveBroker) markPublishLost() {
 	}
 }
 
+// TryPublishControl delivers a bounded lifecycle notification. A source ID of
+// zero addresses every subscription; otherwise source-scoped subscriptions
+// outside that source are not notified.
+func (b *LiveBroker) TryPublishControl(control LiveControl) bool {
+	if b == nil || !validLiveControl(control) {
+		return false
+	}
+	b.lifecycleMu.RLock()
+	defer b.lifecycleMu.RUnlock()
+	if b.state.Load() != brokerRunning {
+		return false
+	}
+	select {
+	case b.commands <- liveCommand{kind: livePublishControl, control: control}:
+		return true
+	default:
+		b.markPublishLost()
+		return false
+	}
+}
+
+func validLiveControl(control LiveControl) bool {
+	if control.SourceID < 0 {
+		return false
+	}
+	switch control.Type {
+	case LiveControlSourcePurged, LiveControlSourceRemoved:
+		return true
+	default:
+		return false
+	}
+}
+
 // Subscribe registers an exact filter through the bounded broker command
 // queue. Once the command is accepted, the method waits only for the broker's
 // deterministic response.
@@ -474,11 +553,60 @@ func compileLiveFilter(filter LiveFilter) (compiledLiveFilter, error) {
 		}
 		compiled.streams[stream] = struct{}{}
 	}
+	if !utf8.ValidString(filter.Contains) ||
+		len(filter.Contains) > MaxTextFilterBytes ||
+		strings.ContainsRune(filter.Contains, 0) {
+		return compiledLiveFilter{}, fmt.Errorf("%w: contains", ErrInvalidLiveFilter)
+	}
+	compiled.contains = asciiFold(filter.Contains)
 	return compiled, nil
 }
 
 func liveMessageBytes(event CommittedEvent) int64 {
 	return event.Event.RetainedBytes() + 128
+}
+
+func asciiFold(value string) string {
+	var folded []byte
+	for index := 0; index < len(value); index++ {
+		current := value[index]
+		if current >= 'A' && current <= 'Z' {
+			if folded == nil {
+				folded = []byte(value)
+			}
+			folded[index] = current + ('a' - 'A')
+		}
+	}
+	if folded == nil {
+		return value
+	}
+	return string(folded)
+}
+
+func asciiContainsFold(value, foldedNeedle string) bool {
+	if foldedNeedle == "" {
+		return true
+	}
+	if len(foldedNeedle) > len(value) {
+		return false
+	}
+	for start := 0; start+len(foldedNeedle) <= len(value); start++ {
+		matched := true
+		for offset := 0; offset < len(foldedNeedle); offset++ {
+			current := value[start+offset]
+			if current >= 'A' && current <= 'Z' {
+				current += 'a' - 'A'
+			}
+			if current != foldedNeedle[offset] {
+				matched = false
+				break
+			}
+		}
+		if matched {
+			return true
+		}
+	}
+	return false
 }
 
 type queuedLiveMessage struct {

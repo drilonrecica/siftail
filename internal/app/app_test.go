@@ -1,12 +1,14 @@
 package app
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"io"
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -321,6 +323,103 @@ func TestAppControlSocketPing(t *testing.T) {
 
 	cancel()
 	<-errCh
+}
+
+func TestAppDrainsWriterBeforeClosingLiveStreams(t *testing.T) {
+	cfg := testConfig(t)
+	app := New(cfg, testLogger(t))
+	ctx, cancel := context.WithCancel(context.Background())
+	errCh := make(chan error, 1)
+	go func() { errCh <- app.Run(ctx) }()
+	waitForServer(t, "http://"+cfg.UIAddr+"/health/live")
+
+	controlClient := &http.Client{Transport: &http.Transport{
+		DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
+			return net.Dial("unix", filepath.Join(cfg.DataDir, "siftail-control.sock"))
+		},
+	}}
+	create, err := http.NewRequest(http.MethodPost, "http://unix/administrator",
+		strings.NewReader(`{"username":"Admin","password":"live-password"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	create.Header.Set("Content-Type", "application/json")
+	created, err := controlClient.Do(create)
+	if err != nil {
+		t.Fatal(err)
+	}
+	created.Body.Close()
+	if created.StatusCode != http.StatusOK {
+		t.Fatalf("administrator status = %d", created.StatusCode)
+	}
+
+	uiClient := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	}}
+	form := url.Values{"username": {"Admin"}, "password": {"live-password"}}
+	login, err := http.NewRequest(http.MethodPost, "http://"+cfg.UIAddr+"/session",
+		strings.NewReader(form.Encode()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	login.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	login.Header.Set("Origin", "http://"+cfg.UIAddr)
+	loggedIn, err := uiClient.Do(login)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loggedIn.Body.Close()
+	cookies := loggedIn.Cookies()
+	if loggedIn.StatusCode != http.StatusSeeOther || len(cookies) != 1 {
+		t.Fatalf("login = %d %#v", loggedIn.StatusCode, loggedIn.Header)
+	}
+
+	streamRequest, err := http.NewRequest(http.MethodGet,
+		"http://"+cfg.UIAddr+"/logs/live/stream", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	streamRequest.AddCookie(cookies[0])
+	streamRequest.Header.Set("Accept", "text/event-stream")
+	streamRequest.Header.Set("Origin", "http://"+cfg.UIAddr)
+	stream, err := uiClient.Do(streamRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stream.Body.Close()
+	reader := bufio.NewReader(stream.Body)
+	if frame := readAppSSEFrame(t, reader); !strings.Contains(frame, "retry: 3000") {
+		t.Fatalf("initial frame = %q", frame)
+	}
+
+	cancel()
+	if frame := readAppSSEFrame(t, reader); !strings.Contains(frame, `"type":"shutdown"`) {
+		t.Fatalf("shutdown frame = %q", frame)
+	}
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("Run returned error: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("application did not stop after closing Live stream")
+	}
+}
+
+func readAppSSEFrame(t *testing.T, reader *bufio.Reader) string {
+	t.Helper()
+	var lines []string
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			t.Fatalf("read SSE frame: %v", err)
+		}
+		line = strings.TrimSuffix(strings.TrimSuffix(line, "\n"), "\r")
+		if line == "" {
+			return strings.Join(lines, "\n")
+		}
+		lines = append(lines, line)
+	}
 }
 
 func TestAppShutdownTimeout(t *testing.T) {

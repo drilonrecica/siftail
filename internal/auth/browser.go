@@ -25,29 +25,50 @@ type BrowserConfig struct {
 	PublicURL         string
 	TrustedProxyCIDRs []string
 	HistoryStore      *logs.Store
+	LiveBroker        *logs.LiveBroker
+	LiveHeartbeat     time.Duration
+	LiveSessionCheck  time.Duration
+	LiveWriteTimeout  time.Duration
 }
 
 type Browser struct {
-	administrators *Store
-	sessions       *sessions.Store
-	publicURL      string
-	proxies        proxyTrust
-	throttle       *loginThrottle
-	ui             *webui.Renderer
-	history        *logs.Store
-	now            func() time.Time
+	administrators   *Store
+	sessions         *sessions.Store
+	publicURL        string
+	proxies          proxyTrust
+	throttle         *loginThrottle
+	ui               *webui.Renderer
+	history          *logs.Store
+	live             *logs.LiveBroker
+	liveHeartbeat    time.Duration
+	liveSessionCheck time.Duration
+	liveWriteTimeout time.Duration
+	now              func() time.Time
 }
 
 func NewBrowser(administrators *Store, sessionStore *sessions.Store, config BrowserConfig) *Browser {
+	if config.LiveHeartbeat <= 0 {
+		config.LiveHeartbeat = 15 * time.Second
+	}
+	if config.LiveSessionCheck <= 0 {
+		config.LiveSessionCheck = 5 * time.Second
+	}
+	if config.LiveWriteTimeout <= 0 {
+		config.LiveWriteTimeout = 5 * time.Second
+	}
 	return &Browser{
-		administrators: administrators,
-		sessions:       sessionStore,
-		publicURL:      strings.TrimSuffix(config.PublicURL, "/"),
-		proxies:        newProxyTrust(config.TrustedProxyCIDRs),
-		throttle:       newLoginThrottle(),
-		ui:             webui.New(),
-		history:        config.HistoryStore,
-		now:            time.Now,
+		administrators:   administrators,
+		sessions:         sessionStore,
+		publicURL:        strings.TrimSuffix(config.PublicURL, "/"),
+		proxies:          newProxyTrust(config.TrustedProxyCIDRs),
+		throttle:         newLoginThrottle(),
+		ui:               webui.New(),
+		history:          config.HistoryStore,
+		live:             config.LiveBroker,
+		liveHeartbeat:    config.LiveHeartbeat,
+		liveSessionCheck: config.LiveSessionCheck,
+		liveWriteTimeout: config.LiveWriteTimeout,
+		now:              time.Now,
 	}
 }
 
@@ -78,6 +99,7 @@ func (b *Browser) Register(mux *http.ServeMux) {
 	mux.Handle("GET /logs", b.Protect(http.HandlerFunc(b.historyPage)))
 	mux.Handle("GET /logs/rows", b.Protect(http.HandlerFunc(b.historyRows)))
 	mux.Handle("GET /logs/events/{id}", b.Protect(http.HandlerFunc(b.eventDetail)))
+	mux.Handle("GET /logs/live/stream", b.Protect(http.HandlerFunc(b.liveStream)))
 }
 
 func (b *Browser) loginPage(w http.ResponseWriter, r *http.Request) {

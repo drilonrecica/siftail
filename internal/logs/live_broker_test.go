@@ -16,6 +16,7 @@ func TestLiveBrokerPublishesInIDOrderAndFilters(t *testing.T) {
 		SourceIDs: []int64{2},
 		Levels:    []Level{LevelError},
 		Streams:   []Stream{StreamStderr},
+		Contains:  "THIRD",
 	})
 
 	events := []CommittedEvent{
@@ -33,11 +34,9 @@ func TestLiveBrokerPublishesInIDOrderAndFilters(t *testing.T) {
 			t.Fatalf("message %d ID = %d, want %d", index, message.Event.ID, wantID)
 		}
 	}
-	for _, wantID := range []int64{2, 3} {
-		message := nextLive(t, filtered)
-		if message.Event.ID != wantID {
-			t.Fatalf("filtered ID = %d, want %d", message.Event.ID, wantID)
-		}
+	message := nextLive(t, filtered)
+	if message.Event.ID != 3 {
+		t.Fatalf("filtered ID = %d, want 3", message.Event.ID)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
 	defer cancel()
@@ -47,6 +46,32 @@ func TestLiveBrokerPublishesInIDOrderAndFilters(t *testing.T) {
 
 	// The broker owns its copies of the batch and filter slices.
 	events[0].ID = 99
+}
+
+func TestLiveBrokerPublishesSourceScopedControls(t *testing.T) {
+	broker := startLiveBroker(t, LiveBrokerOptions{})
+	sourceOne := subscribeLive(t, broker, LiveFilter{SourceIDs: []int64{1}})
+	sourceTwo := subscribeLive(t, broker, LiveFilter{SourceIDs: []int64{2}})
+	all := subscribeLive(t, broker, LiveFilter{})
+
+	control := LiveControl{Type: LiveControlSourcePurged, SourceID: 2}
+	if !broker.TryPublishControl(control) {
+		t.Fatal("control was not accepted")
+	}
+	for _, subscription := range []*LiveSubscription{sourceTwo, all} {
+		message := nextLive(t, subscription)
+		if message.Type != LiveMessageControl || message.Control != control {
+			t.Fatalf("control message = %#v", message)
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+	if _, err := sourceOne.Next(ctx); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("unaffected source received control: %v", err)
+	}
+	if broker.TryPublishControl(LiveControl{Type: "invented", SourceID: 2}) {
+		t.Fatal("invalid control was accepted")
+	}
 }
 
 func TestLiveBrokerSlowSubscriberOverflowsWithoutBlockingPublish(t *testing.T) {
