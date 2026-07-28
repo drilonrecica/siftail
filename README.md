@@ -179,9 +179,23 @@ case-sensitive ASCII letters, digits, `.`, `_`, or `-`. Passwords are 12–1024
 valid UTF-8 bytes and are not trimmed or normalized; CR/LF line terminators from
 the two-line input are removed.
 
-Schema migration `0002` adds the single administrator record. Upgrades apply it
-transactionally and preserve ingestion data. A binary that supports only schema
-1 refuses a schema-2 database.
+Schema migration `0002` adds the single administrator record and migration
+`0003` adds hashed, bounded browser sessions. Upgrades apply them transactionally
+and preserve ingestion and administrator data. Older binaries refuse databases
+with newer schema versions.
+
+All browser sessions can be invalidated locally:
+
+```bash
+./siftail sessions revoke-all
+```
+
+The command uses the same online owner-only control path or stopped-server
+offline path. It prints only the number revoked, never a session token or hash.
+Password reset revokes every active session in the same database transaction.
+Sessions have a 14-day absolute lifetime, a 7-day idle lifetime, and a maximum
+of 64 active records; invalid records are removed after a 7-day grace period by
+bounded hourly cleanup.
 
 ### Current dependency rationale
 

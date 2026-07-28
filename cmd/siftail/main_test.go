@@ -231,6 +231,12 @@ func TestDurableIngestionSubprocessSmoke(t *testing.T) {
 	if bytes.Contains(adminOutput, []byte(administratorPassword)) {
 		t.Fatal("subprocess administrator output leaked password")
 	}
+	revokeCommand := exec.Command(binary, "sessions", "revoke-all")
+	revokeCommand.Env = environment
+	revokeOutput, err := revokeCommand.CombinedOutput()
+	if err != nil || !bytes.Contains(revokeOutput, []byte("revoked 0")) {
+		t.Fatalf("revoke sessions through live CLI: %v", err)
+	}
 
 	var serverOutput []byte
 	deadline := time.Now().Add(3 * time.Second)

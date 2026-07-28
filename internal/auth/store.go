@@ -105,6 +105,11 @@ func (s *Store) ResetPassword(ctx context.Context, password []byte) error {
 		if affected != 1 {
 			return ErrAdministratorNotFound
 		}
+		if _, err := tx.ExecContext(context.WithoutCancel(ctx), `UPDATE sessions
+			SET revoked_at_us=? WHERE administrator_id=1 AND revoked_at_us IS NULL`,
+			changed); err != nil {
+			return database.Classify("revoke sessions after password reset", err)
+		}
 		return nil
 	})
 }

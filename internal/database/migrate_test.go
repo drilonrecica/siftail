@@ -5,14 +5,15 @@ import (
 	"database/sql"
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 	"testing/fstest"
 )
 
 func TestInitialMigrationAndNoOpReopen(t *testing.T) {
 	db := openTestDB(t)
-	assertSchemaVersion(t, db.Writer(), 2)
-	for _, table := range []string{"settings", "servers", "ingestion_tokens", "sources", "container_instances", "log_events", "administrators"} {
+	assertSchemaVersion(t, db.Writer(), 3)
+	for _, table := range []string{"settings", "servers", "ingestion_tokens", "sources", "container_instances", "log_events", "administrators", "sessions"} {
 		var found int
 		if err := db.Writer().QueryRow("SELECT count(*) FROM sqlite_schema WHERE type='table' AND name=?", table).Scan(&found); err != nil {
 			t.Fatal(err)
@@ -24,7 +25,7 @@ func TestInitialMigrationAndNoOpReopen(t *testing.T) {
 	if err := Migrate(context.Background(), db.Writer()); err != nil {
 		t.Fatal(err)
 	}
-	assertSchemaVersion(t, db.Writer(), 2)
+	assertSchemaVersion(t, db.Writer(), 3)
 }
 
 func TestAdministratorMigrationPreservesPreviousSchemaData(t *testing.T) {
@@ -50,7 +51,7 @@ func TestAdministratorMigrationPreservesPreviousSchemaData(t *testing.T) {
 	if err := applyMigrations(context.Background(), db, migrations); err != nil {
 		t.Fatal(err)
 	}
-	assertSchemaVersion(t, db, 2)
+	assertSchemaVersion(t, db, 3)
 	var name string
 	if err := db.QueryRow("SELECT name FROM servers WHERE id=7").Scan(&name); err != nil || name != "preserved" {
 		t.Fatalf("preserved server = %q, err=%v", name, err)
@@ -63,9 +64,43 @@ func TestAdministratorMigrationPreservesPreviousSchemaData(t *testing.T) {
 		t.Fatal(err)
 	}
 	var tooNew *SchemaTooNewError
-	if err := checkSchemaCompatible(context.Background(), db, 1); !errors.As(err, &tooNew) ||
-		tooNew.Actual != 2 || tooNew.Supported != 1 {
+	if err := checkSchemaCompatible(context.Background(), db, 2); !errors.As(err, &tooNew) ||
+		tooNew.Actual != 3 || tooNew.Supported != 2 {
 		t.Fatalf("older compatibility error = %#v", err)
+	}
+}
+
+func TestSessionMigrationPreservesAdministrator(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "schema-two.db")
+	db, err := sql.Open("sqlite3", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	migrations, err := loadMigrations(migrationFiles)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := applyMigrations(context.Background(), db, migrations[:2]); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO administrators(
+		id,username,password_hash,created_at_us,password_changed_at_us
+	) VALUES(1,'Admin',?,1,1)`, strings.Repeat("h", 64)); err != nil {
+		t.Fatal(err)
+	}
+	if err := applyMigrations(context.Background(), db, migrations); err != nil {
+		t.Fatal(err)
+	}
+	assertSchemaVersion(t, db, 3)
+	var username string
+	if err := db.QueryRow("SELECT username FROM administrators WHERE id=1").Scan(&username); err != nil ||
+		username != "Admin" {
+		t.Fatalf("administrator = %q, err=%v", username, err)
+	}
+	var sessions int
+	if err := db.QueryRow("SELECT count(*) FROM sessions").Scan(&sessions); err != nil || sessions != 0 {
+		t.Fatalf("sessions = %d, err=%v", sessions, err)
 	}
 }
 

@@ -681,10 +681,16 @@ dependency. Document dependency, resource, license, and security rationale.
 
 ### SFT-017 — Implement bounded opaque sessions
 
-**Status:** Planned  
+**Status:** Done
 **Milestone:** 0.2.0  
 **Depends on:** SFT-016  
-**Issue/PR:** —
+**Issue/PR:** — (direct maintainer implementation)
+**Completed:** 2026-07-28
+**Completion evidence:** Schema-2 preservation, token-hash-only issuance,
+clock-controlled absolute/idle/touch boundaries, deterministic 65th-login
+eviction, cleanup/grace, revoke and concurrent lookup, transactional
+password-reset rollback, cookie attributes, and online/offline revoke-all CLI
+tests pass with real SQLite.
 
 **Authoritative references:** `DOMAIN.md` §19; `ARCHITECTURE.md` §19.3;
 ADR 0003.

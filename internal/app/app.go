@@ -18,6 +18,7 @@ import (
 	"github.com/drilonrecica/siftail/internal/config"
 	"github.com/drilonrecica/siftail/internal/database"
 	"github.com/drilonrecica/siftail/internal/ingest"
+	"github.com/drilonrecica/siftail/internal/sessions"
 	"github.com/drilonrecica/siftail/internal/sources"
 	"github.com/drilonrecica/siftail/internal/web"
 	"golang.org/x/sync/errgroup"
@@ -98,6 +99,15 @@ func (a *App) Run(ctx context.Context) error {
 	g.Go(func() error { return a.runControlServer(serverCtx, controlListener) })
 	g.Go(func() error { return a.runUIServer(serverCtx) })
 	g.Go(func() error { return a.runIngestServer(serverCtx) })
+	sessionStore := sessions.NewCoordinatedStore(db.Reader(), coordinator)
+	g.Go(func() error {
+		return sessions.NewCleanupWorker(sessionStore, time.Hour, func(error) {
+			a.logger.Warn("session cleanup failed",
+				"component", "sessions",
+				"error_category", "session_cleanup",
+			)
+		}).Run(serverCtx)
+	})
 
 	serverErr := g.Wait()
 	a.shuttingDown.Store(true)
@@ -146,6 +156,7 @@ func (a *App) controlMux() *http.ServeMux {
 	})
 	store := sources.NewCoordinatedStore(a.db.Reader(), a.coordinator)
 	administratorStore := auth.NewCoordinatedStore(a.db.Reader(), a.coordinator)
+	sessionStore := sessions.NewCoordinatedStore(a.db.Reader(), a.coordinator)
 	mux.HandleFunc("POST /administrator", func(w http.ResponseWriter, r *http.Request) {
 		var input struct {
 			Username string `json:"username"`
@@ -165,6 +176,12 @@ func (a *App) controlMux() *http.ServeMux {
 			return
 		}
 		writeControlJSON(w, struct{}{}, administratorStore.ResetPassword(r.Context(), []byte(input.Password)))
+	})
+	mux.HandleFunc("POST /sessions/revoke-all", func(w http.ResponseWriter, r *http.Request) {
+		affected, err := sessionStore.RevokeAll(r.Context(), 1)
+		writeControlJSON(w, struct {
+			Revoked int64 `json:"revoked"`
+		}{Revoked: affected}, err)
 	})
 	mux.HandleFunc("POST /servers", func(w http.ResponseWriter, r *http.Request) {
 		var input struct {

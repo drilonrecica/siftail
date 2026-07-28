@@ -18,6 +18,7 @@ import (
 	"github.com/drilonrecica/siftail/internal/auth"
 	"github.com/drilonrecica/siftail/internal/config"
 	"github.com/drilonrecica/siftail/internal/database"
+	"github.com/drilonrecica/siftail/internal/sessions"
 	"github.com/drilonrecica/siftail/internal/sources"
 )
 
@@ -138,6 +139,11 @@ func runAdminOperation(method, path string, input, output any) error {
 		return auth.NewStore(db.Writer()).ResetPassword(
 			context.Background(), []byte(value["password"].(string)),
 		)
+	case "/sessions/revoke-all":
+		affected, err := sessions.NewStore(db.Writer()).RevokeAll(context.Background(), 1)
+		return assignJSON(struct {
+			Revoked int64 `json:"revoked"`
+		}{Revoked: affected}, output, err)
 	case "/servers":
 		if method == http.MethodGet {
 			servers, err := store.ListServers(context.Background())
