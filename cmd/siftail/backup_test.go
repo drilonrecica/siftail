@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -70,12 +71,38 @@ func TestBackupCLIUsesActiveControlSocketAndReportsVerifiedArtifact(t *testing.T
 	if _, err := backup.Verify(context.Background(), output); err != nil {
 		t.Fatalf("CLI artifact: %v", err)
 	}
+
+	configurationOutput := filepath.Join(t.TempDir(), "cli-configuration.sqlite")
+	stdout.Reset()
+	stderr.Reset()
+	if code := run([]string{
+		"backup", "--configuration-only", "--output", configurationOutput,
+	}, &stdout, &stderr); code != 0 ||
+		!strings.Contains(stdout.String(), "type: configuration") ||
+		!strings.Contains(stdout.String(),
+			"artifact: cli-configuration.sqlite") ||
+		strings.Contains(stdout.String()+stderr.String(),
+			filepath.Dir(configurationOutput)) {
+		t.Fatalf("configuration backup = code %d stdout=%q stderr=%q",
+			code, stdout.String(), stderr.String())
+	}
+	stdout.Reset()
+	stderr.Reset()
+	if code := run(
+		[]string{"backup", "verify", configurationOutput}, &stdout, &stderr,
+	); code != 0 ||
+		!strings.Contains(stdout.String(), "type: configuration") ||
+		strings.Contains(stdout.String()+stderr.String(),
+			filepath.Dir(configurationOutput)) {
+		t.Fatalf("active verify = code %d stdout=%q stderr=%q",
+			code, stdout.String(), stderr.String())
+	}
 	stdout.Reset()
 	stderr.Reset()
 	if code := run([]string{"diagnostics"}, &stdout, &stderr); code != 0 ||
 		!strings.Contains(stdout.String(), "backup_succeeded") ||
 		!strings.Contains(stdout.String(),
-			"A full backup completed and passed verification.") ||
+			"A backup completed and passed verification.") ||
 		strings.Contains(stdout.String(), output) {
 		t.Fatalf("backup diagnostics = code %d stdout=%q stderr=%q",
 			code, stdout.String(), stderr.String())
@@ -97,5 +124,23 @@ func TestBackupCLIRequiresActiveServerAndOutput(t *testing.T) {
 			t.Fatalf("%v exposed unexpected content: %q %q",
 				args, stdout.String(), stderr.String())
 		}
+	}
+
+	corrupt := filepath.Join(t.TempDir(), "private-corrupt.sqlite")
+	if err := os.WriteFile(
+		corrupt, []byte("private-backup-payload"), 0600,
+	); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	if code := run(
+		[]string{"backup", "verify", corrupt}, &stdout, &stderr,
+	); code == 0 ||
+		!strings.Contains(stderr.String(), "backup verification failed") ||
+		strings.Contains(stdout.String()+stderr.String(), corrupt) ||
+		strings.Contains(stdout.String()+stderr.String(),
+			"private-backup-payload") {
+		t.Fatalf("offline corrupt verify = code %d stdout=%q stderr=%q",
+			code, stdout.String(), stderr.String())
 	}
 }

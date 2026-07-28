@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/drilonrecica/siftail/internal/audit"
 )
 
 func TestVerifyRejectsInvalidIncompleteIncompatibleAndSessionArtifacts(t *testing.T) {
@@ -37,6 +39,14 @@ func TestVerifyRejectsInvalidIncompleteIncompatibleAndSessionArtifacts(t *testin
 				t.Helper()
 				execBackupMutation(t, path,
 					"UPDATE siftail_backup_metadata SET complete=0")
+			},
+		},
+		{
+			name: "format too new",
+			mutate: func(t *testing.T, path string) {
+				t.Helper()
+				execBackupMutation(t, path,
+					"UPDATE siftail_backup_metadata SET format_version=99")
 			},
 		},
 		{
@@ -89,6 +99,61 @@ func TestVerifyRejectsCancellationAndSymlink(t *testing.T) {
 	}
 	if _, err := Verify(context.Background(), link); err == nil {
 		t.Fatal("symlink artifact verified")
+	}
+}
+
+func TestVerifyRejectsConfigurationArtifactWithExcludedHistory(t *testing.T) {
+	fixture := newBackupFixture(t)
+	seedFullBackupState(t, fixture.db.Writer())
+	path := filepath.Join(t.TempDir(), "configuration.sqlite")
+	if _, err := fixture.service.CreateConfiguration(
+		context.Background(), path, nil,
+	); err != nil {
+		t.Fatal(err)
+	}
+	execBackupMutation(t, path, `INSERT INTO security_audit_events(
+		occurred_at_us,category,action,outcome,actor_type,safe_metadata_json
+	) VALUES(1,'authentication','sign_in','succeeded','system','{}')`)
+	if _, err := Verify(context.Background(), path); err == nil {
+		t.Fatal("configuration artifact with audit history verified")
+	}
+}
+
+func TestVerifyArtifactRecordsTypedSuccessAndSafeFailure(t *testing.T) {
+	fixture := newBackupFixture(t)
+	seedFullBackupState(t, fixture.db.Writer())
+	path := filepath.Join(t.TempDir(), "configuration.sqlite")
+	if _, err := fixture.service.CreateConfiguration(
+		context.Background(), path, nil,
+	); err != nil {
+		t.Fatal(err)
+	}
+	result, err := fixture.service.VerifyArtifact(context.Background(), path)
+	if err != nil || result.Type != TypeConfiguration {
+		t.Fatalf("verification = %#v, %v", result, err)
+	}
+	corrupt := filepath.Join(t.TempDir(), "private-secret-name.sqlite")
+	if err := os.WriteFile(corrupt, []byte("private-payload"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fixture.service.VerifyArtifact(
+		context.Background(), corrupt,
+	); err == nil {
+		t.Fatal("corrupt artifact verified")
+	}
+	page, err := fixture.audit.List(context.Background(), audit.Query{
+		Action: "backup.verify", Limit: 10,
+	})
+	if err != nil || len(page.Events) != 2 {
+		t.Fatalf("verification audits = %#v, %v", page.Events, err)
+	}
+	if page.Events[0].Outcome != audit.OutcomeFailed ||
+		page.Events[0].Metadata[audit.MetadataResultCategory] !=
+			"verification_failed" ||
+		page.Events[1].Outcome != audit.OutcomeSucceeded ||
+		page.Events[1].Metadata[audit.MetadataBackupType] !=
+			TypeConfiguration {
+		t.Fatalf("verification audits = %#v", page.Events)
 	}
 }
 

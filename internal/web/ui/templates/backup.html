@@ -16,17 +16,45 @@
     </form>
   </section>
 
+  <section aria-labelledby="configuration-backup-heading">
+    <h2 id="configuration-backup-heading">Configuration-only backup</h2>
+    <p>Configuration-only backups include administrator and ingestion credential hashes, Servers, settings, and source names and aliases. They exclude application events and attributes, container observations, security audit history, diagnostics, and browser sessions.</p>
+    <p>Restoring this artifact replaces the database with that configuration and empty history; it is not a merge and not a complete log-history backup.</p>
+    <form method="post" action="/backup/configuration">
+      <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+      <label for="configuration-backup-output-path">Output path</label>
+      <input id="configuration-backup-output-path" name="output_path" type="text" maxlength="4096"
+        placeholder="/backups/siftail-configuration.sqlite" required autocomplete="off"
+        {{if eq .State "running"}}disabled{{end}}>
+      <button class="button button-primary" type="submit" {{if eq .State "running"}}disabled{{end}}>Create verified configuration-only backup</button>
+    </form>
+  </section>
+
   <section aria-labelledby="backup-result-heading" aria-live="polite">
     <h2 id="backup-result-heading">Latest process result</h2>
     <p><strong>{{.StateLabel}}</strong></p>
     {{if .StartedAt}}<p>Started: <time>{{.StartedAt}}</time></p>{{end}}
     {{if .CompletedAt}}<p>Completed: <time>{{.CompletedAt}}</time></p>{{end}}
-    {{if eq .State "running"}}<p>Copied pages: {{.PagesCopied}} / {{.PageCount}}</p>{{end}}
+    {{if and (eq .State "running") .Unit}}<p>Copied {{.Unit}}: {{.CompletedUnits}} / {{.TotalUnits}}</p>{{end}}
     {{if .Name}}<dl class="status-facts">
+      <div><dt>Type</dt><dd>{{.BackupType}}</dd></div>
       <div><dt>Artifact</dt><dd>{{.Name}}</dd></div>
       <div><dt>Size</dt><dd>{{.Size}}</dd></div>
       <div><dt>SHA-256</dt><dd><code>{{.Checksum}}</code></dd></div>
     </dl>{{end}}
+  </section>
+
+  <section aria-labelledby="verify-backup-heading">
+    <h2 id="verify-backup-heading">Verify an artifact</h2>
+    <p>Verification is read-only. It checks SQLite integrity, format and schema compatibility, required tables, completed metadata, type-specific exclusions, private permissions, and SHA-256 without applying or restoring anything.</p>
+    <form method="post" action="/backup/verify">
+      <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+      <label for="verify-backup-path">Artifact path</label>
+      <input id="verify-backup-path" name="artifact_path" type="text" maxlength="4096"
+        placeholder="/backups/siftail-full.sqlite" required autocomplete="off"
+        {{if eq .State "running"}}disabled{{end}}>
+      <button class="button button-quiet" type="submit" {{if eq .State "running"}}disabled{{end}}>Verify backup</button>
+    </form>
   </section>
 
   <section aria-labelledby="restore-heading">

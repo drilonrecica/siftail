@@ -735,7 +735,7 @@ test("status is authenticated, refreshable, sanitized, responsive, and accessibl
   });
 });
 
-test("full backup reports bounded progress and a verified session-free artifact", async ({
+test("full and configuration backups are typed, verified, and accessible", async ({
   page,
 }) => {
   test.setTimeout(45_000);
@@ -756,6 +756,34 @@ test("full backup reports bounded progress and a verified session-free artifact"
   await expect(page.getByText("SHA-256", { exact: true })).toBeVisible();
   expect(await page.content()).not.toContain(state.runDirectory);
   expect(fs.statSync(output).mode & 0o777).toBe(0o600);
+
+  const configurationOutput = path.join(
+    state.runDirectory,
+    "browser-configuration.sqlite",
+  );
+  await expect(page.getByText("not a merge", { exact: false })).toBeVisible();
+  await page.locator("#configuration-backup-output-path").fill(configurationOutput);
+  await page.getByRole("button", {
+    name: "Create verified configuration-only backup",
+  }).click();
+  await expect(page.getByText("Backup verified.", { exact: true })).toBeVisible({
+    timeout: 15_000,
+  });
+  await expect(page.getByText("configuration", { exact: true })).toBeVisible();
+  await expect(page.getByText(
+    "browser-configuration.sqlite",
+    { exact: true },
+  )).toBeVisible();
+  expect(await page.content()).not.toContain(state.runDirectory);
+  expect(fs.statSync(configurationOutput).mode & 0o777).toBe(0o600);
+
+  await page.locator("#verify-backup-path").fill(configurationOutput);
+  await page.getByRole("button", { name: "Verify backup" }).click();
+  await expect(page.getByText("Backup verified.", { exact: true })).toBeVisible({
+    timeout: 15_000,
+  });
+  await expect(page.getByText("configuration", { exact: true })).toBeVisible();
+  expect(await page.content()).not.toContain(state.runDirectory);
 
   await page.locator("[data-theme-select]").selectOption("dark");
   let results = await new AxeBuilder({ page })

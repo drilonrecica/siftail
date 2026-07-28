@@ -397,6 +397,33 @@ func (a *App) controlMux() *http.ServeMux {
 		status, err := a.backupManager.Start(r.Context(), input.OutputPath)
 		writeControlJSON(w, status, err)
 	})
+	mux.HandleFunc("POST /backup/configuration", func(
+		w http.ResponseWriter,
+		r *http.Request,
+	) {
+		var input struct {
+			OutputPath string `json:"output_path"`
+		}
+		if !decodeControlJSON(w, r, &input) {
+			return
+		}
+		status, err := a.backupManager.StartConfiguration(
+			r.Context(), input.OutputPath,
+		)
+		writeControlJSON(w, status, err)
+	})
+	mux.HandleFunc("POST /backup/verify", func(w http.ResponseWriter, r *http.Request) {
+		var input struct {
+			ArtifactPath string `json:"artifact_path"`
+		}
+		if !decodeControlJSON(w, r, &input) {
+			return
+		}
+		status, err := a.backupManager.StartVerify(
+			r.Context(), input.ArtifactPath,
+		)
+		writeControlJSON(w, status, err)
+	})
 	mux.HandleFunc("GET /backup", func(w http.ResponseWriter, r *http.Request) {
 		if len(r.URL.Query()) != 0 {
 			writeControlJSON(w, struct{}{}, errors.New("invalid backup query"))

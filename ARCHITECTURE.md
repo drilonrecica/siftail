@@ -1617,10 +1617,23 @@ hold a multi-gigabyte backup in an HTTP response.
 
 ### 25.3 Configuration-only backup
 
-Implement as a new SQLite artifact containing the allowed configuration tables and backup metadata, or another well-defined format. Prefer SQLite to avoid inventing a second serialization system.
+Create a new current-schema SQLite database rather than serializing a second
+format. Hold one source read transaction while counting and streaming explicit
+columns in primary-key order for `administrators`, `servers`,
+`ingestion_tokens`, `settings`, and `sources`. Insert through one destination
+transaction in foreign-key-safe order. Memory remains bounded to one row plus
+SQLite connection state; the progress unit is copied configuration rows.
 
-Exclude application events, diagnostic events, security audit events, and sessions.
-Restore replaces the corresponding configuration state; it does not merge records.
+The resulting database retains required empty tables so it can follow the
+ordinary compatibility and restore path. It contains no `log_events`,
+`container_instances`, `security_audit_events`, or `sessions` rows. Finalization,
+mode-`0600` staging, no-overwrite publication, synchronization, checksum,
+verification, cleanup, and single-job serialization use the full-backup safety
+contract. Capacity preflight reserves at least 2 MiB; actual writes still fail
+safely if the selected configuration is larger than available space.
+
+Restore replaces the complete database with the configuration snapshot and
+empty history; it does not merge records.
 
 ### 25.4 Verify command
 
@@ -1630,13 +1643,22 @@ siftail backup verify /path/backup.sqlite
 
 Checks:
 
-- readable SQLite;
-- integrity;
-- expected schema tables;
-- schema version;
-- backup type;
-- compatibility;
-- incomplete marker absent.
+- a regular readable owner-private SQLite file rather than a symlink;
+- full `integrity_check`;
+- every expected schema table and exact supported schema version;
+- exactly one completed format-1 metadata row;
+- a recognized `full` or `configuration` type;
+- zero session rows for every type;
+- zero event, container-observation, and security-audit rows for configuration
+  artifacts; and
+- a streaming SHA-256 checksum and byte count.
+
+Verification opens the artifact read-only and never applies migrations or
+changes. With the server active, the CLI and browser submit it to the same
+single-job manager and record `backup.verify`. With the server stopped, the CLI
+verifies directly without opening the active database and therefore cannot
+record an audit event. Errors expose only a closed category, not paths, SQLite
+details, hashes, or artifact contents.
 
 ### 25.5 Restore flow
 

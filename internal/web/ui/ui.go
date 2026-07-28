@@ -48,17 +48,20 @@ type SelectOption struct {
 }
 
 type BackupView struct {
-	CSRFToken   string
-	State       string
-	StateLabel  string
-	StartedAt   string
-	CompletedAt string
-	PageCount   string
-	PagesCopied string
-	Name        string
-	Size        string
-	Checksum    string
-	Error       string
+	CSRFToken      string
+	State          string
+	Operation      string
+	BackupType     string
+	StateLabel     string
+	StartedAt      string
+	CompletedAt    string
+	TotalUnits     string
+	CompletedUnits string
+	Unit           string
+	Name           string
+	Size           string
+	Checksum       string
+	Error          string
 }
 
 type FilterChoice struct {

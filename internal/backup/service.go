@@ -24,9 +24,16 @@ import (
 )
 
 const (
-	FormatVersion = 1
-	TypeFull      = "full"
+	FormatVersion     = 1
+	TypeFull          = "full"
+	TypeConfiguration = "configuration"
 )
+
+type Progress struct {
+	Completed int
+	Total     int
+	Unit      string
+}
 
 type Result struct {
 	Type          string    `json:"type"`
@@ -38,7 +45,8 @@ type Result struct {
 }
 
 func (r Result) Validate() error {
-	if r.Type != TypeFull || !safeBasename(r.Name) || r.CreatedAt.IsZero() ||
+	if (r.Type != TypeFull && r.Type != TypeConfiguration) ||
+		!safeBasename(r.Name) || r.CreatedAt.IsZero() ||
 		r.CreatedAt.Year() < 1 || r.CreatedAt.Year() > 9999 ||
 		r.SchemaVersion < 1 || r.SchemaVersion > database.MaxSchemaVersion ||
 		r.Bytes <= 0 || len(r.SHA256) != sha256.Size*2 {
@@ -75,7 +83,49 @@ func NewService(
 func (s *Service) CreateFull(
 	ctx context.Context,
 	outputPath string,
-	progress func(database.BackupProgress),
+	progress func(Progress),
+) (Result, error) {
+	return s.create(ctx, outputPath, TypeFull, progress)
+}
+
+func (s *Service) CreateConfiguration(
+	ctx context.Context,
+	outputPath string,
+	progress func(Progress),
+) (Result, error) {
+	return s.create(ctx, outputPath, TypeConfiguration, progress)
+}
+
+func (s *Service) VerifyArtifact(
+	ctx context.Context,
+	artifactPath string,
+) (Result, error) {
+	if ctx == nil {
+		return Result{}, errors.New("backup verification context is nil")
+	}
+	if s == nil || s.audit == nil || s.verify == nil {
+		return Result{}, errors.New("backup verification service is unavailable")
+	}
+	result, err := s.verify(ctx, artifactPath)
+	if err != nil {
+		_, _ = s.audit.Record(ctx, verificationAuditInput(
+			ctx, audit.OutcomeFailed, artifactPath, "", "verification_failed",
+		))
+		return Result{}, err
+	}
+	if _, err := s.audit.Record(ctx, verificationAuditInput(
+		ctx, audit.OutcomeSucceeded, artifactPath, result.Type, "",
+	)); err != nil {
+		return Result{}, errors.New("record successful backup verification audit")
+	}
+	return result, nil
+}
+
+func (s *Service) create(
+	ctx context.Context,
+	outputPath string,
+	backupType string,
+	progress func(Progress),
 ) (Result, error) {
 	if ctx == nil {
 		return Result{}, errors.New("backup context is nil")
@@ -86,14 +136,22 @@ func (s *Service) CreateFull(
 	}
 	finalPath, err := validateOutputPath(s.sourcePath, outputPath)
 	if err != nil {
-		return s.fail(ctx, outputPath, "invalid_output", err)
+		return s.fail(
+			ctx, outputPath, backupType, "invalid_output", err,
+		)
 	}
-	if err := ensureBackupSpace(s.source.Reader(), filepath.Dir(finalPath)); err != nil {
-		return s.fail(ctx, finalPath, "insufficient_space", err)
+	if err := ensureBackupSpace(
+		s.source.Reader(), filepath.Dir(finalPath), backupType,
+	); err != nil {
+		return s.fail(
+			ctx, finalPath, backupType, "insufficient_space", err,
+		)
 	}
 	stagingPath, cleanup, err := createStagingFile(finalPath)
 	if err != nil {
-		return s.fail(ctx, finalPath, "destination_unavailable", err)
+		return s.fail(
+			ctx, finalPath, backupType, "destination_unavailable", err,
+		)
 	}
 	keepStaging := false
 	defer func() {
@@ -102,30 +160,62 @@ func (s *Service) CreateFull(
 		}
 	}()
 
-	if err := s.copy(
-		ctx, s.source.Reader(), stagingPath,
-		s.stepPages, progress,
-	); err != nil {
-		return s.fail(ctx, finalPath, failureCategory(err), err)
+	var snapshotErr error
+	switch backupType {
+	case TypeFull:
+		snapshotErr = s.copy(
+			ctx, s.source.Reader(), stagingPath, s.stepPages,
+			func(value database.BackupProgress) {
+				if progress != nil {
+					progress(Progress{
+						Completed: value.PageCount - value.Remaining,
+						Total:     value.PageCount, Unit: "pages",
+					})
+				}
+			},
+		)
+	case TypeConfiguration:
+		snapshotErr = createConfigurationSnapshot(
+			ctx, s.source.Reader(), stagingPath, progress,
+		)
+	default:
+		snapshotErr = errors.New("backup type is invalid")
+	}
+	if snapshotErr != nil {
+		return s.fail(
+			ctx, finalPath, backupType, failureCategory(snapshotErr), snapshotErr,
+		)
 	}
 	createdAt := s.now().UTC()
-	if err := finalizeSnapshot(ctx, stagingPath, createdAt); err != nil {
-		return s.fail(ctx, finalPath, failureCategory(err), err)
+	if err := finalizeSnapshot(
+		ctx, stagingPath, backupType, createdAt,
+	); err != nil {
+		return s.fail(
+			ctx, finalPath, backupType, failureCategory(err), err,
+		)
 	}
 	verified, err := s.verify(ctx, stagingPath)
 	if err != nil {
-		return s.fail(ctx, finalPath, "verification_failed", err)
+		return s.fail(
+			ctx, finalPath, backupType, "verification_failed", err,
+		)
+	}
+	if verified.Type != backupType {
+		return s.fail(ctx, finalPath, backupType, "verification_failed",
+			errors.New("backup type verification mismatch"))
 	}
 	if err := syncFile(stagingPath); err != nil {
-		return s.fail(ctx, finalPath, "destination_unavailable", err)
+		return s.fail(
+			ctx, finalPath, backupType, "destination_unavailable", err,
+		)
 	}
 	if err := os.Link(stagingPath, finalPath); err != nil {
-		return s.fail(ctx, finalPath, "destination_unavailable",
+		return s.fail(ctx, finalPath, backupType, "destination_unavailable",
 			fmt.Errorf("publish verified backup: %w", err))
 	}
 	if err := os.Remove(stagingPath); err != nil {
 		_ = os.Remove(finalPath)
-		return s.fail(ctx, finalPath, "destination_unavailable",
+		return s.fail(ctx, finalPath, backupType, "destination_unavailable",
 			errors.New("remove published backup staging link"))
 	}
 	keepStaging = true
@@ -136,19 +226,23 @@ func (s *Service) CreateFull(
 		}
 	}()
 	if err := syncDirectory(filepath.Dir(finalPath)); err != nil {
-		return s.fail(ctx, finalPath, "destination_unavailable", err)
+		return s.fail(
+			ctx, finalPath, backupType, "destination_unavailable", err,
+		)
 	}
 	verified, err = s.verify(ctx, finalPath)
 	if err != nil {
-		return s.fail(ctx, finalPath, "verification_failed", err)
+		return s.fail(
+			ctx, finalPath, backupType, "verification_failed", err,
+		)
 	}
 	if verified.CreatedAt.IsZero() {
 		verified.CreatedAt = createdAt
 	}
 	if _, err := s.audit.Record(ctx, backupAuditInput(
-		ctx, audit.OutcomeSucceeded, finalPath, "",
+		ctx, audit.OutcomeSucceeded, finalPath, backupType, "",
 	)); err != nil {
-		return Result{}, errors.New("record successful full backup audit")
+		return Result{}, errors.New("record successful backup audit")
 	}
 	removeFinal = false
 	return verified, nil
@@ -157,12 +251,13 @@ func (s *Service) CreateFull(
 func (s *Service) fail(
 	ctx context.Context,
 	outputPath string,
+	backupType string,
 	category string,
 	cause error,
 ) (Result, error) {
 	if s != nil && s.audit != nil {
 		_, _ = s.audit.Record(ctx, backupAuditInput(
-			ctx, audit.OutcomeFailed, outputPath, category,
+			ctx, audit.OutcomeFailed, outputPath, backupType, category,
 		))
 	}
 	return Result{}, cause
@@ -172,6 +267,7 @@ func backupAuditInput(
 	ctx context.Context,
 	outcome audit.Outcome,
 	outputPath string,
+	backupType string,
 	category string,
 ) audit.Input {
 	name := filepath.Base(outputPath)
@@ -179,14 +275,43 @@ func backupAuditInput(
 		name = "invalid"
 	}
 	metadata := audit.Metadata{
-		audit.MetadataBackupType: TypeFull,
+		audit.MetadataBackupType: backupType,
 		audit.MetadataBackupName: name,
 	}
 	if category != "" {
 		metadata[audit.MetadataResultCategory] = category
 	}
+	action := "backup.full"
+	if backupType == TypeConfiguration {
+		action = "backup.configuration"
+	}
 	input := audit.InputFromContext(
-		ctx, audit.CategoryBackupRestore, "backup.full", outcome, metadata,
+		ctx, audit.CategoryBackupRestore, action, outcome, metadata,
+	)
+	input.OccurredAt = time.Now().UTC()
+	return input
+}
+
+func verificationAuditInput(
+	ctx context.Context,
+	outcome audit.Outcome,
+	artifactPath string,
+	backupType string,
+	category string,
+) audit.Input {
+	name := filepath.Base(artifactPath)
+	if !safeBasename(name) {
+		name = "invalid"
+	}
+	metadata := audit.Metadata{audit.MetadataBackupName: name}
+	if validBackupType(backupType) {
+		metadata[audit.MetadataBackupType] = backupType
+	}
+	if category != "" {
+		metadata[audit.MetadataResultCategory] = category
+	}
+	input := audit.InputFromContext(
+		ctx, audit.CategoryBackupRestore, "backup.verify", outcome, metadata,
 	)
 	input.OccurredAt = time.Now().UTC()
 	return input
@@ -240,10 +365,18 @@ func createStagingFile(finalPath string) (string, func(), error) {
 		_ = os.Remove(stagingPath)
 		return "", func() {}, errors.New("close backup staging file")
 	}
-	return stagingPath, func() { _ = os.Remove(stagingPath) }, nil
+	return stagingPath, func() {
+		for _, suffix := range []string{"", "-wal", "-shm", "-journal"} {
+			_ = os.Remove(stagingPath + suffix)
+		}
+	}, nil
 }
 
-func ensureBackupSpace(source *sql.DB, destinationDirectory string) error {
+func ensureBackupSpace(
+	source *sql.DB,
+	destinationDirectory string,
+	backupType string,
+) error {
 	var pageCount, pageSize int64
 	if err := source.QueryRow("PRAGMA page_count").Scan(&pageCount); err != nil {
 		return database.Classify("measure backup source pages", err)
@@ -256,6 +389,9 @@ func ensureBackupSpace(source *sql.DB, destinationDirectory string) error {
 		return errors.New("backup size is unsupported")
 	}
 	required := pageCount * pageSize
+	if backupType == TypeConfiguration {
+		required = 1 << 20
+	}
 	slack := required / 20
 	if slack < 1<<20 {
 		slack = 1 << 20
@@ -275,7 +411,12 @@ func ensureBackupSpace(source *sql.DB, destinationDirectory string) error {
 	return nil
 }
 
-func finalizeSnapshot(ctx context.Context, path string, createdAt time.Time) error {
+func finalizeSnapshot(
+	ctx context.Context,
+	path string,
+	backupType string,
+	createdAt time.Time,
+) error {
 	db, err := sql.Open("sqlite3", sqlitePath(path, "rw"))
 	if err != nil {
 		return errors.New("open staged backup")
@@ -300,6 +441,19 @@ func finalizeSnapshot(ctx context.Context, path string, createdAt time.Time) err
 	if _, err := tx.ExecContext(ctx, "DELETE FROM sessions"); err != nil {
 		return database.Classify("exclude backup sessions", err)
 	}
+	if backupType == TypeConfiguration {
+		for _, query := range []string{
+			"DELETE FROM log_events",
+			"DELETE FROM container_instances",
+			"DELETE FROM security_audit_events",
+		} {
+			if _, err := tx.ExecContext(ctx, query); err != nil {
+				return database.Classify(
+					"exclude configuration backup history", err,
+				)
+			}
+		}
+	}
 	if _, err := tx.ExecContext(ctx, `
 		DROP TABLE IF EXISTS siftail_backup_metadata;
 		CREATE TABLE siftail_backup_metadata(
@@ -313,7 +467,7 @@ func finalizeSnapshot(ctx context.Context, path string, createdAt time.Time) err
 			format_version,backup_type,created_at_us,
 			source_schema_version,complete
 		) VALUES(?,?,?,?,1)`,
-		FormatVersion, TypeFull, createdAt.UnixMicro(),
+		FormatVersion, backupType, createdAt.UnixMicro(),
 		database.MaxSchemaVersion,
 	); err != nil {
 		return database.Classify("write backup metadata", err)

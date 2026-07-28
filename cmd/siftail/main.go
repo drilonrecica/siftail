@@ -167,5 +167,6 @@ func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "  sessions revoke-all Revoke every administrator session")
 	fmt.Fprintln(w, "  database check [--full] Run a bounded database integrity check")
 	fmt.Fprintln(w, "  diagnostics      Print the latest sanitized operational diagnostics")
-	fmt.Fprintln(w, "  backup --output <path> Create and verify an online full backup")
+	fmt.Fprintln(w, "  backup [--configuration-only] --output <path> Create and verify a backup")
+	fmt.Fprintln(w, "  backup verify <path> Verify a backup without applying changes")
 }

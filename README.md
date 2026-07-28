@@ -550,7 +550,7 @@ This prints at most 100 validated entries through the owner-only control
 socket. There is no arbitrary SQL command, raw process-log export, support
 bundle, public administration endpoint, or outbound reporting.
 
-### Verified online full backup
+### Verified full and configuration-only backups
 
 With Siftail running, create a full backup through the owner-only control
 socket:
@@ -559,8 +559,17 @@ socket:
 ./siftail backup --output /backups/siftail-full.sqlite
 ```
 
+Create a configuration-only artifact, or verify either artifact type without
+applying it:
+
+```bash
+./siftail backup --configuration-only --output /backups/siftail-config.sqlite
+./siftail backup verify /backups/siftail-config.sqlite
+```
+
 The authenticated Backup workspace exposes the same single-job operation with
-bounded page progress and a sanitized final result. The destination directory
+bounded page/row progress, read-only verification, and a sanitized final result.
+The destination directory
 must already exist on protected storage and have room for the logical database
 plus 5% or at least 1 MiB of slack. Existing output files are never overwritten.
 Siftail creates a hidden mode-`0600` staging file in the same directory, copies
@@ -576,7 +585,11 @@ no-overwrite race removes Siftail's partial output. Scheduling, off-host
 copying, lifecycle, and encryption of the verified artifact remain operator
 responsibilities. Full backups contain retained application logs, password and
 token hashes, configuration, sources, and audit history, so protect them as
-sensitive data. See
+sensitive data. Configuration-only backups still contain password and token
+hashes, Servers, settings, and source presentation configuration, but exclude
+events, container observations, audit history, diagnostics, and sessions.
+Restore replaces the database with the saved configuration and empty history;
+it is not a merge. See
 [`docs/operations/full-backups.md`](docs/operations/full-backups.md).
 
 ### Current dependency rationale

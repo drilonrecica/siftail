@@ -67,7 +67,7 @@ func TestCreateFullBackupWhileWritingExcludesSessionsAndRestores(t *testing.T) {
 	var startWrite sync.Once
 	result, err := fixture.service.CreateFull(
 		context.Background(), output,
-		func(database.BackupProgress) {
+		func(Progress) {
 			startWrite.Do(func() {
 				go func() {
 					writeDone <- fixture.coordinator.Do(

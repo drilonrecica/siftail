@@ -1306,7 +1306,7 @@ Contains:
 - administrator configuration and hash;
 - server definitions;
 - token metadata and hashes as explicitly designed;
-- sources and aliases;
+- stable source identities, observed presentation labels, and aliases;
 - settings;
 - schema metadata.
 
@@ -1314,9 +1314,17 @@ Excludes:
 
 - application log events;
 - raw log attributes;
+- container-instance observations;
 - security audit and diagnostic events;
 - active and historical browser sessions;
 - plaintext credentials.
+
+The artifact is a current-schema SQLite database with excluded history tables
+present but empty. It carries exactly one completed format-1
+`configuration` metadata record. Configuration rows are copied in stable
+primary-key order from one read snapshot, so validation and logical contents
+are deterministic even though SQLite file-header bytes and therefore checksums
+may differ between equivalent creations.
 
 ### 26.3 Backup verification
 
@@ -1330,7 +1338,15 @@ Verification confirms:
 - exactly one compatible backup-metadata record;
 - no incomplete backup marker;
 - absence of browser session rows; and
+- absence of application events, container observations, and security audit
+  rows when the declared type is `configuration`; and
 - a complete bounded-memory checksum of the artifact.
+
+Verification is read-only and does not migrate, restore, or otherwise apply an
+artifact. An active-server verification is audited with only the safe basename,
+declared type on success, outcome, and a closed failure category. Stopped-server
+CLI verification cannot append an audit event because it must not open or
+modify the active database.
 
 A backup is not an accepted artifact until verification succeeds and the
 completed file is atomically published without replacing an existing path.

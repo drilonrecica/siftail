@@ -1271,6 +1271,8 @@ process-local state:
 
 - no backup run;
 - full backup in progress with copied/total SQLite pages;
+- configuration-only backup in progress with copied/total configuration rows;
+- read-only artifact verification in progress;
 - backup verified with safe basename, byte size, and SHA-256;
 - canceled before publication; or
 - failed with destination-capacity/permission guidance and no raw path or
@@ -1280,6 +1282,13 @@ While running, the output input and action are disabled and only the focused
 region polls once per second. Existing page content remains visible. The
 server-side output path is never echoed after submission; only its safe
 basename may appear in the result and security audit.
+
+Configuration-only copy states explicitly that it includes credential hashes,
+Servers, settings, and source presentation configuration; excludes logs,
+container observations, audit/diagnostic history, and sessions; and restores by
+replacement with empty history rather than merging. Verification copy states
+that it is read-only and checks type, compatibility, integrity, exclusions,
+permissions, and checksum without restoring.
 
 ### 21.3 Restore warning
 

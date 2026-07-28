@@ -35,6 +35,10 @@ func TestBrowserBackupIsProtectedStartsAndShowsVerifiedOutcome(t *testing.T) {
 		page.Header().Get("Cache-Control") != "no-store" ||
 		!strings.Contains(body, `aria-current="page">Backup</a>`) ||
 		!strings.Contains(body, "Browser sessions are always excluded") ||
+		!strings.Contains(body, "Configuration-only backup") ||
+		!strings.Contains(body, "replaces the database") ||
+		!strings.Contains(body, "not a merge") ||
+		!strings.Contains(body, "Verification is read-only") ||
 		!strings.Contains(body, "Never copy only the live main database file") {
 		t.Fatalf("backup page = %d %#v %q", page.Code, page.Header(), body)
 	}
@@ -85,6 +89,59 @@ func TestBrowserBackupIsProtectedStartsAndShowsVerifiedOutcome(t *testing.T) {
 		auditPage.Events[0].Outcome != audit.OutcomeSucceeded {
 		t.Fatalf("browser backup audit = %#v", auditPage.Events)
 	}
+
+	configurationOutput := filepath.Join(
+		t.TempDir(), "private-server-path-configuration.sqlite",
+	)
+	form = url.Values{
+		"csrf_token":  {CSRFToken(cookie.Value)},
+		"output_path": {configurationOutput},
+	}
+	start = httptest.NewRequest(
+		http.MethodPost, "/backup/configuration",
+		strings.NewReader(form.Encode()),
+	)
+	start.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	start.Header.Set("Origin", "https://logs.example.test")
+	start.AddCookie(cookie)
+	startResponse = httptest.NewRecorder()
+	handler.ServeHTTP(startResponse, start)
+	if startResponse.Code != http.StatusSeeOther {
+		t.Fatalf("configuration backup start = %d %q",
+			startResponse.Code, startResponse.Body.String())
+	}
+	configurationStatus := waitBrowserBackup(
+		t, fixture, backup.StateSucceeded,
+	)
+	if configurationStatus.Result == nil ||
+		configurationStatus.Result.Type != backup.TypeConfiguration {
+		t.Fatalf("configuration status = %#v", configurationStatus)
+	}
+
+	form = url.Values{
+		"csrf_token":    {CSRFToken(cookie.Value)},
+		"artifact_path": {configurationOutput},
+	}
+	start = httptest.NewRequest(
+		http.MethodPost, "/backup/verify", strings.NewReader(form.Encode()),
+	)
+	start.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	start.Header.Set("Origin", "https://logs.example.test")
+	start.AddCookie(cookie)
+	startResponse = httptest.NewRecorder()
+	handler.ServeHTTP(startResponse, start)
+	if startResponse.Code != http.StatusSeeOther {
+		t.Fatalf("verification start = %d %q",
+			startResponse.Code, startResponse.Body.String())
+	}
+	verificationStatus := waitBrowserBackup(
+		t, fixture, backup.StateSucceeded,
+	)
+	if verificationStatus.Operation != backup.OperationVerify ||
+		verificationStatus.Result == nil ||
+		verificationStatus.Result.Type != backup.TypeConfiguration {
+		t.Fatalf("verification status = %#v", verificationStatus)
+	}
 }
 
 func TestBrowserBackupRequiresCSRFOriginAndBoundedPath(t *testing.T) {
@@ -92,21 +149,36 @@ func TestBrowserBackupRequiresCSRFOriginAndBoundedPath(t *testing.T) {
 	cookie := loginBrowserCookie(t, fixture)
 	for _, test := range []struct {
 		name   string
+		route  string
+		field  string
 		origin string
 		csrf   string
 		path   string
 		status int
 	}{
-		{"origin", "https://attacker.test", CSRFToken(cookie.Value), "/tmp/x", 403},
-		{"csrf", "https://logs.example.test", "wrong", "/tmp/x", 403},
-		{"path", "https://logs.example.test", CSRFToken(cookie.Value), "bad\npath", 400},
+		{
+			"full origin", "/backup/full", "output_path",
+			"https://attacker.test", CSRFToken(cookie.Value), "/tmp/x", 403,
+		},
+		{
+			"configuration csrf", "/backup/configuration", "output_path",
+			"https://logs.example.test", "wrong", "/tmp/x", 403,
+		},
+		{
+			"verification origin", "/backup/verify", "artifact_path",
+			"https://attacker.test", CSRFToken(cookie.Value), "/tmp/x", 403,
+		},
+		{
+			"bounded path", "/backup/full", "output_path",
+			"https://logs.example.test", CSRFToken(cookie.Value), "bad\npath", 400,
+		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			form := url.Values{
-				"csrf_token": {test.csrf}, "output_path": {test.path},
+				"csrf_token": {test.csrf}, test.field: {test.path},
 			}
 			request := httptest.NewRequest(
-				http.MethodPost, "/backup/full",
+				http.MethodPost, test.route,
 				strings.NewReader(form.Encode()),
 			)
 			request.Header.Set("Content-Type", "application/x-www-form-urlencoded")

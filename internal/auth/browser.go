@@ -151,6 +151,12 @@ func (b *Browser) Register(mux *http.ServeMux) {
 	mux.Handle("GET /backup", b.Protect(http.HandlerFunc(b.backupPage)))
 	mux.Handle("GET /backup/region", b.Protect(http.HandlerFunc(b.backupRegion)))
 	mux.Handle("POST /backup/full", b.Protect(http.HandlerFunc(b.backupStart)))
+	mux.Handle("POST /backup/configuration", b.Protect(
+		http.HandlerFunc(b.configurationBackupStart),
+	))
+	mux.Handle("POST /backup/verify", b.Protect(
+		http.HandlerFunc(b.backupVerifyStart),
+	))
 }
 
 func (b *Browser) loginPage(w http.ResponseWriter, r *http.Request) {

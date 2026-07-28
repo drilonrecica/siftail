@@ -367,10 +367,10 @@ func sanitizeDiagnostic(input DiagnosticInput) (Diagnostic, error) {
 		summary = "Database writability recovered after a bounded probe."
 	case "backup/backup_succeeded":
 		severity = "information"
-		summary = "A full backup completed and passed verification."
+		summary = "A backup completed and passed verification."
 	case "backup/backup_failed":
 		severity = "attention"
-		summary = "A full backup did not produce a verified artifact."
+		summary = "A backup did not produce a verified artifact."
 	case "retention/retention_cleanup":
 		severity = "attention"
 		summary = "Retention cleanup did not complete."

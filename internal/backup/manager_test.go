@@ -39,8 +39,52 @@ func TestManagerSerializesReportsAndCompletesBackup(t *testing.T) {
 	}
 	status := waitBackupStatus(t, manager, started.ID)
 	if status.State != StateSucceeded || status.Result == nil ||
-		status.PagesCopied != status.PageCount || status.Validate() != nil {
+		status.CompletedUnits != status.TotalUnits || status.Validate() != nil {
 		t.Fatalf("completed = %#v", status)
+	}
+}
+
+func TestManagerCreatesConfigurationAndVerifiesTypedArtifact(t *testing.T) {
+	fixture := newBackupFixture(t)
+	seedFullBackupState(t, fixture.db.Writer())
+	manager := NewManager(fixture.service)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- manager.Run(ctx) }()
+	<-manager.Ready()
+	t.Cleanup(func() {
+		cancel()
+		if err := <-done; err != nil {
+			t.Error(err)
+		}
+	})
+
+	output := filepath.Join(t.TempDir(), "configuration.sqlite")
+	started, err := manager.StartConfiguration(context.Background(), output)
+	if err != nil || started.Operation != OperationCreate ||
+		started.BackupType != TypeConfiguration ||
+		started.Validate() != nil {
+		t.Fatalf("configuration start = %#v, %v", started, err)
+	}
+	created := waitBackupStatus(t, manager, started.ID)
+	if created.State != StateSucceeded || created.Result == nil ||
+		created.Result.Type != TypeConfiguration ||
+		created.Unit != "rows" || created.Validate() != nil {
+		t.Fatalf("configuration result = %#v", created)
+	}
+
+	started, err = manager.StartVerify(context.Background(), output)
+	if err != nil || started.Operation != OperationVerify ||
+		started.BackupType != "" || started.Validate() != nil {
+		t.Fatalf("verification start = %#v, %v", started, err)
+	}
+	verified := waitBackupStatus(t, manager, started.ID)
+	if verified.State != StateSucceeded || verified.Result == nil ||
+		verified.Result.Type != TypeConfiguration ||
+		verified.BackupType != TypeConfiguration ||
+		verified.Operation != OperationVerify ||
+		verified.Validate() != nil {
+		t.Fatalf("verification result = %#v", verified)
 	}
 }
 
@@ -71,7 +115,7 @@ func TestManagerCancellationStopsOwnedBackupAndLeavesNoArtifact(t *testing.T) {
 	}
 	<-copyStarted
 	running := manager.Snapshot()
-	if running.PageCount != 10 || running.PagesCopied != 4 {
+	if running.TotalUnits != 10 || running.CompletedUnits != 4 {
 		t.Fatalf("running progress = %#v", running)
 	}
 	cancel()

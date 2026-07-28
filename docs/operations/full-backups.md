@@ -1,7 +1,7 @@
-# Verified online full backups
+# Verified full and configuration-only backups
 
 **Reviewed:** 2026-07-28  
-**Scope:** SFT-042 active-server format-1 full backup
+**Scope:** SFT-042–SFT-043 format-1 backup creation and verification
 
 ## Create
 
@@ -13,14 +13,23 @@ supports ordinary same-directory hard links, then run:
 ./siftail backup --output /backups/siftail-full.sqlite
 ```
 
+For configuration without retained history:
+
+```bash
+./siftail backup --configuration-only \
+  --output /backups/siftail-configuration.sqlite
+```
+
 The server must be active because the CLI uses the owner-only Unix control
 socket. The authenticated Backup workspace provides the same operation. Only
 one backup runs at a time. The CLI polls typed status until completion; the
 browser replaces only its Backup region once per second. Neither path streams
 database bytes through HTTP.
 
-The output directory must already exist and have capacity for the current
-logical SQLite page count plus 5% or at least 1 MiB of slack. Siftail refuses:
+For full backup, the output directory must have capacity for the current logical
+SQLite page count plus 5% or at least 1 MiB of slack. Configuration backup
+reserves at least 2 MiB before starting; a larger configuration still fails
+safely if the filesystem fills. Siftail refuses:
 
 - the live main database, WAL, or shared-memory path;
 - a missing/non-directory parent;
@@ -58,6 +67,48 @@ The final path is reopened and verified once more before success is reported.
 The source security audit then records `backup.full` with only type, safe
 basename, outcome, and a closed failure category.
 
+### Configuration-only snapshot
+
+A configuration artifact uses the same staging, synchronization, no-overwrite,
+verification, and publication contract. Instead of copying the active database,
+Siftail creates a fresh current-schema SQLite database and holds one consistent
+source read transaction while it streams explicit columns in stable order for:
+
+- administrator configuration and password hash;
+- Servers;
+- ingestion-token metadata and hashes;
+- settings; and
+- stable source identity, observed labels, and aliases.
+
+It retains the required schema but leaves events, raw attributes, container
+observations, security audit/diagnostic history, and sessions empty. One row at
+a time is retained by the copier. The artifact is marked format-1
+`configuration`; restoring it replaces the whole database with this
+configuration and empty history. It is not a merge and is not a complete
+log-history backup.
+
+Equivalent unchanged configuration has deterministic logical rows and
+validation. SQLite header state can differ between creations, so byte-for-byte
+identity and equal SHA-256 values are not promised.
+
+## Verify without applying
+
+```bash
+./siftail backup verify /backups/siftail-full.sqlite
+```
+
+Verification is read-only. It requires a regular owner-private file, full
+SQLite integrity, all expected tables, supported schema and format versions,
+exactly one completed typed metadata row, zero sessions, and type-specific
+empty history for configuration artifacts, then streams its byte count and
+SHA-256. It never migrates, restores, or changes the artifact.
+
+With the server active, verification uses the owner-only control socket and
+records `backup.verify` with a safe basename, type on success, outcome, and
+closed category. With the server stopped, verification runs directly and
+cannot audit because it does not open or modify the active database. Failures
+do not print the submitted path, SQLite details, hashes, or artifact contents.
+
 ## Contents and protection
 
 A full backup contains:
@@ -71,8 +122,9 @@ A full backup contains:
 - schema migrations; and
 - format/type/completion metadata.
 
-It contains no browser session rows and no recoverable plaintext ingestion
-token because Siftail never stores plaintext tokens. Deleted source content can
+Neither type contains browser session rows or a recoverable plaintext ingestion
+token because Siftail never stores plaintext tokens. Both contain password and
+ingestion-token hashes and must be protected as sensitive. Deleted source content can
 still exist in older backups, host snapshots, or storage free space; Siftail
 does not claim forensic erasure.
 
@@ -111,3 +163,19 @@ Three one-second Fedora/i5 runs measured a 95.762 ms/op median
 bytes/op, and 1,086–1,088 allocations/op. These local results are not
 guarantees for larger databases, slower synchronization, concurrent write
 rates, filesystems, storage hardware, encryption, or failure conditions.
+
+The configuration benchmark uses the same 10,000-event source but copies one
+administrator, Server, token, source, and their configuration into an
+approximately 140 KiB artifact:
+
+```bash
+go test -run '^$' -bench '^BenchmarkCreateConfigurationBackup$' \
+  -benchtime=1s -count=3 -benchmem ./internal/backup
+```
+
+Three one-second runs measured a 7.353 ms/op median
+(7.323–7.382 ms/op), 19.50 MB/s median artifact throughput,
+244,073–244,212 bytes/op, and 2,291 allocations/op. The excluded event volume
+does not enter the row copier, but source SQLite snapshot and verification cost,
+configuration cardinality, filesystem synchronization, storage, and encryption
+still affect real deployments.

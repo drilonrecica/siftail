@@ -10,7 +10,7 @@ import (
 	"github.com/drilonrecica/siftail/internal/database"
 )
 
-var requiredFullTables = []string{
+var requiredTables = []string{
 	"administrators",
 	"container_instances",
 	"ingestion_tokens",
@@ -67,7 +67,8 @@ func Verify(ctx context.Context, path string) (Result, error) {
 	); err != nil {
 		return Result{}, errors.New("backup metadata is invalid")
 	}
-	if formatVersion != FormatVersion || result.Type != TypeFull ||
+	if formatVersion != FormatVersion ||
+		(result.Type != TypeFull && result.Type != TypeConfiguration) ||
 		complete != 1 || result.SchemaVersion < 1 ||
 		result.SchemaVersion > database.MaxSchemaVersion {
 		return Result{}, errors.New("backup metadata is incompatible")
@@ -78,7 +79,7 @@ func Verify(ctx context.Context, path string) (Result, error) {
 	).Scan(&schemaVersion); err != nil || schemaVersion != result.SchemaVersion {
 		return Result{}, errors.New("backup schema metadata is inconsistent")
 	}
-	for _, table := range requiredFullTables {
+	for _, table := range requiredTables {
 		var count int
 		if err := db.QueryRowContext(ctx, `SELECT count(*) FROM sqlite_schema
 			WHERE type='table' AND name=?`, table).Scan(&count); err != nil ||
@@ -91,6 +92,20 @@ func Verify(ctx context.Context, path string) (Result, error) {
 		ctx, "SELECT count(*) FROM sessions",
 	).Scan(&sessions); err != nil || sessions != 0 {
 		return Result{}, errors.New("backup contains browser sessions")
+	}
+	if result.Type == TypeConfiguration {
+		for _, table := range []string{
+			"log_events", "container_instances", "security_audit_events",
+		} {
+			var count int
+			if err := db.QueryRowContext(
+				ctx, "SELECT count(*) FROM "+table,
+			).Scan(&count); err != nil || count != 0 {
+				return Result{}, errors.New(
+					"configuration backup contains excluded history",
+				)
+			}
+		}
 	}
 	result.CreatedAt = time.UnixMicro(createdAtUS).UTC()
 	result.Name = info.Name()
