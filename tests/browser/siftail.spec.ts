@@ -20,6 +20,81 @@ async function login(page: Page): Promise<void> {
   await expect(page.locator(".log-row")).toHaveCount(200);
 }
 
+let liveToken = "";
+
+function getLiveToken(): string {
+  if (liveToken) return liveToken;
+  const state = readState();
+  const output = execFileSync(
+    state.binary,
+    ["token", "create", "--server", "1", "--name", "browser-live"],
+    {
+      env: siftailEnvironment({ SIFTAIL_DATA_DIR: state.dataDirectory }),
+      encoding: "utf8",
+    },
+  );
+  liveToken = output.match(/^token \(shown once\): (.+)$/m)?.[1] ?? "";
+  if (!liveToken) throw new Error("Live test token was not returned");
+  return liveToken;
+}
+
+async function ingestLive(messages: string[]): Promise<void> {
+  const state = readState();
+  const now = Date.now();
+  const response = await fetch(`http://${state.ingestAddress}/api/v1/ingest`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${getLiveToken()}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(messages.map((message, index) => ({
+      timestamp: new Date(now + index).toISOString(),
+      project: "browser-project",
+      environment: "test",
+      application: "api",
+      service: "web",
+      container_id: "api-container",
+      container_name: "api-1",
+      stream: index % 2 === 0 ? "stderr" : "stdout",
+      level: index % 3 === 0 ? "ERROR" : "INFO",
+      log: message,
+    }))),
+  });
+  if (response.status !== 204) {
+    throw new Error(`Live fixture ingestion returned HTTP ${response.status}`);
+  }
+}
+
+async function trackEventSources(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const NativeEventSource = window.EventSource;
+    const stats = { active: 0, created: 0, closed: 0 };
+    class TrackedEventSource extends NativeEventSource {
+      private trackedClosed = false;
+
+      constructor(url: string | URL, init?: EventSourceInit) {
+        super(url, init);
+        stats.active += 1;
+        stats.created += 1;
+      }
+
+      override close(): void {
+        if (!this.trackedClosed) {
+          this.trackedClosed = true;
+          stats.active -= 1;
+          stats.closed += 1;
+        }
+        super.close();
+      }
+    }
+    Object.defineProperty(window, "EventSource", {
+      configurable: true,
+      value: TrackedEventSource,
+    });
+    Object.defineProperty(window, "__siftailEventSourceStats", { value: stats });
+  });
+}
+
 test("login, canonical History default, security headers, and logout", async ({ page }) => {
   const loginResponse = await page.goto("/login");
   expect(loginResponse?.headers()["content-security-policy"]).toContain("default-src 'self'");
@@ -106,6 +181,161 @@ test("inline details remain hostile text and preserve focus and clipboard conten
   await detail.getByRole("button", { name: "Collapse details" }).click();
   await expect(toggle).toBeFocused();
   await expect(toggle).toHaveAttribute("aria-expanded", "false");
+});
+
+test("Live pause, pending, clear-view, filters, reconnect, focus, and safe rendering", async ({
+  page,
+}) => {
+  await trackEventSources(page);
+  await login(page);
+  await page.getByRole("tab", { name: "Live" }).click();
+  await expect(page).toHaveURL(/mode=live/);
+  await expect(page.locator("[data-live-status]")).toHaveText("Live");
+  await expect(page.locator("[data-live-empty]")).toBeVisible();
+
+  const hostile = "<img src=x onerror=window.siftailLiveXSS=true> live-hostile";
+  await ingestLive([hostile]);
+  await expect(page.locator("#live-rows .log-row")).toHaveCount(1);
+  await expect(page.locator("#live-rows .row-message")).toHaveText(hostile);
+  await expect(page.locator("#live-rows img")).toHaveCount(0);
+  expect(await page.evaluate(
+    () => (window as Window & { siftailLiveXSS?: boolean }).siftailLiveXSS,
+  )).toBeUndefined();
+
+  const row = page.locator("#live-rows .log-row").first();
+  await row.focus();
+  await page.keyboard.press("Enter");
+  await expect(row.locator(".event-detail")).toBeFocused();
+  await expect(row.locator(".event-detail")).toContainText(hostile);
+  await row.getByRole("button", { name: "Collapse details" }).click();
+
+  await page.getByRole("button", { name: "Pause" }).click();
+  await expect(page.locator("[data-live-status]")).toHaveText("Paused");
+  await expect(page.locator("[data-live-notices]").getByText(
+    "Live view paused. Logs are still being stored.",
+  )).toBeVisible();
+  await ingestLive(["paused-one", "paused-two", "paused-three"]);
+  await expect(page.locator("#live-rows .log-row")).toHaveCount(1);
+  await expect(page.locator("[data-live-pending]")).toContainText("3 new events");
+  await page.getByRole("button", { name: "Resume" }).click();
+  await expect(page.locator("#live-rows .log-row")).toHaveCount(4);
+  await expect(page.locator("[data-live-pending]")).toBeHidden();
+
+  await page.getByRole("button", { name: "Clear view" }).click();
+  await expect(page.locator("#live-rows .log-row")).toHaveCount(0);
+  await expect(page.getByText(/Persisted logs were not deleted/)).toBeAttached();
+  await page.getByRole("tab", { name: "History" }).click();
+  await expect(page.locator(".log-row").filter({ hasText: "paused-three" })).toHaveCount(1);
+  await page.getByRole("tab", { name: "Live" }).click();
+  await expect(page.locator("[data-live-status]")).toHaveText("Live");
+
+  await page.locator("#live-contains-filter").fill("filter-match");
+  await expect(page).toHaveURL(/contains=filter-match/);
+  await ingestLive(["ignored-after-filter", "filter-match visible"]);
+  await expect(page.locator("#live-rows .log-row")).toHaveCount(1);
+  await expect(page.locator("#live-rows .row-message")).toHaveText("filter-match visible");
+  await page.getByRole("button", { name: "Reconnect" }).click();
+  await expect(page.locator("[data-live-notices]").getByText(/manually reconnected/)).toBeVisible();
+  await expect.poll(async () => page.evaluate(
+    () => (window as Window & {
+      __siftailEventSourceStats: { active: number };
+    }).__siftailEventSourceStats.active,
+  )).toBe(1);
+});
+
+test("Live enforces rendered and pending caps and does not steal scroll", async ({ page }) => {
+  test.setTimeout(90_000);
+  await login(page);
+  await page.getByRole("tab", { name: "Live" }).click();
+  await expect(page.locator("[data-live-status]")).toHaveText("Live");
+
+  let delivered = 0;
+  for (let batch = 0; batch < 11; batch += 1) {
+    const messages = Array.from({ length: 100 }, (_, index) =>
+      `render-cap-${batch}-${index}`);
+    await ingestLive(messages);
+    delivered += messages.length;
+    await expect(page.locator("#live-rows .log-row")).toHaveCount(Math.min(delivered, 1000));
+  }
+  await expect(page.locator("#live-rows .log-row")).toHaveCount(1000);
+  await expect(page.locator("[data-live-notices]").getByText(/Older rows were removed/)).toBeVisible();
+
+  const scroll = page.locator("[data-live-scroll]");
+  await scroll.evaluate((element) => {
+    element.scrollTop = 0;
+    element.dispatchEvent(new Event("scroll"));
+  });
+  await ingestLive(["scrolled-away-one", "scrolled-away-two"]);
+  await expect(page.locator("#live-rows .log-row")).toHaveCount(1000);
+  await expect(page.locator("[data-live-pending]")).toContainText("2 new events");
+  await page.locator("[data-live-pending]").click();
+  await expect(page.locator("#live-rows .row-message").last()).toHaveText("scrolled-away-two");
+
+  await page.getByRole("button", { name: "Pause" }).click();
+  for (let batch = 0; batch < 21; batch += 1) {
+    const count = batch === 20 ? 1 : 100;
+    await ingestLive(Array.from({ length: count }, (_, index) =>
+      `pending-cap-${batch}-${index}`));
+    if (batch < 20) {
+      await expect(page.locator("[data-live-pending]")).toContainText(
+        `${(batch + 1) * 100} new events`,
+      );
+    }
+  }
+  await expect(page.locator("[data-live-notices]").getByText(
+    /Live view was truncated while you were away/,
+  )).toBeVisible();
+  await expect(page.locator("#live-rows .log-row")).toHaveCount(1000);
+});
+
+test("Live keyboard, themes, reduced motion, mobile, axe, and online invalidation", async ({
+  page,
+}) => {
+  await login(page);
+  await page.keyboard.press("l");
+  await expect(page).toHaveURL(/mode=live/);
+  await expect(page.locator("[data-live-status]")).toHaveText("Live");
+  await page.keyboard.press("Space");
+  await expect(page.locator("[data-live-status]")).toHaveText("Paused");
+  await page.keyboard.press("Space");
+  await expect(page.locator("[data-live-status]")).toHaveText("Live");
+
+  await page.locator("[data-theme-select]").selectOption("dark");
+  let results = await new AxeBuilder({ page })
+    .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"])
+    .analyze();
+  expect(results.violations.map((violation) => violation.id)).toEqual([]);
+  await page.screenshot({
+    path: ".playwright-artifacts/live-desktop-dark.png",
+    fullPage: true,
+  });
+  await page.locator("[data-theme-select]").selectOption("light");
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  const behavior = await page.locator("[data-live-scroll]").evaluate(
+    (element) => getComputedStyle(element).scrollBehavior,
+  );
+  expect(behavior).not.toBe("smooth");
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await page.evaluate(
+    () => document.documentElement.scrollWidth > window.innerWidth,
+  )).toBe(false);
+  await expect(page.getByRole("button", { name: "Pause" })).toBeVisible();
+  await page.screenshot({
+    path: ".playwright-artifacts/live-mobile-light.png",
+    fullPage: true,
+  });
+  results = await new AxeBuilder({ page })
+    .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"])
+    .analyze();
+  expect(results.violations.map((violation) => violation.id)).toEqual([]);
+
+  const state = readState();
+  execFileSync(state.binary, ["sessions", "revoke-all"], {
+    env: siftailEnvironment({ SIFTAIL_DATA_DIR: state.dataDirectory }),
+    encoding: "utf8",
+  });
+  await expect(page).toHaveURL(/\/login\?return=.*expired=1/, { timeout: 10_000 });
 });
 
 test("keyboard, themes, reduced motion, mobile inspection, and axe smoke", async ({ page }) => {

@@ -330,8 +330,7 @@ func TestLiveStreamConnectionLimitAndOverflowControl(t *testing.T) {
 		t.Fatal("handler did not begin blocked log write")
 	}
 	if !broker.TryPublish([]logs.CommittedEvent{
-		authLiveEvent(2, 1, logs.LevelInfo, logs.StreamStdout, "two"),
-		authLiveEvent(3, 1, logs.LevelInfo, logs.StreamStdout, "three"),
+		authLiveEvent(2, 1, logs.LevelInfo, logs.StreamStdout, strings.Repeat("x", 600<<10)),
 	}) {
 		t.Fatal("overflow batch rejected by broker ingress")
 	}

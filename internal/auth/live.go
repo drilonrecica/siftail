@@ -186,9 +186,7 @@ func (b *Browser) liveStream(w http.ResponseWriter, r *http.Request) {
 }
 
 func (b *Browser) validLiveOrigin(r *http.Request) bool {
-	allowed := b.allowedOrigin(r)
-	origin := r.Header.Get("Origin")
-	return allowed != "" && origin != "" && origin == allowed
+	return b.validRequestOrigin(r)
 }
 
 func acceptsEventStream(value string) bool {

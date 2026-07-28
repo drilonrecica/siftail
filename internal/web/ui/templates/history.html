@@ -2,7 +2,7 @@
 <section id="history-region" class="workspace-panel history-region" aria-labelledby="history-tab" aria-busy="false">
   <div class="mode-tabs" role="tablist" aria-label="Log mode">
     <a id="history-tab" role="tab" aria-selected="true" href="{{.CanonicalURL}}">History</a>
-    <span role="tab" aria-selected="false" aria-disabled="true">Live</span>
+    <a id="live-tab" role="tab" aria-selected="false" href="/logs?mode=live">Live</a>
   </div>
   {{if .Error}}
   <div class="history-error" role="alert">

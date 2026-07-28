@@ -79,6 +79,7 @@ func TestShellTemplateUsesLocalCSPCompatibleAssets(t *testing.T) {
 		`href="/assets/app.css"`,
 		`src="/assets/htmx-2.0.10.min.js"`,
 		`src="/assets/app.js"`,
+		`src="/assets/live.js"`,
 		`hx-history="false"`,
 		`name="htmx-config"`,
 		`"[45].."`,
@@ -95,6 +96,44 @@ func TestShellTemplateUsesLocalCSPCompatibleAssets(t *testing.T) {
 		if strings.Contains(body, forbidden) {
 			t.Errorf("shell contains CSP-incompatible or unsafe %q", forbidden)
 		}
+	}
+}
+
+func TestLiveShellRendersExplicitEscapedBoundedWorkspace(t *testing.T) {
+	renderer := New()
+	response := httptest.NewRecorder()
+	view := LiveView{
+		CanonicalURL:  `/logs?mode=live&amp;contains=%3Cunsafe%3E`,
+		StreamURL:     `/logs/live/stream?contains=%3Cunsafe%3E`,
+		HistoryURL:    "/logs",
+		SourceSummary: `API <unsafe>`,
+		Sources: []SelectOption{{
+			Value: "1", Label: `API <unsafe>`, Selected: true,
+		}},
+		Levels:       []FilterChoice{{ID: "level-error", Value: "error", Label: "error", Checked: true}},
+		Streams:      []FilterChoice{{ID: "stream-stderr", Value: "stderr", Label: "stderr", Checked: true}},
+		LevelsValue:  "error",
+		StreamsValue: "stderr",
+		Contains:     `<script>alert(1)</script>`,
+	}
+	if err := renderer.Shell(response, http.StatusOK, ShellView{Mode: "live", Live: view}); err != nil {
+		t.Fatal(err)
+	}
+	body := response.Body.String()
+	for _, want := range []string{
+		`data-live-workspace`, `data-stream-url=`,
+		`aria-selected="true" href=`, `data-live-pause`, `data-live-newest`,
+		`data-live-clear`, `>Clear view<`, `data-live-reconnect`,
+		`data-live-pending hidden`, `aria-label="Live log events"`,
+		`API &lt;unsafe&gt;`, `&lt;script&gt;alert(1)&lt;/script&gt;`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("Live shell missing %q", want)
+		}
+	}
+	if strings.Contains(body, `<script>alert(1)</script>`) ||
+		strings.Contains(body, "Clear logs") {
+		t.Fatal("Live shell emitted unsafe content or destructive copy")
 	}
 }
 
@@ -197,6 +236,7 @@ func TestEmbeddedAssetsTypesIntegrityAndSafety(t *testing.T) {
 	cases := map[string]string{
 		"app.css":            "text/css; charset=utf-8",
 		"app.js":             "text/javascript; charset=utf-8",
+		"live.js":            "text/javascript; charset=utf-8",
 		"favicon.svg":        "image/svg+xml",
 		"htmx-2.0.10.min.js": "text/javascript; charset=utf-8",
 	}
@@ -245,6 +285,26 @@ func TestEmbeddedAssetsTypesIntegrityAndSafety(t *testing.T) {
 		!strings.Contains(string(appJS), "navigator.clipboard.writeText(source.textContent)") ||
 		!strings.Contains(string(appJS), "replaceChildren()") {
 		t.Fatal("application JavaScript violates DOM/history constraints")
+	}
+	liveJS, err := files.ReadFile("assets/live.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, forbidden := range []string{".innerHTML =", "insertAdjacentHTML", "document.write"} {
+		if strings.Contains(string(liveJS), forbidden) {
+			t.Fatalf("Live JavaScript contains unsafe DOM API %q", forbidden)
+		}
+	}
+	for _, required := range []string{
+		"const renderedLimit = 1000",
+		"const pendingLimit = 2000",
+		"message.textContent",
+		"eventSource.close()",
+		`window.addEventListener("pagehide"`,
+	} {
+		if !strings.Contains(string(liveJS), required) {
+			t.Errorf("Live JavaScript missing lifecycle constraint %q", required)
+		}
 	}
 	css, err := files.ReadFile("assets/app.css")
 	if err != nil {

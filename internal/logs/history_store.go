@@ -90,6 +90,11 @@ type SourceCatalog struct {
 	Containers   []ContainerOption
 }
 
+type LiveSourceOption struct {
+	ID    int64
+	Label string
+}
+
 const historyEventColumns = `SELECT
 	e.id, e.event_at_us, e.received_at_us,
 	e.source_id, s.server_id, server.name,
@@ -342,7 +347,6 @@ func (s *Store) Catalog(ctx context.Context, scope SourceScope) (SourceCatalog, 
 	if len(catalog.Servers) > MaxCatalogOptions {
 		return SourceCatalog{}, ErrCatalogTooLarge
 	}
-
 	if catalog.Projects, err = s.catalogSourceOptions(ctx, scope, 0); err != nil {
 		return SourceCatalog{}, err
 	}
@@ -359,6 +363,46 @@ func (s *Store) Catalog(ctx context.Context, scope SourceScope) (SourceCatalog, 
 		return SourceCatalog{}, err
 	}
 	return catalog, nil
+}
+
+// LiveSources returns the bounded stable-source choices used only by the Live
+// workspace, avoiding extra catalog work on every History query.
+func (s *Store) LiveSources(ctx context.Context) ([]LiveSourceOption, error) {
+	if s == nil || s.db == nil {
+		return nil, errors.New("history store is unavailable")
+	}
+	sourceRows, err := s.db.QueryContext(ctx, `SELECT s.id,
+		CASE WHEN s.alias IS NOT NULL
+			THEN s.alias || ' · ' || server.name
+			ELSE server.name || ' / ' || s.project_label || ' / ' ||
+				s.environment_label || ' / ' || s.application_label || ' / ' ||
+				s.service_label
+		END
+		FROM sources AS s
+		JOIN servers AS server ON server.id=s.server_id
+		ORDER BY 2 COLLATE BINARY, s.id
+		LIMIT ?`, MaxCatalogOptions+1)
+	if err != nil {
+		return nil, historyReadError(ctx, "list Live sources", err)
+	}
+	options := make([]LiveSourceOption, 0)
+	for sourceRows.Next() {
+		var option LiveSourceOption
+		if err := sourceRows.Scan(&option.ID, &option.Label); err != nil {
+			sourceRows.Close()
+			return nil, fmt.Errorf("scan Live source option: %w", err)
+		}
+		options = append(options, option)
+	}
+	if err := sourceRows.Err(); err != nil {
+		sourceRows.Close()
+		return nil, historyReadError(ctx, "list Live sources", err)
+	}
+	sourceRows.Close()
+	if len(options) > MaxCatalogOptions {
+		return nil, ErrCatalogTooLarge
+	}
+	return options, nil
 }
 
 func (s *Store) catalogSourceOptions(

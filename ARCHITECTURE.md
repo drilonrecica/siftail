@@ -1168,10 +1168,12 @@ deleted rows.
 
 ### 17.5 Security
 
-SSE requires a normal authenticated browser session, an exact same-origin
-`Origin`, and `Accept: text/event-stream`. CSRF is not required for the read-only
-GET stream. Responses are `no-store` and carry the ordinary browser security
-headers.
+SSE requires a normal authenticated browser session, exact same-origin
+`Origin` or `Referer` validation, and `Accept: text/event-stream`. Chromium may
+omit `Origin` on a same-origin EventSource GET, so the validated same-origin
+`Referer` path remains required rather than weakening the check. CSRF is not
+required for the read-only GET stream. Responses are `no-store` and carry the
+ordinary browser security headers.
 
 ---
 

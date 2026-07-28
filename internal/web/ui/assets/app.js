@@ -247,6 +247,11 @@
       document.querySelector('input[name="contains"]')?.focus();
       return;
     }
+    if (event.key.toLowerCase() === "l" && !event.ctrlKey && !event.metaKey) {
+      event.preventDefault();
+      window.location.assign("/logs?mode=live");
+      return;
+    }
     if (
       event.key === "/" ||
       ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k")

@@ -1,0 +1,72 @@
+{{define "live-region.html"}}
+<section id="live-region" class="workspace-panel live-region" aria-labelledby="live-tab"
+         data-live-workspace data-stream-url="{{.StreamURL}}">
+  <div class="mode-tabs" role="tablist" aria-label="Log mode">
+    <a id="history-tab" role="tab" aria-selected="false" href="{{.HistoryURL}}">History</a>
+    <a id="live-tab" role="tab" aria-selected="true" href="{{.CanonicalURL}}">Live</a>
+  </div>
+  <details class="history-filter-disclosure" open>
+    <summary>Filters</summary>
+    <form id="live-filter-form" class="history-form live-form" method="get" action="/logs" data-live-filters>
+      <input type="hidden" name="mode" value="live">
+      <input type="hidden" name="levels" value="{{.LevelsValue}}" data-list-value="levels">
+      <input type="hidden" name="streams" value="{{.StreamsValue}}" data-list-value="streams">
+      <fieldset class="filter-group live-source-filter">
+        <legend>Source</legend>
+        <label>Source
+          <select id="live-source-filter" name="source">
+            <option value="">All sources</option>
+            {{range .Sources}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}
+          </select>
+        </label>
+      </fieldset>
+      <fieldset class="filter-group choice-filters">
+        <legend>Levels</legend>
+        <div class="filter-shortcuts" aria-label="Level shortcuts">
+          <button type="button" data-choice-preset="levels" data-values="error,fatal">Errors</button>
+          <button type="button" data-choice-preset="levels" data-values="warn,error,fatal">Problems</button>
+          <button type="button" data-choice-preset="levels" data-values="*">All</button>
+        </div>
+        <div class="choice-list">
+          {{range .Levels}}<label for="{{.ID}}"><input id="{{.ID}}" type="checkbox" value="{{.Value}}" data-list-filter="levels"{{if .Checked}} checked{{end}}> <span class="severity severity-{{.Value}}">{{.Label}}</span></label>{{end}}
+        </div>
+      </fieldset>
+      <fieldset class="filter-group choice-filters">
+        <legend>Streams</legend>
+        <div class="choice-list">
+          {{range .Streams}}<label for="{{.ID}}"><input id="{{.ID}}" type="checkbox" value="{{.Value}}" data-list-filter="streams"{{if .Checked}} checked{{end}}> {{.Label}}</label>{{end}}
+        </div>
+      </fieldset>
+      <fieldset class="filter-group text-filters live-text-filter">
+        <legend>Message text</legend>
+        <label>Contains
+          <input id="live-contains-filter" name="contains" value="{{.Contains}}" maxlength="512"
+                 placeholder="Contains message text" data-text-filter>
+        </label>
+      </fieldset>
+      <button class="button button-primary apply-filters" type="submit">Apply filters</button>
+    </form>
+  </details>
+  <div class="live-toolbar">
+    <div class="live-status" role="status" aria-live="polite">
+      <span class="live-status-dot" aria-hidden="true"></span>
+      <span data-live-status>Connecting</span>
+    </div>
+    <button class="button button-quiet" type="button" data-live-pause>Pause</button>
+    <button class="button button-quiet" type="button" data-live-newest>Jump to newest</button>
+    <button class="button button-quiet" type="button" data-live-clear>Clear view</button>
+    <button class="button button-quiet" type="button" data-live-reconnect>Reconnect</button>
+  </div>
+  <div class="live-notices" aria-live="polite" data-live-notices></div>
+  <div class="live-list-wrap" data-live-scroll>
+    <div id="live-rows" class="log-list" tabindex="0" aria-label="Live log events">
+      <div class="empty-state" data-live-empty>
+        <h2>Waiting for new events from this source</h2>
+        <p>Live events will appear here after they are committed.</p>
+      </div>
+    </div>
+  </div>
+  <button class="button live-new-events" type="button" data-live-pending hidden>↓ 0 new events</button>
+  <p class="visually-hidden" role="status" aria-live="polite" data-live-announcement></p>
+</section>
+{{end}}

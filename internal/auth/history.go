@@ -15,6 +15,10 @@ import (
 )
 
 func (b *Browser) historyPage(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Query().Get("mode") == "live" {
+		b.livePage(w, r)
+		return
+	}
 	session, _ := BrowserSessionFromContext(r.Context())
 	values := cloneURLValues(r.URL.Query())
 	query, err := logs.ParseHistoryQuery(values, b.now())
@@ -36,6 +40,7 @@ func (b *Browser) historyPage(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := b.ui.Shell(w, http.StatusOK, webui.ShellView{
 		CSRFToken: session.CSRFToken,
+		Mode:      "history",
 		History:   view,
 	}); err != nil {
 		http.Error(w, "Logs are temporarily unavailable.", http.StatusInternalServerError)
@@ -235,6 +240,7 @@ func (b *Browser) renderHistoryShellError(
 	}
 	if err := b.ui.Shell(w, status, webui.ShellView{
 		CSRFToken: csrfToken,
+		Mode:      "history",
 		History:   view,
 	}); err != nil {
 		http.Error(w, "Logs are temporarily unavailable.", http.StatusInternalServerError)

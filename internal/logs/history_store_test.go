@@ -208,6 +208,13 @@ func TestHistoryCatalogCascadesAndIncludesInactiveSources(t *testing.T) {
 	if got := len(all.Servers); got != 2 {
 		t.Fatalf("servers = %d", got)
 	}
+	liveSources, err := fixture.store.LiveSources(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := len(liveSources); got != 3 {
+		t.Fatalf("Live sources = %d: %#v", got, liveSources)
+	}
 	if !containsSourceOption(all.Projects, "inactive-project") {
 		t.Fatalf("inactive source missing from projects: %#v", all.Projects)
 	}

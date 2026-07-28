@@ -27,7 +27,9 @@ type LoginView struct {
 
 type ShellView struct {
 	CSRFToken string
+	Mode      string
 	History   HistoryView
+	Live      LiveView
 }
 
 type SelectOption struct {
@@ -128,6 +130,19 @@ type HistoryView struct {
 	Announcement   string
 }
 
+type LiveView struct {
+	CanonicalURL  string
+	StreamURL     string
+	HistoryURL    string
+	SourceSummary string
+	Sources       []SelectOption
+	Levels        []FilterChoice
+	Streams       []FilterChoice
+	LevelsValue   string
+	StreamsValue  string
+	Contains      string
+}
+
 func New() *Renderer {
 	return &Renderer{templates: template.Must(template.ParseFS(files, "templates/*.html"))}
 }
@@ -181,6 +196,7 @@ func (r *Renderer) Asset(w http.ResponseWriter, request *http.Request) {
 	contentTypes := map[string]string{
 		"app.css":            "text/css; charset=utf-8",
 		"app.js":             "text/javascript; charset=utf-8",
+		"live.js":            "text/javascript; charset=utf-8",
 		"favicon.svg":        "image/svg+xml",
 		"htmx-2.0.10.min.js": "text/javascript; charset=utf-8",
 	}

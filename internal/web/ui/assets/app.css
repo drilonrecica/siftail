@@ -549,6 +549,92 @@ code {
   font-size: 0.85rem;
 }
 
+.live-form {
+  grid-template-columns: repeat(10, minmax(0, 1fr));
+}
+
+.live-source-filter {
+  grid-column: span 3;
+}
+
+.live-text-filter {
+  grid-column: span 2;
+}
+
+.live-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.live-status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 7rem;
+  margin-right: auto;
+  color: var(--text-secondary);
+  font-weight: 700;
+}
+
+.live-status-dot {
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 50%;
+  background: var(--text-muted);
+}
+
+[data-live-state="live"] .live-status-dot {
+  background: var(--accent-primary);
+}
+
+[data-live-state="paused"] .live-status-dot,
+[data-live-state="truncated"] .live-status-dot {
+  background: var(--accent-secondary);
+}
+
+.live-notices:empty {
+  display: none;
+}
+
+.live-notices {
+  display: grid;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.live-notice {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+}
+
+.live-list-wrap {
+  position: relative;
+  min-height: 18rem;
+  max-height: min(65vh, 52rem);
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.live-new-events {
+  position: sticky;
+  z-index: 2;
+  bottom: var(--space-3);
+  display: block;
+  margin: calc(-1 * (var(--space-6) + var(--space-3))) auto var(--space-3);
+  box-shadow: var(--shadow-sm);
+}
+
+.live-new-events[hidden] {
+  display: none;
+}
+
 .log-list {
   min-height: 12rem;
 }
@@ -853,6 +939,7 @@ code {
   }
 
   .source-filters,
+  .live-source-filter,
   .time-filters,
   .choice-filters,
   .text-filters,
@@ -862,6 +949,7 @@ code {
   }
 
   .source-filters,
+  .live-source-filter,
   .structured-filters {
     grid-template-columns: repeat(2, minmax(8rem, 1fr));
   }
@@ -926,6 +1014,7 @@ code {
   }
 
   .source-filters label,
+  .live-source-filter label,
   .time-filters label,
   .structured-filters label {
     grid-column: 1;

@@ -10,6 +10,7 @@
   <link rel="stylesheet" href="/assets/app.css">
   <script src="/assets/htmx-2.0.10.min.js" defer></script>
   <script src="/assets/app.js" defer></script>
+  <script src="/assets/live.js" defer></script>
 </head>
 <body hx-history="false">
   <a class="skip-link" href="#main-content">Skip to main content</a>
@@ -42,12 +43,14 @@
   <main id="main-content" class="workspace">
     <header class="workspace-heading">
       <div>
-        <p class="eyebrow">History</p>
+        <p class="eyebrow">{{if eq .Mode "live"}}Live{{else}}History{{end}}</p>
         <h1>Logs</h1>
       </div>
-      <p class="workspace-context">{{.History.SourceSummary}} · {{.History.RangeSummary}}</p>
+      {{if eq .Mode "live"}}<p class="workspace-context">{{.Live.SourceSummary}}</p>
+      {{else}}<p class="workspace-context">{{.History.SourceSummary}} · {{.History.RangeSummary}}</p>{{end}}
     </header>
-    {{template "history-region.html" .History}}
+    {{if eq .Mode "live"}}{{template "live-region.html" .Live}}
+    {{else}}{{template "history-region.html" .History}}{{end}}
   </main>
 </body>
 </html>{{end}}
