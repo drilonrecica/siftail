@@ -145,6 +145,47 @@ func TestSettingsShellRendersBoundedAccessibleRetentionForm(t *testing.T) {
 	}
 }
 
+func TestStatusShellRendersSanitizedTextualOperationalState(t *testing.T) {
+	renderer := New()
+	response := httptest.NewRecorder()
+	view := StatusView{
+		Severity: "Degraded", Version: "dev · unknown", Uptime: "1h2m3s",
+		Architecture: "linux/amd64", UIReady: "ready", IngestionReady: "not ready",
+		DatabaseSize: "2.0 MiB", WALSize: "1.0 MiB", SHMSize: "32.0 KiB",
+		DatabaseLimit: "4.00 GiB", DatabaseUsage: 1,
+		OldestEvent: "old", NewestEvent: "new", RetentionAge: "14 days",
+		LastCleanup: "now", LastCleanupResult: "10 age-deleted",
+		EventsToday: "12", RecentRate: "3 events/min (last 60 seconds)",
+		QueuedEvents: "1", QueuedBytes: "2.0 KiB", RejectedBatches: "4",
+		AcceptedEvents: "12", LastIngest: "now", LastDatabaseError: "storage_full",
+		Diagnostics: []StatusDiagnosticView{{
+			Time: "now", Category: "storage_full",
+			Summary: `<script>private-payload</script>`,
+		}},
+	}
+	if err := renderer.Shell(response, http.StatusOK, ShellView{
+		Mode: "status", Status: view,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	body := response.Body.String()
+	for _, want := range []string{
+		`aria-current="page">Status</a>`,
+		`data-severity="Degraded"`,
+		`<progress id="database-usage" max="100" value="1">`,
+		`Runtime`, `Storage`, `Ingestion`, `Diagnostics`,
+		`&lt;script&gt;private-payload&lt;/script&gt;`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("Status shell missing %q", want)
+		}
+	}
+	if strings.Contains(body, `<script>private-payload`) ||
+		strings.Contains(body, "canvas") || strings.Contains(body, "<svg") {
+		t.Fatal("Status shell emitted unsafe content or dashboard chart")
+	}
+}
+
 func TestLiveShellRendersExplicitEscapedBoundedWorkspace(t *testing.T) {
 	renderer := New()
 	response := httptest.NewRecorder()

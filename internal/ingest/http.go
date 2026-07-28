@@ -42,11 +42,17 @@ type Limits struct {
 }
 
 type Handler struct {
-	tokens  *sources.Store
-	decoder Decoder
-	queue   *Queue
-	limits  Limits
-	now     func() time.Time
+	tokens   *sources.Store
+	decoder  Decoder
+	queue    *Queue
+	observer Observer
+	limits   Limits
+	now      func() time.Time
+}
+
+func (h *Handler) WithObserver(observer Observer) *Handler {
+	h.observer = observer
+	return h
 }
 
 func (h *Handler) WithQueue(queue *Queue) *Handler {
@@ -71,6 +77,17 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeSafe(w, http.StatusMethodNotAllowed)
 		return
 	}
+	outcome := &ingestOutcomeWriter{ResponseWriter: w, status: http.StatusOK}
+	w = outcome
+	writerOutcome := false
+	defer func() {
+		if h.observer != nil && !writerOutcome &&
+			outcome.status != http.StatusNoContent && outcome.status >= 400 {
+			h.observer.RecordIngestRejected(
+				categoryForStatus(outcome.status), false, h.now().UTC(),
+			)
+		}
+	}()
 	token, ok := bearerToken(r.Header.Values("Authorization"))
 	if !ok {
 		writeSafe(w, http.StatusUnauthorized)
@@ -136,6 +153,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		select {
 		case err := <-writeBatch.Result:
+			writerOutcome = true
 			if err != nil {
 				writeSafe(w, statusFor(err))
 				return
@@ -149,6 +167,23 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeSafe(w, statusFor(err))
+}
+
+type ingestOutcomeWriter struct {
+	http.ResponseWriter
+	status int
+}
+
+func (w *ingestOutcomeWriter) WriteHeader(status int) {
+	w.status = status
+	w.ResponseWriter.WriteHeader(status)
+}
+
+func (w *ingestOutcomeWriter) Write(body []byte) (int, error) {
+	if w.status == http.StatusOK {
+		w.WriteHeader(http.StatusOK)
+	}
+	return w.ResponseWriter.Write(body)
 }
 
 func bearerToken(values []string) (string, bool) {

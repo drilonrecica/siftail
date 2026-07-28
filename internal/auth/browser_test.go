@@ -17,6 +17,7 @@ import (
 	"github.com/drilonrecica/siftail/internal/retention"
 	"github.com/drilonrecica/siftail/internal/sessions"
 	"github.com/drilonrecica/siftail/internal/sources"
+	statusstate "github.com/drilonrecica/siftail/internal/status"
 	"github.com/drilonrecica/siftail/internal/web"
 )
 
@@ -25,13 +26,15 @@ type browserFixture struct {
 	browser     *Browser
 	sessions    *sessions.Store
 	coordinator *database.Coordinator
+	operational *statusstate.State
 	cancel      context.CancelFunc
 	done        chan error
 }
 
 func newBrowserFixture(t *testing.T, publicURL string, administrator bool) *browserFixture {
 	t.Helper()
-	db, err := database.Open(context.Background(), filepath.Join(t.TempDir(), "siftail.db"))
+	databasePath := filepath.Join(t.TempDir(), "siftail.db")
+	db, err := database.Open(context.Background(), databasePath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,14 +56,21 @@ func newBrowserFixture(t *testing.T, publicURL string, administrator bool) *brow
 	if err != nil {
 		t.Fatal(err)
 	}
+	retentionStore := retention.NewStore(db.Reader(), coordinator)
+	operationalState := statusstate.NewState(time.Now())
+	operationalState.SetWriterReady(true)
 	browser := NewBrowser(adminStore, sessionStore, BrowserConfig{
 		PublicURL: publicURL, HistoryStore: logs.NewHistoryStore(db.Reader(), codec),
 		SourceStore:    sources.NewCoordinatedStore(db.Reader(), coordinator),
-		RetentionStore: retention.NewStore(db.Reader(), coordinator),
+		RetentionStore: retentionStore,
+		StatusStore: statusstate.NewStore(
+			db.Reader(), databasePath, nil, retentionStore, operationalState,
+		),
 	})
 	fixture := &browserFixture{
 		db: db, browser: browser, sessions: sessionStore,
-		coordinator: coordinator, cancel: cancel, done: done,
+		coordinator: coordinator, operational: operationalState,
+		cancel: cancel, done: done,
 	}
 	t.Cleanup(func() {
 		coordinator.Close()

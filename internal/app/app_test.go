@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -15,7 +16,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/drilonrecica/siftail/internal/auth"
 	"github.com/drilonrecica/siftail/internal/config"
+	"github.com/drilonrecica/siftail/internal/ingest"
+	statusstate "github.com/drilonrecica/siftail/internal/status"
 )
 
 func testConfig(t *testing.T) config.Config {
@@ -108,6 +112,46 @@ func TestAppStartsListeners(t *testing.T) {
 
 	if _, err := os.Stat(filepath.Join(cfg.DataDir, "siftail-control.sock")); !os.IsNotExist(err) {
 		t.Fatal("control socket was not removed on shutdown")
+	}
+}
+
+func TestHealthLivenessAndReadinessTransitionsStayMinimal(t *testing.T) {
+	state := statusstate.NewState(time.Now())
+	state.SetWriterReady(true)
+	application := New(testConfig(t), testLogger(t))
+	application.status = state
+	application.browser = auth.NewBrowser(nil, nil, auth.BrowserConfig{})
+	handler := application.uiMux()
+
+	request := func(path string) *httptest.ResponseRecorder {
+		t.Helper()
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, path, nil))
+		return response
+	}
+	if live := request("/health/live"); live.Code != http.StatusOK ||
+		strings.TrimSpace(live.Body.String()) != "ok" {
+		t.Fatalf("healthy liveness = %d %q", live.Code, live.Body.String())
+	}
+	if ready := request("/health/ready"); ready.Code != http.StatusOK ||
+		strings.TrimSpace(ready.Body.String()) != "ok" {
+		t.Fatalf("healthy readiness = %d %q", ready.Code, ready.Body.String())
+	}
+	state.RecordIngestRejected(ingest.CategoryUnavailable, true, time.Now())
+	if live := request("/health/live"); live.Code != http.StatusOK {
+		t.Fatalf("busy liveness = %d", live.Code)
+	}
+	if ready := request("/health/ready"); ready.Code != http.StatusServiceUnavailable ||
+		strings.TrimSpace(ready.Body.String()) != "not ready" {
+		t.Fatalf("degraded readiness = %d %q", ready.Code, ready.Body.String())
+	}
+	state.RecordIngestAccepted(1, time.Now())
+	if ready := request("/health/ready"); ready.Code != http.StatusOK {
+		t.Fatalf("recovered readiness = %d", ready.Code)
+	}
+	application.shuttingDown.Store(true)
+	if ready := request("/health/ready"); ready.Code != http.StatusServiceUnavailable {
+		t.Fatalf("shutdown readiness = %d", ready.Code)
 	}
 }
 

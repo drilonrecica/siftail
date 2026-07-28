@@ -1,0 +1,66 @@
+{{define "status.html"}}
+<section class="workspace-panel status-workspace" aria-label="Siftail status">
+  {{if .Error}}<div class="form-error" role="alert">
+    <p>{{.Error}}</p>
+    {{if .ErrorRequestID}}<p>Request ID: <code>{{.ErrorRequestID}}</code></p>{{end}}
+  </div>{{else}}
+  <div class="status-summary" aria-label="Current severity">
+    <span class="status-indicator" data-severity="{{.Severity}}">{{.Severity}}</span>
+    <span>UI {{.UIReady}} · Ingestion {{.IngestionReady}}</span>
+  </div>
+
+  <div class="status-sections">
+    <section aria-labelledby="status-runtime">
+      <h2 id="status-runtime">Runtime</h2>
+      <dl class="status-facts">
+        <div><dt>Version</dt><dd>{{.Version}}</dd></div>
+        <div><dt>Uptime</dt><dd>{{.Uptime}}</dd></div>
+        <div><dt>Architecture</dt><dd>{{.Architecture}}</dd></div>
+      </dl>
+    </section>
+
+    <section aria-labelledby="status-storage">
+      <h2 id="status-storage">Storage</h2>
+      <dl class="status-facts">
+        <div><dt>Database</dt><dd>{{.DatabaseSize}}</dd></div>
+        <div><dt>WAL</dt><dd>{{.WALSize}}</dd></div>
+        <div><dt>Shared memory</dt><dd>{{.SHMSize}}</dd></div>
+        <div><dt>Configured limit</dt><dd>{{.DatabaseLimit}}</dd></div>
+        <div><dt>Oldest event</dt><dd>{{.OldestEvent}}</dd></div>
+        <div><dt>Newest event</dt><dd>{{.NewestEvent}}</dd></div>
+        <div><dt>Retention age</dt><dd>{{.RetentionAge}}</dd></div>
+        <div><dt>Last cleanup</dt><dd>{{.LastCleanup}}</dd></div>
+        <div><dt>Cleanup result</dt><dd>{{.LastCleanupResult}}</dd></div>
+      </dl>
+      <label for="database-usage">Active SQLite footprint · {{.DatabaseUsage}}%</label>
+      <progress id="database-usage" max="100" value="{{.DatabaseUsage}}">{{.DatabaseUsage}}%</progress>
+    </section>
+
+    <section aria-labelledby="status-ingestion">
+      <h2 id="status-ingestion">Ingestion</h2>
+      <dl class="status-facts">
+        <div><dt>Events accepted today (this process)</dt><dd>{{.EventsToday}}</dd></div>
+        <div><dt>Recent rate</dt><dd>{{.RecentRate}}</dd></div>
+        <div><dt>Queued events</dt><dd>{{.QueuedEvents}}</dd></div>
+        <div><dt>Queued bytes</dt><dd>{{.QueuedBytes}}</dd></div>
+        <div><dt>Accepted events</dt><dd>{{.AcceptedEvents}}</dd></div>
+        <div><dt>Rejected batches</dt><dd>{{.RejectedBatches}}</dd></div>
+        <div><dt>Last successful ingest</dt><dd>{{.LastIngest}}</dd></div>
+        <div><dt>Last database error</dt><dd>{{.LastDatabaseError}}</dd></div>
+      </dl>
+    </section>
+
+    <section aria-labelledby="status-diagnostics">
+      <h2 id="status-diagnostics">Diagnostics</h2>
+      {{if .Diagnostics}}<ol class="diagnostic-list">
+        {{range .Diagnostics}}<li>
+          <time>{{.Time}}</time>
+          <strong>{{.Category}}</strong>
+          <span>{{.Summary}}</span>
+        </li>{{end}}
+      </ol>{{else}}<p>No recent operational diagnostics.</p>{{end}}
+    </section>
+  </div>
+  {{end}}
+</section>
+{{end}}

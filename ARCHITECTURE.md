@@ -1647,11 +1647,30 @@ Healthy when:
 
 Response remains minimal.
 
+Startup migration, integrity, and writable checks establish the initial state.
+The writer lifecycle then owns the live ready/not-ready transition. A
+storage-unavailable commit marks readiness unhealthy; a later durable commit
+recovers database readiness. Retention remains independently degraded when the
+size target cannot be reached after application events are exhausted, and only
+a later successful retention result clears that condition. Shutdown makes
+readiness unhealthy before listeners drain. Liveness remains healthy for these
+database and degradation states while the HTTP stack can respond.
+
 ### 26.3 Authentication
 
 Health endpoints may be unauthenticated for orchestration, but expose only status code and minimal generic body.
 
 Detailed status page is authenticated.
+
+The status page combines bounded in-memory operational state with sanitized,
+index-backed SQLite facts. In-memory state uses 60 one-second event-rate
+buckets and the latest 100 diagnostic entries. It contains aggregate counts,
+safe categories, and fixed internal summaries only. “Events accepted today”
+is explicitly scoped to the current process because reconstructing an exact
+received-today count would require an unbounded event scan after restart.
+Oldest and newest event facts use one-row lookups through the existing History
+time index. No status query reads message, raw payload, attributes,
+credentials, hashes, headers, or environment values.
 
 ---
 

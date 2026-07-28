@@ -638,6 +638,48 @@ test("retention settings validate, persist, remain responsive, and expire safely
   await expect(page).toHaveURL(/\/login\?return=.*expired=1/);
 });
 
+test("status is authenticated, refreshable, sanitized, responsive, and accessible", async ({
+  page,
+}) => {
+  await login(page);
+  const responsePromise = page.waitForResponse(
+    (response) => response.url().endsWith("/status") &&
+      response.request().method() === "GET",
+  );
+  await page.getByRole("link", { name: "Status", exact: true }).click();
+  const response = await responsePromise;
+  expect(response.status()).toBe(200);
+  expect(response.headers()["cache-control"]).toBe("no-store");
+  await expect(page.getByRole("heading", { name: "Status", exact: true })).toBeVisible();
+  await expect(page.getByText("Healthy", { exact: true }).first()).toBeVisible();
+  for (const heading of ["Runtime", "Storage", "Ingestion", "Diagnostics"]) {
+    await expect(page.getByRole("heading", { name: heading, exact: true })).toBeVisible();
+  }
+  expect(await page.content()).not.toContain("browser managed token check");
+  expect(await page.content()).not.toContain("sft_");
+  await page.reload();
+  await expect(page.getByText(/events\/min \(last 60 seconds\)/)).toBeVisible();
+
+  await page.locator("[data-theme-select]").selectOption("dark");
+  let results = await new AxeBuilder({ page })
+    .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"])
+    .analyze();
+  expect(results.violations.map((violation) => violation.id)).toEqual([]);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.locator("[data-theme-select]").selectOption("light");
+  expect(await page.evaluate(
+    () => document.documentElement.scrollWidth > window.innerWidth,
+  )).toBe(false);
+  results = await new AxeBuilder({ page })
+    .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"])
+    .analyze();
+  expect(results.violations.map((violation) => violation.id)).toEqual([]);
+  await page.screenshot({
+    path: ".playwright-artifacts/status-mobile-light.png",
+    fullPage: true,
+  });
+});
+
 test("keyboard, themes, reduced motion, mobile inspection, and axe smoke", async ({ page }) => {
   await login(page);
   await page.locator("[data-theme-select]").selectOption("dark");

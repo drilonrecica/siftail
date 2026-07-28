@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -26,6 +27,33 @@ type ingestionIntegration struct {
 	coordinatorStop context.CancelFunc
 	coordinatorDone chan error
 	writerDone      chan error
+	observer        *recordingIngestObserver
+}
+
+type recordingIngestObserver struct {
+	mu              sync.Mutex
+	acceptedBatches int
+	acceptedEvents  int
+	rejectedBatches int
+	databaseFailure bool
+}
+
+func (o *recordingIngestObserver) RecordIngestAccepted(events int, _ time.Time) {
+	o.mu.Lock()
+	o.acceptedBatches++
+	o.acceptedEvents += events
+	o.mu.Unlock()
+}
+
+func (o *recordingIngestObserver) RecordIngestRejected(
+	_ ErrorCategory,
+	databaseFailure bool,
+	_ time.Time,
+) {
+	o.mu.Lock()
+	o.rejectedBatches++
+	o.databaseFailure = o.databaseFailure || databaseFailure
+	o.mu.Unlock()
 }
 
 func newIngestionIntegration(t *testing.T, queueEvents, queueBytes int64) *ingestionIntegration {
@@ -63,22 +91,26 @@ func newIngestionIntegrationWithPublisher(
 		QueueMaxEvents: queueEvents, QueueMaxBytes: queueBytes,
 	})
 	queue := NewQueue(admission)
+	observer := &recordingIngestObserver{}
 	decoder := NewJSONDecoder(DecoderLimits{
 		MaxCompressedBytes: 1 << 20, MaxDecompressedBytes: 2 << 20,
 		MaxEventBytes: 1 << 20, MaxEvents: 100, MaxJSONDepth: 32,
 	}).WithAdmission(admission)
 	handler := NewHandler(sources.NewCoordinatedStore(db.Reader(), coordinator), decoder, Limits{
 		MaxCompressedBytes: 1 << 20, RequestTimeout: time.Second,
-	}).WithQueue(queue)
+	}).WithQueue(queue).WithObserver(observer)
 	writerDone := make(chan error, 1)
 	go func() {
-		writerDone <- NewWriterWorker(queue, NewBatchWriter(coordinator, publisher)).Run(context.Background())
+		writerDone <- NewWriterWorker(
+			queue, NewBatchWriter(coordinator, publisher),
+		).WithObserver(observer).Run(context.Background())
 	}()
 
 	fixture := &ingestionIntegration{
 		db: db, coordinator: coordinator, admission: admission, queue: queue,
 		handler: handler, token: token.Token, coordinatorStop: coordinatorStop,
 		coordinatorDone: coordinatorDone, writerDone: writerDone,
+		observer: observer,
 	}
 	t.Cleanup(func() {
 		admission.Close()
@@ -90,6 +122,34 @@ func newIngestionIntegrationWithPublisher(
 		_ = db.Close()
 	})
 	return fixture
+}
+
+func TestIngestionObserverCountsDurableAndTransportOutcomes(t *testing.T) {
+	fixture := newIngestionIntegration(t, 10, 1<<20)
+	success, done := fixture.request(
+		context.Background(), testEventJSON("", "private-observer-payload"),
+	)
+	<-done
+	if success.Code != http.StatusNoContent {
+		t.Fatalf("success status = %d", success.Code)
+	}
+	unauthorized := httptest.NewRequest(
+		http.MethodPost, "/api/v1/ingest", strings.NewReader(`{"log":"private"}`),
+	)
+	unauthorized.Header.Set("Content-Type", "application/json")
+	rejected := httptest.NewRecorder()
+	fixture.handler.ServeHTTP(rejected, unauthorized)
+	if rejected.Code != http.StatusUnauthorized {
+		t.Fatalf("rejected status = %d", rejected.Code)
+	}
+	fixture.observer.mu.Lock()
+	defer fixture.observer.mu.Unlock()
+	if fixture.observer.acceptedBatches != 1 ||
+		fixture.observer.acceptedEvents != 1 ||
+		fixture.observer.rejectedBatches != 1 ||
+		fixture.observer.databaseFailure {
+		t.Fatalf("observer = %#v", fixture.observer)
+	}
 }
 
 func TestIngestionPublishesOnlyAfterCommit(t *testing.T) {

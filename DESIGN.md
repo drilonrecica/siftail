@@ -1103,7 +1103,7 @@ A compact appliance-status page, not a metrics dashboard.
 
 #### Ingestion
 
-- events today;
+- events accepted today by the current process;
 - current recent rate;
 - queued events;
 - queued bytes;

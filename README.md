@@ -390,6 +390,31 @@ receive a post-commit retention notice; deletion never waits for a browser.
 Measured reclamation and writer-interference evidence is recorded in
 [`docs/performance/retention.md`](docs/performance/retention.md).
 
+### Health and status
+
+The unauthenticated UI-listener endpoints are deliberately minimal:
+
+```text
+GET /health/live   process HTTP responsiveness
+GET /health/ready  migration/integrity startup, writer, writable storage,
+                   shutdown, and critical-degradation readiness
+```
+
+Liveness remains `200` during a transient database failure to avoid restart
+loops. Readiness returns `503` with only `not ready` when the writer is
+unavailable, storage cannot commit, shutdown has begun, or retention exhausts
+application events without reaching the configured size target. A later
+durable commit recovers database readiness; retention degradation clears only
+after a successful cleanup result.
+
+The authenticated `/status` page shows version, uptime, architecture,
+DB/WAL/SHM sizes, the configured retention limit, index-backed oldest/newest
+times, queue gauges, current-process ingestion totals and 60-second rate,
+last cleanup, last safe database category, and at most 100 sanitized
+diagnostics. Operational state is local and bounded; it contains no messages,
+raw payloads, attributes, credentials, hashes, authorization headers, or
+environment dump, and nothing is reported externally.
+
 ### Current dependency rationale
 
 - `github.com/mattn/go-sqlite3` v1.14.48 is the accepted SQLite driver. It

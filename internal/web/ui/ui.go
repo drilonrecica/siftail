@@ -36,6 +36,7 @@ type ShellView struct {
 	Server    ServerDetailView
 	Token     OneTimeTokenView
 	Settings  SettingsView
+	Status    StatusView
 }
 
 type SelectOption struct {
@@ -264,6 +265,42 @@ type SettingsView struct {
 	Notice         string
 	Error          string
 	ErrorRequestID string
+}
+
+type StatusView struct {
+	Severity          string
+	Version           string
+	Uptime            string
+	Architecture      string
+	UIReady           string
+	IngestionReady    string
+	DatabaseSize      string
+	WALSize           string
+	SHMSize           string
+	DatabaseLimit     string
+	DatabaseUsage     int
+	OldestEvent       string
+	NewestEvent       string
+	RetentionAge      string
+	LastCleanup       string
+	LastCleanupResult string
+	EventsToday       string
+	RecentRate        string
+	QueuedEvents      string
+	QueuedBytes       string
+	RejectedBatches   string
+	AcceptedEvents    string
+	LastIngest        string
+	LastDatabaseError string
+	Diagnostics       []StatusDiagnosticView
+	Error             string
+	ErrorRequestID    string
+}
+
+type StatusDiagnosticView struct {
+	Time     string
+	Category string
+	Summary  string
 }
 
 func New() *Renderer {

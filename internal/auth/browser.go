@@ -18,6 +18,7 @@ import (
 	"github.com/drilonrecica/siftail/internal/retention"
 	"github.com/drilonrecica/siftail/internal/sessions"
 	"github.com/drilonrecica/siftail/internal/sources"
+	statusstate "github.com/drilonrecica/siftail/internal/status"
 	webui "github.com/drilonrecica/siftail/internal/web/ui"
 )
 
@@ -29,6 +30,7 @@ type BrowserConfig struct {
 	HistoryStore      *logs.Store
 	SourceStore       *sources.Store
 	RetentionStore    *retention.Store
+	StatusStore       *statusstate.Store
 	LiveBroker        *logs.LiveBroker
 	LiveHeartbeat     time.Duration
 	LiveSessionCheck  time.Duration
@@ -45,6 +47,7 @@ type Browser struct {
 	history          *logs.Store
 	sources          *sources.Store
 	retention        *retention.Store
+	status           *statusstate.Store
 	live             *logs.LiveBroker
 	liveHeartbeat    time.Duration
 	liveSessionCheck time.Duration
@@ -72,6 +75,7 @@ func NewBrowser(administrators *Store, sessionStore *sessions.Store, config Brow
 		history:          config.HistoryStore,
 		sources:          config.SourceStore,
 		retention:        config.RetentionStore,
+		status:           config.StatusStore,
 		live:             config.LiveBroker,
 		liveHeartbeat:    config.LiveHeartbeat,
 		liveSessionCheck: config.LiveSessionCheck,
@@ -120,6 +124,7 @@ func (b *Browser) Register(mux *http.ServeMux) {
 	mux.Handle("POST /tokens/{id}/revoke", b.Protect(http.HandlerFunc(b.tokenRevoke)))
 	mux.Handle("GET /settings", b.Protect(http.HandlerFunc(b.settingsPage)))
 	mux.Handle("POST /settings/retention", b.Protect(http.HandlerFunc(b.retentionSettingsSave)))
+	mux.Handle("GET /status", b.Protect(http.HandlerFunc(b.statusPage)))
 }
 
 func (b *Browser) loginPage(w http.ResponseWriter, r *http.Request) {

@@ -10,6 +10,12 @@ type Worker struct {
 	cleaner  *Cleaner
 	interval time.Duration
 	onError  func(error)
+	onResult func(CleanupResult)
+}
+
+func (w *Worker) WithResultObserver(observer func(CleanupResult)) *Worker {
+	w.onResult = observer
+	return w
 }
 
 func NewWorker(cleaner *Cleaner, interval time.Duration, onError func(error)) *Worker {
@@ -41,8 +47,14 @@ func (w *Worker) Run(ctx context.Context) error {
 }
 
 func (w *Worker) runOnce(ctx context.Context) {
-	if _, err := w.cleaner.RunOnce(ctx); err != nil &&
-		!errors.Is(err, context.Canceled) && w.onError != nil {
+	result, err := w.cleaner.RunOnce(ctx)
+	if err == nil {
+		if w.onResult != nil {
+			w.onResult(result)
+		}
+		return
+	}
+	if !errors.Is(err, context.Canceled) && w.onError != nil {
 		w.onError(err)
 	}
 }

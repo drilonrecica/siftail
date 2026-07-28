@@ -22,6 +22,7 @@ import (
 	"github.com/drilonrecica/siftail/internal/retention"
 	"github.com/drilonrecica/siftail/internal/sessions"
 	"github.com/drilonrecica/siftail/internal/sources"
+	statusstate "github.com/drilonrecica/siftail/internal/status"
 	"github.com/drilonrecica/siftail/internal/web"
 	"golang.org/x/sync/errgroup"
 )
@@ -38,6 +39,7 @@ type App struct {
 	browser      *auth.Browser
 	cursorCodec  *logs.CursorCodec
 	liveBroker   *logs.LiveBroker
+	status       *statusstate.State
 	shuttingDown atomic.Bool
 }
 
@@ -96,11 +98,18 @@ func (a *App) Run(ctx context.Context) error {
 	administratorStore := auth.NewCoordinatedStore(db.Reader(), coordinator)
 	sessionStore := sessions.NewCoordinatedStore(db.Reader(), coordinator)
 	retentionStore := retention.NewStore(db.Reader(), coordinator)
+	operationalState := statusstate.NewState(time.Now())
+	a.status = operationalState
+	defer func() { a.status = nil }()
+	statusStore := statusstate.NewStore(
+		db.Reader(), a.cfg.DatabasePath, nil, retentionStore, operationalState,
+	)
 	a.browser = auth.NewBrowser(administratorStore, sessionStore, auth.BrowserConfig{
 		PublicURL: a.cfg.PublicURL, TrustedProxyCIDRs: a.cfg.TrustedProxyCIDRs,
 		HistoryStore:   logs.NewHistoryStore(db.Reader(), cursorCodec),
 		SourceStore:    sources.NewCoordinatedStore(db.Reader(), coordinator),
 		RetentionStore: retentionStore,
+		StatusStore:    statusStore,
 		LiveBroker:     liveBroker,
 	})
 	defer func() { a.browser = nil }()
@@ -111,6 +120,7 @@ func (a *App) Run(ctx context.Context) error {
 		<-coordinatorDone
 		return err
 	}
+	statusStore.SetAdmission(a.admission)
 	defer func() {
 		a.admission = nil
 		a.queue = nil
@@ -124,8 +134,12 @@ func (a *App) Run(ctx context.Context) error {
 
 	writerDone := make(chan error, 1)
 	writerCtx, cancelWriter := context.WithCancel(context.Background())
+	operationalState.SetWriterReady(true)
 	go func() {
-		writerDone <- ingest.NewWriterWorker(a.queue, ingest.NewBatchWriter(coordinator, liveBroker)).Run(writerCtx)
+		defer operationalState.SetWriterReady(false)
+		writerDone <- ingest.NewWriterWorker(
+			a.queue, ingest.NewBatchWriter(coordinator, liveBroker),
+		).WithObserver(operationalState).Run(writerCtx)
 	}()
 
 	g.Go(func() error { return a.runControlServer(serverCtx, controlListener) })
@@ -148,12 +162,16 @@ func (a *App) Run(ctx context.Context) error {
 				})
 			}},
 		)
-		return retention.NewWorker(cleaner, retention.DefaultCleanupInterval, func(error) {
+		worker := retention.NewWorker(cleaner, retention.DefaultCleanupInterval, func(error) {
+			operationalState.RecordCleanupError(time.Now())
 			a.logger.Warn("retention cleanup failed",
 				"component", "retention",
 				"error_category", "retention_cleanup",
 			)
-		}).Run(serverCtx)
+		}).WithResultObserver(func(result retention.CleanupResult) {
+			operationalState.RecordCleanup(result, time.Now())
+		})
+		return worker.Run(serverCtx)
 	})
 
 	serverDone := make(chan error, 1)
@@ -290,12 +308,12 @@ func (a *App) runControlServer(ctx context.Context, l net.Listener) error {
 
 func (a *App) uiMux() *http.ServeMux {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/health/live", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /health/live", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	})
-	mux.HandleFunc("/health/ready", func(w http.ResponseWriter, r *http.Request) {
-		if a.shuttingDown.Load() {
+	mux.HandleFunc("GET /health/ready", func(w http.ResponseWriter, r *http.Request) {
+		if a.status == nil || !a.status.Ready(a.shuttingDown.Load()) {
 			http.Error(w, "not ready", http.StatusServiceUnavailable)
 			return
 		}
@@ -332,7 +350,7 @@ func (a *App) initializeIngestion() error {
 	handler := ingest.NewHandler(store, decoder, ingest.Limits{
 		MaxCompressedBytes: a.cfg.MaxCompressedRequestBytes,
 		RequestTimeout:     30 * time.Second,
-	}).WithQueue(queue)
+	}).WithQueue(queue).WithObserver(a.status)
 	a.admission = admission
 	a.queue = queue
 	a.ingestHTTP = handler

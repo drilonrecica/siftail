@@ -3,14 +3,21 @@ package ingest
 import (
 	"context"
 	"errors"
+	"time"
 )
 
 // WriterWorker drains complete admitted batches through the transactional
 // writer. Queue closure is the graceful stop signal; caller cancellation never
 // abandons work that admission already accepted.
 type WriterWorker struct {
-	queue  *Queue
-	writer *BatchWriter
+	queue    *Queue
+	writer   *BatchWriter
+	observer Observer
+}
+
+func (w *WriterWorker) WithObserver(observer Observer) *WriterWorker {
+	w.observer = observer
+	return w
 }
 
 func NewWriterWorker(queue *Queue, writer *BatchWriter) *WriterWorker {
@@ -36,6 +43,23 @@ func (w *WriterWorker) Run(ctx context.Context) error {
 			return nil
 		default:
 		}
-		batch.Complete(w.writer.Persist(ctx, batch))
+		persistErr := w.writer.Persist(ctx, batch)
+		if w.observer != nil {
+			if persistErr == nil {
+				w.observer.RecordIngestAccepted(len(batch.Events), time.Now().UTC())
+			} else {
+				category := CategoryUnavailable
+				var ingestErr *Error
+				if errors.As(persistErr, &ingestErr) {
+					category = ingestErr.Category
+				}
+				databaseFailure := category == CategoryUnavailable ||
+					category == CategoryStorageFull
+				w.observer.RecordIngestRejected(
+					category, databaseFailure, time.Now().UTC(),
+				)
+			}
+		}
+		batch.Complete(persistErr)
 	}
 }
