@@ -1361,7 +1361,7 @@ Content-Security-Policy:
   form-action 'self';
 
 X-Content-Type-Options: nosniff
-Referrer-Policy: no-referrer
+Referrer-Policy: same-origin
 Permissions-Policy: camera=(), microphone=(), geolocation=()
 Cross-Origin-Opener-Policy: same-origin
 ```
@@ -1373,6 +1373,13 @@ Also consider:
 - HSTS only when public URL is HTTPS and deployment behavior is understood.
 
 Avoid inline scripts/styles so CSP remains strict without nonces in version one.
+
+The UI listener uses `same-origin` because Chromium otherwise serializes native
+form navigation origins as `null`, making required exact Origin/Referer
+validation reject Siftail's own login and logout forms. The policy suppresses
+cross-origin referrers while allowing local form navigation to carry verifiable
+same-origin metadata. Common ingestion-listener responses retain
+`no-referrer`.
 
 ---
 

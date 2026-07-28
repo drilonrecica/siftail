@@ -275,6 +275,26 @@ func TestSecurityHeadersPanicRecoveryRequestIDAndSensitiveLogs(t *testing.T) {
 	}
 }
 
+func TestLoginReferrerPolicySupportsExactSameOriginFormValidation(t *testing.T) {
+	handler := SecurityHeaders("https://logs.example.test")(http.HandlerFunc(
+		func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusNoContent)
+		},
+	))
+	for path, want := range map[string]string{
+		"/login":     "same-origin",
+		"/session":   "same-origin",
+		"/logs":      "same-origin",
+		"/logs/rows": "same-origin",
+	} {
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, path, nil))
+		if got := response.Header().Get("Referrer-Policy"); got != want {
+			t.Errorf("%s Referrer-Policy = %q, want %q", path, got, want)
+		}
+	}
+}
+
 func loginRequest(username, password, returnPath string) *http.Request {
 	form := url.Values{"username": {username}, "password": {password}, "return": {returnPath}}
 	request := httptest.NewRequest(http.MethodPost, "/session", strings.NewReader(form.Encode()))

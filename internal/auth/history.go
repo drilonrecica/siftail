@@ -115,9 +115,6 @@ func (b *Browser) historyView(
 	}
 	view := buildHistoryView(query, page, catalog)
 	if appendPage {
-		for index := range view.Rows {
-			view.Rows[index].OOB = true
-		}
 		noun := "events"
 		if len(view.Rows) == 1 {
 			noun = "event"

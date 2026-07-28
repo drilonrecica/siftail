@@ -60,7 +60,6 @@ type HistoryRowView struct {
 	Stream       string
 	Source       string
 	Message      string
-	OOB          bool
 }
 
 type DetailField struct {

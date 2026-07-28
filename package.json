@@ -1,0 +1,17 @@
+{
+  "name": "siftail-browser-tests",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Development-only browser verification for Siftail",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "frontend-check": "playwright test --list",
+    "playwright": "playwright test"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "4.12.1",
+    "@playwright/test": "1.62.0"
+  }
+}

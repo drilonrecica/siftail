@@ -147,7 +147,6 @@ func TestHistoryFragmentsRenderFocusedEscapedState(t *testing.T) {
 		t.Fatal("History fragment emitted unescaped event/filter data")
 	}
 
-	view.Rows[0].OOB = true
 	view.Announcement = "1 additional event loaded."
 	appendResponse := httptest.NewRecorder()
 	if err := renderer.HistoryAppend(appendResponse, http.StatusOK, view); err != nil {
@@ -155,7 +154,7 @@ func TestHistoryFragmentsRenderFocusedEscapedState(t *testing.T) {
 	}
 	appendBody := appendResponse.Body.String()
 	if strings.Contains(appendBody, "<form") ||
-		!strings.Contains(appendBody, `hx-swap-oob="beforeend:#history-rows"`) ||
+		!strings.Contains(appendBody, `<div hx-swap-oob="beforeend:#history-rows">`) ||
 		!strings.Contains(appendBody, `id="history-pagination"`) {
 		t.Fatalf("append fragment replaced the wrong boundary: %s", appendBody)
 	}

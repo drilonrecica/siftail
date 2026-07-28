@@ -199,7 +199,7 @@ func TestHistoryLoadOlderAppendsWithoutReplacingContext(t *testing.T) {
 		appendResponse.Header().Get("HX-Push-Url") != "" ||
 		strings.Contains(body, "<!doctype html>") ||
 		!strings.Contains(body, `data-event-id="2"`) ||
-		!strings.Contains(body, `hx-swap-oob="beforeend:#history-rows"`) ||
+		!strings.Contains(body, `<div hx-swap-oob="beforeend:#history-rows">`) ||
 		!strings.Contains(body, `id="history-pagination"`) ||
 		!strings.Contains(body, `id="load-older"`) ||
 		!strings.Contains(body, `1 additional event loaded.`) {

@@ -636,8 +636,8 @@ regression review.
 
 ## 3. `0.2.0` — Authentication and historical browsing
 
-Milestone authority: `PRODUCT.md` §19.2. These tasks remain `Planned` until
-SFT-015 is `Done`.
+Milestone authority: `PRODUCT.md` §19.2. The SFT-015 dependency gate is
+complete.
 
 ### SFT-016 — Implement administrator storage and secure CLI recovery
 
@@ -984,10 +984,24 @@ not enter caches beyond the active authenticated response/DOM.
 
 ### SFT-024 — Close the `0.2.0` browser and security gate
 
-**Status:** Planned  
+**Status:** Done
 **Milestone:** 0.2.0  
 **Depends on:** SFT-022, SFT-023  
-**Issue/PR:** —
+**Issue/PR:** — (direct maintainer implementation)
+**Completed:** 2026-07-28
+**Completion evidence:** Lockfile-pinned development-only Playwright 1.62.0 and
+axe 4.12.1 tooling provisions Siftail through production CLI paths, ingests 220
+fixtures, and guarantees process/database/socket/temp cleanup. Seven Chromium
+scenarios passed in 22.2 seconds across native login/logout, uniform/throttled
+failure, canonical/default/filter/Back/pagination state, hostile inline details,
+clipboard and focus, online session invalidation, explicit dark/light,
+reduced-motion, 390px responsive inspection, and WCAG A/AA axe checks. Browser
+coverage exposed and closed native-form Origin, HTMX append-wrapper, and
+light-theme contrast defects. The complete Go suite and race suite pass;
+16-worker concurrent session/History stress passes under race. The measured
+100k/1M query rerun retained existing plans and is recorded with the requirement
+matrix, dependency/resource review, manual checklist, and explicit pre-public
+limitations in `docs/release/0.2.0-gate.md`.
 
 **Authoritative references:** `PRODUCT.md` §19.2; `AGENTS.md` §§18.6–18.7;
 `ARCHITECTURE.md` §§32.5–32.6.

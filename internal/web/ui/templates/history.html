@@ -140,7 +140,7 @@
 {{end}}
 
 {{define "history-row"}}
-<article class="log-row level-{{.Level}}" data-event-id="{{.ID}}"{{if .OOB}} hx-swap-oob="beforeend:#history-rows"{{end}}>
+<article class="log-row level-{{.Level}}" data-event-id="{{.ID}}">
   <button class="event-toggle" type="button" aria-label="Show details for event {{.ID}}"
           aria-expanded="false" aria-controls="{{.DetailID}}"
           hx-get="{{.DetailURL}}" hx-target="#{{.DetailID}}" hx-swap="innerHTML"
@@ -170,7 +170,7 @@
 {{end}}
 
 {{define "history-append.html"}}
-{{range .Rows}}{{template "history-row" .}}{{end}}
+<div hx-swap-oob="beforeend:#history-rows">{{range .Rows}}{{template "history-row" .}}{{end}}</div>
 {{template "history-pagination" .}}
 <p id="history-update-status" hx-swap-oob="outerHTML" class="visually-hidden" role="status" aria-live="polite">{{.Announcement}}</p>
 {{end}}

@@ -76,11 +76,29 @@ make test       # go test ./...
 make race-test  # go test -race ./...
 make build      # build the siftail binary
 make check      # formatting, vet, tests, and metadata-bearing build
+make frontend-check # list and validate development-only browser tests
+make playwright     # run the Chromium browser/security suite
 ```
 
 Measured engineering baselines are recorded under
 [`docs/performance/`](docs/performance/); they describe their exact hardware and
 method and are not cross-machine performance guarantees.
+
+Browser verification requires Node.js 22 or newer only on the development/CI
+host:
+
+```bash
+npm ci --ignore-scripts
+npx playwright install --with-deps chromium
+make frontend-check
+make playwright
+```
+
+An installed Chromium may be used locally with
+`SIFTAIL_PLAYWRIGHT_CHROMIUM=/path/to/chromium make playwright`. Node,
+Playwright, axe, browsers, and their reports are not production runtime
+dependencies. The 0.2.0 method, requirement matrix, and measured limitations
+are recorded in [`docs/release/0.2.0-gate.md`](docs/release/0.2.0-gate.md).
 
 No process secret environment variable exists yet. When one is introduced,
 direct and `_FILE` forms will be mutually exclusive; `_FILE` input removes only
@@ -211,6 +229,8 @@ token, form content type, and an exact allowed Origin or Referer. Authenticated
 responses use `Cache-Control: no-store`. UI responses set a self-only CSP,
 clickjacking, MIME, referrer, permissions, opener, and resource-policy headers;
 HTTPS public URLs also enable HSTS and Secure session cookies.
+UI responses use a same-origin-only referrer policy so native forms can satisfy
+exact Origin/Referer validation without sending referrers cross-origin.
 
 Set `SIFTAIL_PUBLIC_URL` to the operator-facing HTTP(S) origin. Forwarded
 client, scheme, and host metadata is considered only when the immediate peer is

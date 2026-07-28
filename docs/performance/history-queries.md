@@ -60,6 +60,29 @@ No new index is justified by this baseline. Literal substring search has no
 dedicated index by design and remains bounded by the required time range;
 introducing FTS5 still requires the documented ADR and measurements.
 
+## 0.2.0 gate rerun
+
+SFT-024 reran each 100k/1M case once on the same host and configuration:
+
+```bash
+go test -run '^$' -bench '^BenchmarkHistoryStore(100K|1M)$' \
+  -benchtime=1x -benchmem ./internal/logs
+```
+
+| Rows | Query | Time/op | Allocated bytes/op | Allocations/op |
+|---:|---|---:|---:|---:|
+| 100,000 | unfiltered | 1.109 ms | 342,088 | 7,561 |
+| 100,000 | exact source + level | 1.376 ms | 345,472 | 7,596 |
+| 100,000 | literal `needle` | 42.404 ms | 212,520 | 3,795 |
+| 1,000,000 | unfiltered | 0.957 ms | 341,976 | 7,559 |
+| 1,000,000 | exact source + level | 1.395 ms | 345,472 | 7,596 |
+| 1,000,000 | literal `needle` | 85.732 ms | 342,216 | 7,564 |
+
+The captured plans selected the same indexes described above. A single
+iteration is a release-gate smoke measurement, not a statistically stable
+comparison; it identified no plan change and does not replace the five-iteration
+development baseline.
+
 ## Review and remaining gate
 
 - Pages fetch `limit+1`, return at most 500 events, and do not run `COUNT(*)`.

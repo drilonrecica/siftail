@@ -27,6 +27,13 @@ go.work.sum
 # Built binary
 /siftail
 
+# Development-only browser test artifacts
+node_modules/
+playwright-report/
+test-results/
+.playwright-state.json
+.playwright-artifacts/
+
 # env file
 .env
 
