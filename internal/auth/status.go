@@ -1,8 +1,10 @@
 package auth
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"runtime"
 	"strconv"
 	"time"
@@ -15,7 +17,8 @@ import (
 
 func (b *Browser) statusPage(w http.ResponseWriter, r *http.Request) {
 	session, _ := BrowserSessionFromContext(r.Context())
-	if len(r.URL.Query()) != 0 {
+	notice, err := statusNotice(r.URL.Query())
+	if err != nil {
 		b.renderStatus(w, session.CSRFToken, http.StatusBadRequest, webui.StatusView{
 			Severity: "Unavailable", Error: "Check the Status page parameters.",
 		})
@@ -37,7 +40,55 @@ func (b *Browser) statusPage(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	b.renderStatus(w, session.CSRFToken, http.StatusOK, statusView(snapshot, b.now()))
+	view := statusView(snapshot, b.now())
+	view.CSRFToken = session.CSRFToken
+	view.CheckNotice = notice
+	view.CheckFailed = r.URL.Query().Get("notice") == "database-check-failed"
+	if result, ok := b.databaseChecker.Last(); ok {
+		view.DatabaseCheckAt = formatStatusTime(result.At)
+		if result.ErrorCategory != "" {
+			view.DatabaseCheck = "Failed · " + result.ErrorCategory
+		} else {
+			view.DatabaseCheck = fmt.Sprintf(
+				"Healthy · schema %d/%d · SQLite %s · %s · checkpoint %s",
+				result.Report.SchemaVersion, result.Report.SupportedSchema,
+				result.Report.SQLiteVersion, result.Report.Integrity,
+				result.Report.Checkpoint,
+			)
+		}
+	}
+	b.renderStatus(w, session.CSRFToken, http.StatusOK, view)
+}
+
+func (b *Browser) databaseCheck(w http.ResponseWriter, r *http.Request) {
+	session, _ := BrowserSessionFromContext(r.Context())
+	if _, err := exactManagementForm(r); err != nil {
+		b.renderStatus(w, session.CSRFToken, http.StatusBadRequest, webui.StatusView{
+			Severity: "Unavailable", Error: "Check the database-check request.",
+		})
+		return
+	}
+	if b.databaseChecker == nil {
+		http.Error(w, "Database check is temporarily unavailable.",
+			http.StatusServiceUnavailable)
+		return
+	}
+	_, err := b.databaseChecker.Check(r.Context())
+	input := statusstate.DiagnosticInput{
+		At: b.now(), Component: "database",
+		Category:  "database_check_succeeded",
+		RequestID: web.RequestIDFromContext(r.Context()),
+	}
+	if err != nil {
+		input.Category = "database_check_failed"
+		_ = b.status.RecordDiagnostic(input)
+		http.Redirect(w, r, "/status?notice=database-check-failed",
+			http.StatusSeeOther)
+		return
+	}
+	_ = b.status.RecordDiagnostic(input)
+	http.Redirect(w, r, "/status?notice=database-check-complete",
+		http.StatusSeeOther)
 }
 
 func (b *Browser) renderStatus(
@@ -75,6 +126,8 @@ func statusView(snapshot statusstate.OperationalSnapshot, now time.Time) webui.S
 	view := webui.StatusView{
 		Severity:          severity,
 		Version:           version.Version + " · " + version.Commit,
+		SchemaVersion:     strconv.Itoa(snapshot.SchemaVersion),
+		SQLiteVersion:     snapshot.SQLiteVersion,
 		Uptime:            formatUptime(now.Sub(state.StartedAt)),
 		Architecture:      runtime.GOOS + "/" + runtime.GOARCH,
 		UIReady:           "ready",
@@ -97,6 +150,8 @@ func statusView(snapshot statusstate.OperationalSnapshot, now time.Time) webui.S
 		AcceptedEvents:    strconv.FormatUint(state.AcceptedEvents, 10),
 		LastIngest:        "Never",
 		LastDatabaseError: "None",
+		DatabaseCheck:     "Not yet run",
+		DatabaseCheckAt:   "—",
 		Diagnostics:       make([]webui.StatusDiagnosticView, len(state.Diagnostics)),
 	}
 	if state.LastCleanup != nil {
@@ -119,12 +174,33 @@ func statusView(snapshot statusstate.OperationalSnapshot, now time.Time) webui.S
 	}
 	for index, diagnostic := range state.Diagnostics {
 		view.Diagnostics[index] = webui.StatusDiagnosticView{
-			Time:     formatStatusTime(diagnostic.At),
-			Category: diagnostic.Category,
-			Summary:  diagnostic.Summary,
+			Time: formatStatusTime(diagnostic.At), Severity: diagnostic.Severity,
+			Component: diagnostic.Component, Category: diagnostic.Category,
+			Summary: diagnostic.Summary, RequestID: diagnostic.RequestID,
+		}
+		if diagnostic.RecoveredAt != nil {
+			view.Diagnostics[index].RecoveredAt =
+				formatStatusTime(*diagnostic.RecoveredAt)
 		}
 	}
 	return view
+}
+
+func statusNotice(values url.Values) (string, error) {
+	if len(values) == 0 {
+		return "", nil
+	}
+	if len(values) != 1 || len(values["notice"]) != 1 {
+		return "", errors.New("invalid Status notice")
+	}
+	switch values.Get("notice") {
+	case "database-check-complete":
+		return "Database check completed.", nil
+	case "database-check-failed":
+		return "Database check did not complete successfully.", nil
+	default:
+		return "", errors.New("invalid Status notice")
+	}
 }
 
 func readinessLabel(state statusstate.Snapshot) string {

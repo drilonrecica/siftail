@@ -280,6 +280,8 @@ type SettingsView struct {
 type StatusView struct {
 	Severity          string
 	Version           string
+	SchemaVersion     string
+	SQLiteVersion     string
 	Uptime            string
 	Architecture      string
 	UIReady           string
@@ -302,15 +304,24 @@ type StatusView struct {
 	AcceptedEvents    string
 	LastIngest        string
 	LastDatabaseError string
+	DatabaseCheck     string
+	DatabaseCheckAt   string
+	CheckNotice       string
+	CheckFailed       bool
+	CSRFToken         string
 	Diagnostics       []StatusDiagnosticView
 	Error             string
 	ErrorRequestID    string
 }
 
 type StatusDiagnosticView struct {
-	Time     string
-	Category string
-	Summary  string
+	Time        string
+	Severity    string
+	Component   string
+	Category    string
+	Summary     string
+	RequestID   string
+	RecoveredAt string
 }
 
 type AuditView struct {

@@ -1187,7 +1187,13 @@ Invariants:
 
 - no incoming message payload;
 - no secret material;
+- summaries come from a closed set of prewritten operational messages rather
+  than caller-supplied text;
+- component, category, severity, request ID, and optional recovery time are
+  individually bounded and validated;
 - bounded to the latest 100 records;
+- in-memory diagnostic history is process-local and intentionally resets on
+  restart;
 - not a substitute for process stdout/stderr logs;
 - may be stored in a dedicated bounded table or memory structure.
 

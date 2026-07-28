@@ -22,6 +22,8 @@ type OperationalSnapshot struct {
 	EventsToday   int64
 	OldestEventUS *int64
 	NewestEventUS *int64
+	SchemaVersion int
+	SQLiteVersion string
 }
 
 type Store struct {
@@ -35,7 +37,9 @@ type Store struct {
 
 const statusEventBoundsSQL = `SELECT
 	(SELECT event_at_us FROM log_events ORDER BY event_at_us, id LIMIT 1),
-	(SELECT event_at_us FROM log_events ORDER BY event_at_us DESC, id DESC LIMIT 1)`
+	(SELECT event_at_us FROM log_events ORDER BY event_at_us DESC, id DESC LIMIT 1),
+	(SELECT coalesce(max(version),0) FROM schema_migrations),
+	sqlite_version()`
 
 func NewStore(
 	db *sql.DB,
@@ -53,6 +57,13 @@ func NewStore(
 // SetAdmission completes startup composition before HTTP listeners open.
 func (s *Store) SetAdmission(admission *ingest.Admission) {
 	s.admission = admission
+}
+
+func (s *Store) RecordDiagnostic(input DiagnosticInput) error {
+	if s == nil || s.state == nil {
+		return errors.New("status storage is unavailable")
+	}
+	return s.state.RecordDiagnostic(input)
 }
 
 func (s *Store) Read(ctx context.Context) (OperationalSnapshot, error) {
@@ -84,7 +95,10 @@ func (s *Store) Read(ctx context.Context) (OperationalSnapshot, error) {
 	}
 	var oldest, newest sql.NullInt64
 	if err := s.db.QueryRowContext(ctx, statusEventBoundsSQL).
-		Scan(&oldest, &newest); err != nil {
+		Scan(
+			&oldest, &newest, &snapshot.SchemaVersion,
+			&snapshot.SQLiteVersion,
+		); err != nil {
 		return OperationalSnapshot{}, fmt.Errorf("read sanitized event status: %w", err)
 	}
 	snapshot.EventsToday = int64(snapshot.State.EventsToday)

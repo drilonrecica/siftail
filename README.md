@@ -483,12 +483,55 @@ durable commit recovers database readiness; retention degradation clears only
 after a successful cleanup result.
 
 The authenticated `/status` page shows version, uptime, architecture,
-DB/WAL/SHM sizes, the configured retention limit, index-backed oldest/newest
-times, queue gauges, current-process ingestion totals and 60-second rate,
-last cleanup, last safe database category, and at most 100 sanitized
-diagnostics. Operational state is local and bounded; it contains no messages,
-raw payloads, attributes, credentials, hashes, authorization headers, or
-environment dump, and nothing is reported externally.
+schema and SQLite versions, DB/WAL/SHM sizes, the configured retention limit,
+index-backed oldest/newest times, queue gauges, current-process ingestion
+totals and 60-second rate, last cleanup, last safe database category, the last
+manual database check, and at most 100 sanitized diagnostics. Diagnostic
+summaries come from a closed internal list and may include only typed
+severity/component/category, an internal request ID, and recovery time. The
+process-local ring resets on restart. It contains no messages, raw payloads,
+attributes, credentials, hashes, paths, authorization headers, or environment
+dump, and nothing is reported externally.
+
+### Database checks and local diagnostics
+
+Run a bounded quick database check with:
+
+```bash
+./siftail database check
+```
+
+When Siftail is active, this uses the owner-only control socket, runs
+`quick_check` on the bounded read pool, and orders a passive WAL checkpoint
+through the database maintenance coordinator. The authenticated Status page
+offers the same check through `Run safe database check`.
+
+For a stopped server, the command opens the existing database read-only. It
+does not create, migrate, checkpoint, or rewrite the database. A full
+integrity scan is available only while stopped:
+
+```bash
+./siftail database check --full
+```
+
+Output is a fixed path-free report containing schema compatibility, SQLite
+version, integrity, durability pragmas, the source of the writability result,
+checkpoint state, page/free counts, and DB/WAL/SHM byte counts. Stopped-server
+writability is an advisory filesystem-access result, not proof that a future
+SQLite commit will succeed. Corrupt, newer-schema, busy, canceled, and
+unavailable failures print safe categories and return failure without
+recreating the database.
+
+The latest process-local diagnostics are available only while the server is
+active:
+
+```bash
+./siftail diagnostics
+```
+
+This prints at most 100 validated entries through the owner-only control
+socket. There is no arbitrary SQL command, raw process-log export, support
+bundle, public administration endpoint, or outbound reporting.
 
 ### Current dependency rationale
 

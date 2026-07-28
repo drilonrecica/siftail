@@ -15,6 +15,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/drilonrecica/siftail/internal/audit"
+	"github.com/drilonrecica/siftail/internal/database"
 	"github.com/drilonrecica/siftail/internal/ingest"
 	"github.com/drilonrecica/siftail/internal/logs"
 	"github.com/drilonrecica/siftail/internal/retention"
@@ -36,6 +37,7 @@ type BrowserConfig struct {
 	RetentionStore    *retention.Store
 	StatusStore       *statusstate.Store
 	AuditStore        *audit.Store
+	DatabaseChecker   *database.ActiveChecker
 	LiveBroker        *logs.LiveBroker
 	LiveHeartbeat     time.Duration
 	LiveSessionCheck  time.Duration
@@ -56,6 +58,7 @@ type Browser struct {
 	retention        *retention.Store
 	status           *statusstate.Store
 	audit            *audit.Store
+	databaseChecker  *database.ActiveChecker
 	live             *logs.LiveBroker
 	liveHeartbeat    time.Duration
 	liveSessionCheck time.Duration
@@ -87,6 +90,7 @@ func NewBrowser(administrators *Store, sessionStore *sessions.Store, config Brow
 		retention:        config.RetentionStore,
 		status:           config.StatusStore,
 		audit:            config.AuditStore,
+		databaseChecker:  config.DatabaseChecker,
 		live:             config.LiveBroker,
 		liveHeartbeat:    config.LiveHeartbeat,
 		liveSessionCheck: config.LiveSessionCheck,
@@ -138,6 +142,7 @@ func (b *Browser) Register(mux *http.ServeMux) {
 	mux.Handle("GET /settings", b.Protect(http.HandlerFunc(b.settingsPage)))
 	mux.Handle("POST /settings/retention", b.Protect(http.HandlerFunc(b.retentionSettingsSave)))
 	mux.Handle("GET /status", b.Protect(http.HandlerFunc(b.statusPage)))
+	mux.Handle("POST /status/database-check", b.Protect(http.HandlerFunc(b.databaseCheck)))
 	mux.Handle("GET /audit", b.Protect(http.HandlerFunc(b.auditPage)))
 }
 

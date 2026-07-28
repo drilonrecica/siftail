@@ -1761,6 +1761,14 @@ ring. This powers the authenticated diagnostics section.
 
 It is not a second log database.
 
+The implemented process-local ring accepts only typed component/category
+pairs whose severity and summary are selected from closed internal tables.
+Callers cannot persist arbitrary error strings. An entry may carry one bounded
+internal request ID and an optional recovery time; it never carries a path,
+request body, environment map, credential, hash, or application field. The
+ring resets on restart by design. Authenticated Status and the owner-only
+`siftail diagnostics` control-socket command expose at most those 100 entries.
+
 ### 27.6 Recursive ingestion prevention
 
 Generated Coolify Fluent Bit configuration must exclude Siftail's own container/service. Otherwise Siftail stdout may be drained into Siftail recursively.
@@ -2028,6 +2036,18 @@ control socket under `/data` so all mutations still pass through the write coord
 No TCP administration API is exposed. Direct database maintenance and restore commands
 require the server to be stopped; online backup and diagnostics use the control socket.
 `version` and `config validate` do not open the database.
+
+`database check` is special-cased as an active-safe bounded inspection. While
+the server is active it runs `quick_check` through the read pool and orders one
+passive WAL checkpoint through the maintenance coordinator. `database check
+--full` is refused while the server is active. With the server stopped, quick
+and full checks open the existing file read-only, never create or migrate it,
+never run a checkpoint, and report filesystem access separately from an
+observed application commit. Reports have a closed, path-free field set:
+schema compatibility, SQLite version, integrity, required pragmas,
+writability source, checkpoint state, page/free counts, and DB/WAL/SHM byte
+counts. Corrupt, incompatible, busy, canceled, and unavailable results are
+reduced to safe categories.
 
 ---
 

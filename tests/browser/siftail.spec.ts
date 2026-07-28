@@ -691,6 +691,25 @@ test("status is authenticated, refreshable, sanitized, responsive, and accessibl
   }
   expect(await page.content()).not.toContain("browser managed token check");
   expect(await page.content()).not.toContain("sft_");
+  const checkResponse = page.waitForResponse(
+    (candidate) => candidate.url().endsWith("/status/database-check") &&
+      candidate.request().method() === "POST",
+  );
+  await page.getByRole("button", { name: "Run safe database check" }).click();
+  expect((await checkResponse).status()).toBe(303);
+  await expect(page).toHaveURL(/\/status\?notice=database-check-complete$/);
+  await expect(page.getByText("Database check completed.")).toBeVisible();
+  await expect(page.getByText(
+    /Healthy · schema 4\/4 · SQLite .* · ok · checkpoint completed/,
+  ))
+    .toBeVisible();
+  await expect(page.getByText(/database_check_succeeded/))
+    .toBeVisible();
+  await expect(page.getByText(
+    "The bounded database check completed successfully.",
+  )).toBeVisible();
+  expect(await page.content()).not.toContain("/tmp/");
+  expect(await page.content()).not.toContain("/home/");
   await page.reload();
   await expect(page.getByText(/events\/min \(last 60 seconds\)/)).toBeVisible();
 
@@ -775,8 +794,8 @@ test("audit filters, pagination, escaping, keyboard, themes, and mobile remain b
   await page.getByLabel("Outcome").selectOption("succeeded");
   await page.getByLabel("Exact action").fill("source.alias_set");
   await page.getByRole("button", { name: "Apply audit filters" }).click();
-  await expect(page.locator("code", { hasText: "source.alias_set" })).toBeVisible();
-  await expect(page.getByText(hostileAlias)).toBeVisible();
+  await expect(page.locator("code", { hasText: "source.alias_set" }).first()).toBeVisible();
+  await expect(page.getByText(hostileAlias).first()).toBeVisible();
   await expect(page.locator(".audit-table img")).toHaveCount(0);
   expect(await page.evaluate(
     () => (window as Window & { siftailSourceXSS?: boolean }).siftailSourceXSS,

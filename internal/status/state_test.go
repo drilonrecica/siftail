@@ -1,6 +1,7 @@
 package status
 
 import (
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -50,6 +51,11 @@ func TestStateReadinessRateRecoveryAndDiagnosticBound(t *testing.T) {
 		"Ingestion could not commit because storage was unavailable." {
 		t.Fatalf("unsafe diagnostic = %#v", snapshot.Diagnostics[0])
 	}
+	for _, diagnostic := range snapshot.Diagnostics {
+		if err := diagnostic.Validate(); err != nil {
+			t.Fatalf("invalid bounded diagnostic %#v: %v", diagnostic, err)
+		}
+	}
 	if later := state.Snapshot(started.Add(132 * time.Second)); later.RecentEvents != 0 {
 		t.Fatalf("expired recent events = %d", later.RecentEvents)
 	}
@@ -67,6 +73,64 @@ func TestStateReadinessRateRecoveryAndDiagnosticBound(t *testing.T) {
 	}, started.Add(135*time.Second))
 	if !state.Ready(false) {
 		t.Fatal("successful retention recovery did not restore readiness")
+	}
+}
+
+func TestDiagnosticInputIsClosedSanitizedAndBounded(t *testing.T) {
+	state := NewState(time.Now())
+	at := time.Date(2026, 7, 28, 12, 0, 0, 0, time.UTC)
+	recovered := at.Add(time.Minute)
+	if err := state.RecordDiagnostic(DiagnosticInput{
+		At: at, Component: "database", Category: "database_check_succeeded",
+		RequestID: "request-safe-1", RecoveredAt: &recovered,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, input := range []DiagnosticInput{
+		{Component: "database", Category: "database_check_succeeded"},
+		{At: at, Component: "database", Category: "private-payload-token"},
+		{
+			At: at, Component: "database", Category: "database_check_succeeded",
+			RequestID: "request\nprivate",
+		},
+		{
+			At: at, Component: "database", Category: "database_check_succeeded",
+			RecoveredAt: func() *time.Time {
+				value := at.Add(-time.Second)
+				return &value
+			}(),
+		},
+	} {
+		if err := state.RecordDiagnostic(input); err == nil {
+			t.Fatalf("unsafe diagnostic accepted: %#v", input)
+		}
+	}
+	for index := 0; index < diagnosticCapacity+5; index++ {
+		if err := state.RecordDiagnostic(DiagnosticInput{
+			At:        at.Add(time.Duration(index+1) * time.Second),
+			Component: "audit", Category: "audit_cleanup",
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	snapshot := state.Snapshot(at.Add(time.Hour))
+	if len(snapshot.Diagnostics) != diagnosticCapacity ||
+		snapshot.Diagnostics[0].Category != "audit_cleanup" ||
+		snapshot.Diagnostics[diagnosticCapacity-1].At != at.Add(6*time.Second) {
+		t.Fatalf("bounded diagnostics = %#v", snapshot.Diagnostics)
+	}
+	for _, diagnostic := range snapshot.Diagnostics {
+		if err := diagnostic.Validate(); err != nil {
+			t.Fatalf("invalid diagnostic %#v: %v", diagnostic, err)
+		}
+		for _, forbidden := range []string{
+			"private", "payload", "token", "password", "authorization",
+		} {
+			if strings.Contains(strings.ToLower(diagnostic.Summary), forbidden) {
+				t.Fatalf("diagnostic summary exposed %q: %#v",
+					forbidden, diagnostic)
+			}
+		}
 	}
 }
 

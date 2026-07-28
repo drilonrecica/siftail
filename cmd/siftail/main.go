@@ -77,6 +77,18 @@ func run(args []string, stdout, stderr io.Writer) int {
 			return 1
 		}
 		return 0
+	case "database":
+		if err := runDatabaseCommand(args[1:], stdout); err != nil {
+			fmt.Fprintf(stderr, "siftail: %v\n", err)
+			return 1
+		}
+		return 0
+	case "diagnostics":
+		if err := runDiagnosticsCommand(args[1:], stdout); err != nil {
+			fmt.Fprintf(stderr, "siftail: %v\n", err)
+			return 1
+		}
+		return 0
 	case "help", "-h", "--help":
 		printUsage(stdout)
 		return 0
@@ -147,4 +159,6 @@ func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "  admin create      Create the single administrator")
 	fmt.Fprintln(w, "  admin reset-password Reset the administrator password")
 	fmt.Fprintln(w, "  sessions revoke-all Revoke every administrator session")
+	fmt.Fprintln(w, "  database check [--full] Run a bounded database integrity check")
+	fmt.Fprintln(w, "  diagnostics      Print the latest sanitized operational diagnostics")
 }

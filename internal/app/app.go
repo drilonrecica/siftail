@@ -30,18 +30,19 @@ import (
 
 // App composes the long-running Siftail process.
 type App struct {
-	cfg          config.Config
-	logger       *slog.Logger
-	db           *database.DB
-	coordinator  *database.Coordinator
-	admission    *ingest.Admission
-	queue        *ingest.Queue
-	ingestHTTP   http.Handler
-	browser      *auth.Browser
-	cursorCodec  *logs.CursorCodec
-	liveBroker   *logs.LiveBroker
-	status       *statusstate.State
-	shuttingDown atomic.Bool
+	cfg           config.Config
+	logger        *slog.Logger
+	db            *database.DB
+	coordinator   *database.Coordinator
+	admission     *ingest.Admission
+	queue         *ingest.Queue
+	ingestHTTP    http.Handler
+	browser       *auth.Browser
+	cursorCodec   *logs.CursorCodec
+	liveBroker    *logs.LiveBroker
+	status        *statusstate.State
+	databaseCheck *database.ActiveChecker
+	shuttingDown  atomic.Bool
 }
 
 // New creates an application root. It does not open listeners or databases.
@@ -106,6 +107,11 @@ func (a *App) Run(ctx context.Context) error {
 	statusStore := statusstate.NewStore(
 		db.Reader(), a.cfg.DatabasePath, nil, retentionStore, operationalState,
 	)
+	databaseChecker := database.NewActiveChecker(
+		db, a.cfg.DatabasePath, coordinator, operationalState.DatabaseWritable,
+	)
+	a.databaseCheck = databaseChecker
+	defer func() { a.databaseCheck = nil }()
 	sourceStore := sources.NewCoordinatedStore(db.Reader(), coordinator)
 	guideTester, err := ingest.NewGuideTester(a.cfg.IngestPublicURL, sourceStore)
 	if err != nil {
@@ -124,6 +130,7 @@ func (a *App) Run(ctx context.Context) error {
 		RetentionStore:    retentionStore,
 		StatusStore:       statusStore,
 		AuditStore:        auditStore,
+		DatabaseChecker:   databaseChecker,
 		LiveBroker:        liveBroker,
 	})
 	defer func() { a.browser = nil }()
@@ -161,6 +168,9 @@ func (a *App) Run(ctx context.Context) error {
 	g.Go(func() error { return a.runIngestServer(serverCtx) })
 	g.Go(func() error {
 		return sessions.NewCleanupWorker(sessionStore, time.Hour, func(error) {
+			_ = operationalState.RecordDiagnostic(statusstate.DiagnosticInput{
+				At: time.Now(), Component: "sessions", Category: "session_cleanup",
+			})
 			a.logger.Warn("session cleanup failed",
 				"component", "sessions",
 				"error_category", "session_cleanup",
@@ -169,6 +179,9 @@ func (a *App) Run(ctx context.Context) error {
 	})
 	g.Go(func() error {
 		return audit.NewCleanupWorker(auditStore, audit.DefaultCleanupInterval, func(error) {
+			_ = operationalState.RecordDiagnostic(statusstate.DiagnosticInput{
+				At: time.Now(), Component: "audit", Category: "audit_cleanup",
+			})
 			a.logger.Warn("security audit cleanup failed",
 				"component", "audit",
 				"error_category", "audit_cleanup",
@@ -317,6 +330,30 @@ func (a *App) controlMux() *http.ServeMux {
 			return
 		}
 		writeControlJSON(w, struct{}{}, store.RevokeToken(r.Context(), input.ID))
+	})
+	mux.HandleFunc("GET /database/check", func(w http.ResponseWriter, r *http.Request) {
+		if len(r.URL.Query()) != 0 {
+			writeControlJSON(w, struct{}{}, errors.New("invalid database check query"))
+			return
+		}
+		report, err := a.databaseCheck.Check(r.Context())
+		diagnostic := statusstate.DiagnosticInput{
+			At: time.Now(), Component: "database",
+			Category:  "database_check_succeeded",
+			RequestID: web.RequestIDFromContext(r.Context()),
+		}
+		if err != nil {
+			diagnostic.Category = "database_check_failed"
+		}
+		_ = a.status.RecordDiagnostic(diagnostic)
+		writeControlJSON(w, report, err)
+	})
+	mux.HandleFunc("GET /diagnostics", func(w http.ResponseWriter, r *http.Request) {
+		if len(r.URL.Query()) != 0 {
+			writeControlJSON(w, struct{}{}, errors.New("invalid diagnostics query"))
+			return
+		}
+		writeControlJSON(w, a.status.Snapshot(time.Now()).Diagnostics, nil)
 	})
 	return mux
 }

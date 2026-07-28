@@ -1095,11 +1095,16 @@ A compact appliance-status page, not a metrics dashboard.
 
 - database size;
 - WAL size;
+- schema and SQLite version;
 - configured size limit;
 - oldest event;
 - newest event;
 - retention age;
 - last cleanup.
+- last bounded database-check result and time;
+- a `Run safe database check` action that preserves the Status page, reports
+  a concise success/failure notice, and never exposes database paths or raw
+  SQLite errors.
 
 #### Ingestion
 
@@ -1125,6 +1130,9 @@ A compact appliance-status page, not a metrics dashboard.
 #### Diagnostics
 
 - latest sanitized operational events.
+- each row shows time, textual severity, component, category, fixed safe
+  summary, optional request ID, and optional recovery time;
+- never accept or render arbitrary process-error text.
 
 ### 18.3 Visualization
 

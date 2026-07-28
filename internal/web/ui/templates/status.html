@@ -1,5 +1,8 @@
 {{define "status.html"}}
 <section class="workspace-panel status-workspace" aria-label="Siftail status">
+  {{if .CheckNotice}}<div class="notice {{if .CheckFailed}}notice-warning{{else}}notice-info{{end}}" role="status">
+    <p>{{.CheckNotice}}</p>
+  </div>{{end}}
   {{if .Error}}<div class="form-error" role="alert">
     <p>{{.Error}}</p>
     {{if .ErrorRequestID}}<p>Request ID: <code>{{.ErrorRequestID}}</code></p>{{end}}
@@ -14,6 +17,8 @@
       <h2 id="status-runtime">Runtime</h2>
       <dl class="status-facts">
         <div><dt>Version</dt><dd>{{.Version}}</dd></div>
+        <div><dt>Database schema</dt><dd>{{.SchemaVersion}}</dd></div>
+        <div><dt>SQLite</dt><dd>{{.SQLiteVersion}}</dd></div>
         <div><dt>Uptime</dt><dd>{{.Uptime}}</dd></div>
         <div><dt>Architecture</dt><dd>{{.Architecture}}</dd></div>
       </dl>
@@ -31,9 +36,15 @@
         <div><dt>Retention age</dt><dd>{{.RetentionAge}}</dd></div>
         <div><dt>Last cleanup</dt><dd>{{.LastCleanup}}</dd></div>
         <div><dt>Cleanup result</dt><dd>{{.LastCleanupResult}}</dd></div>
+        <div><dt>Last database check</dt><dd>{{.DatabaseCheck}}</dd></div>
+        <div><dt>Database check time</dt><dd>{{.DatabaseCheckAt}}</dd></div>
       </dl>
       <label for="database-usage">Active SQLite footprint · {{.DatabaseUsage}}%</label>
       <progress id="database-usage" max="100" value="{{.DatabaseUsage}}">{{.DatabaseUsage}}%</progress>
+      <form method="post" action="/status/database-check">
+        <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+        <button class="button button-quiet" type="submit">Run safe database check</button>
+      </form>
     </section>
 
     <section aria-labelledby="status-ingestion">
@@ -55,8 +66,10 @@
       {{if .Diagnostics}}<ol class="diagnostic-list">
         {{range .Diagnostics}}<li>
           <time>{{.Time}}</time>
-          <strong>{{.Category}}</strong>
+          <strong>{{.Severity}} · {{.Component}} · {{.Category}}</strong>
           <span>{{.Summary}}</span>
+          {{if .RequestID}}<span>Request ID: <code>{{.RequestID}}</code></span>{{end}}
+          {{if .RecoveredAt}}<span>Recovered: {{.RecoveredAt}}</span>{{end}}
         </li>{{end}}
       </ol>{{else}}<p>No recent operational diagnostics.</p>{{end}}
     </section>

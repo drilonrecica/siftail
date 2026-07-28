@@ -11,6 +11,7 @@ import (
 
 	"github.com/drilonrecica/siftail/internal/ingest"
 	"github.com/drilonrecica/siftail/internal/sources"
+	statusstate "github.com/drilonrecica/siftail/internal/status"
 	"github.com/drilonrecica/siftail/internal/web"
 	webui "github.com/drilonrecica/siftail/internal/web/ui"
 )
@@ -179,6 +180,7 @@ func (b *Browser) guidedIngestionTest(w http.ResponseWriter, r *http.Request) {
 	serverID, idErr := serverPathID(r)
 	values, formErr := exactManagementForm(r, "token")
 	if idErr != nil || formErr != nil {
+		b.recordGuidedTestRejected(r)
 		b.writeGuidedTestJSON(w, http.StatusBadRequest, ingest.TestResult{
 			Outcome: ingest.TestRejected, Title: "Guided test request was invalid",
 			Detail: "Reload the one-time token page and try again.",
@@ -186,6 +188,7 @@ func (b *Browser) guidedIngestionTest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if session.CSRFToken == "" {
+		b.recordGuidedTestRejected(r)
 		b.writeGuidedTestJSON(w, http.StatusForbidden, ingest.TestResult{
 			Outcome: ingest.TestRejected, Title: "Guided test request was forbidden",
 			Detail: "Sign in again and create a replacement token.",
@@ -193,7 +196,17 @@ func (b *Browser) guidedIngestionTest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	result := b.guideTester.Test(r.Context(), serverID, values.Get("token"))
+	if result.Outcome == ingest.TestRejected {
+		b.recordGuidedTestRejected(r)
+	}
 	b.writeGuidedTestJSON(w, http.StatusOK, result)
+}
+
+func (b *Browser) recordGuidedTestRejected(r *http.Request) {
+	_ = b.status.RecordDiagnostic(statusstate.DiagnosticInput{
+		At: b.now(), Component: "ingestion", Category: "guided_test_rejected",
+		RequestID: web.RequestIDFromContext(r.Context()),
+	})
 }
 
 func (b *Browser) writeGuidedTestJSON(w http.ResponseWriter, status int, result ingest.TestResult) {

@@ -4,11 +4,13 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/drilonrecica/siftail/internal/ingest"
+	"github.com/drilonrecica/siftail/internal/web"
 )
 
 func TestBrowserStatusIsProtectedSanitizedAndShowsTransitions(t *testing.T) {
@@ -81,5 +83,60 @@ func TestBrowserStatusIsProtectedSanitizedAndShowsTransitions(t *testing.T) {
 		strings.Contains(invalidResponse.Body.String(), "private-query-marker") {
 		t.Fatalf("invalid Status = %d %q",
 			invalidResponse.Code, invalidResponse.Body.String())
+	}
+}
+
+func TestBrowserRunsAuthenticatedCorrelatedSafeDatabaseCheck(t *testing.T) {
+	fixture := newBrowserFixture(t, "https://logs.example.test", true)
+	cookie := loginBrowserCookie(t, fixture)
+	handler := web.RequestID(fixture.handler())
+	form := url.Values{"csrf_token": {CSRFToken(cookie.Value)}}
+	request := httptest.NewRequest(
+		http.MethodPost, "/status/database-check",
+		strings.NewReader(form.Encode()),
+	)
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	request.Header.Set("Origin", "https://logs.example.test")
+	request.AddCookie(cookie)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusSeeOther ||
+		response.Header().Get("Location") !=
+			"/status?notice=database-check-complete" {
+		t.Fatalf("database check response = %d %q %q",
+			response.Code, response.Header().Get("Location"), response.Body.String())
+	}
+
+	pageRequest := httptest.NewRequest(
+		http.MethodGet, "/status?notice=database-check-complete", nil,
+	)
+	pageRequest.AddCookie(cookie)
+	page := httptest.NewRecorder()
+	handler.ServeHTTP(page, pageRequest)
+	body := page.Body.String()
+	if page.Code != http.StatusOK ||
+		!strings.Contains(body, "Database check completed.") ||
+		!strings.Contains(body, "Healthy · schema 4/4 · SQLite ") ||
+		!strings.Contains(body, "· ok · checkpoint completed") ||
+		!strings.Contains(body, "database_check_succeeded") ||
+		!strings.Contains(body, "The bounded database check completed successfully.") ||
+		!strings.Contains(body, "Request ID:") {
+		t.Fatalf("checked Status = %d %q", page.Code, body)
+	}
+	for _, forbidden := range []string{
+		"private-status-payload", "private-status-secret",
+		"password_hash", "token_hash", "/tmp/", "/home/",
+	} {
+		if forbidden != "" && strings.Contains(body, forbidden) {
+			t.Fatalf("database check page exposed %q", forbidden)
+		}
+	}
+
+	unauthenticated := httptest.NewRecorder()
+	handler.ServeHTTP(unauthenticated, httptest.NewRequest(
+		http.MethodPost, "/status/database-check", nil,
+	))
+	if unauthenticated.Code != http.StatusSeeOther {
+		t.Fatalf("unauthenticated database check = %d", unauthenticated.Code)
 	}
 }

@@ -62,6 +62,9 @@ func newBrowserFixture(t *testing.T, publicURL string, administrator bool) *brow
 	auditStore := audit.NewStore(db.Reader(), coordinator)
 	operationalState := statusstate.NewState(time.Now())
 	operationalState.SetWriterReady(true)
+	databaseChecker := database.NewActiveChecker(
+		db, databasePath, coordinator, operationalState.DatabaseWritable,
+	)
 	sourceStore := sources.NewCoordinatedStore(db.Reader(), coordinator)
 	ingestPublicURL := "https://ingest.example.test/api/v1/ingest"
 	guideTester, err := ingest.NewGuideTester(ingestPublicURL, sourceStore)
@@ -70,11 +73,12 @@ func newBrowserFixture(t *testing.T, publicURL string, administrator bool) *brow
 	}
 	browser := NewBrowser(adminStore, sessionStore, BrowserConfig{
 		PublicURL: publicURL, IngestPublicURL: ingestPublicURL,
-		GuideTester:    guideTester,
-		HistoryStore:   logs.NewHistoryStore(db.Reader(), codec),
-		SourceStore:    sourceStore,
-		RetentionStore: retentionStore,
-		AuditStore:     auditStore,
+		GuideTester:     guideTester,
+		HistoryStore:    logs.NewHistoryStore(db.Reader(), codec),
+		SourceStore:     sourceStore,
+		RetentionStore:  retentionStore,
+		AuditStore:      auditStore,
+		DatabaseChecker: databaseChecker,
 		StatusStore: statusstate.NewStore(
 			db.Reader(), databasePath, nil, retentionStore, operationalState,
 		),
