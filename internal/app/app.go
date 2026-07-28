@@ -18,6 +18,7 @@ import (
 	"github.com/drilonrecica/siftail/internal/config"
 	"github.com/drilonrecica/siftail/internal/database"
 	"github.com/drilonrecica/siftail/internal/ingest"
+	"github.com/drilonrecica/siftail/internal/logs"
 	"github.com/drilonrecica/siftail/internal/sessions"
 	"github.com/drilonrecica/siftail/internal/sources"
 	"github.com/drilonrecica/siftail/internal/web"
@@ -34,6 +35,7 @@ type App struct {
 	queue        *ingest.Queue
 	ingestHTTP   http.Handler
 	browser      *auth.Browser
+	cursorCodec  *logs.CursorCodec
 	shuttingDown atomic.Bool
 }
 
@@ -79,6 +81,15 @@ func (a *App) Run(ctx context.Context) error {
 	coordinatorDone := make(chan error, 1)
 	go func() { coordinatorDone <- coordinator.Run(coordinatorCtx) }()
 	<-coordinator.Ready()
+	cursorCodec, err := logs.LoadCursorCodec(serverCtx, db.Reader(), coordinator)
+	if err != nil {
+		coordinator.Close()
+		cancelCoordinator()
+		<-coordinatorDone
+		return fmt.Errorf("history cursor setup: %w", err)
+	}
+	a.cursorCodec = cursorCodec
+	defer func() { a.cursorCodec = nil }()
 	administratorStore := auth.NewCoordinatedStore(db.Reader(), coordinator)
 	sessionStore := sessions.NewCoordinatedStore(db.Reader(), coordinator)
 	a.browser = auth.NewBrowser(administratorStore, sessionStore, auth.BrowserConfig{

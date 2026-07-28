@@ -218,6 +218,28 @@ inside `SIFTAIL_TRUSTED_PROXY_CIDRS`; direct clients cannot spoof it. Siftail
 does not treat `Remote-User`, `X-Forwarded-User`, or other identity headers as
 authentication.
 
+### Historical query compatibility
+
+History URLs use `mode=history` and absolute UTC `from`/`to` endpoints with
+half-open `[from,to)` semantics. Presets (`15m`, `1h`, `6h`, `24h`, and `7d`)
+are resolved immediately into those absolute endpoints, so a bookmarked page
+does not drift with the clock. The default range is one hour, the maximum is
+31 days, and page limits are 200 by default and at most 500.
+
+The URL can carry a Server and source hierarchy, exact container instance,
+comma-separated canonical levels and streams, literal `contains` and
+`excludes` terms, selected exact common fields, traversal direction, and an
+opaque cursor. Text filters are bounded to 512 UTF-8 bytes. Complete query
+state is serialized canonically; credentials, session tokens, CSRF values, and
+the local cursor key are never part of the URL.
+
+History cursors are versioned URL-safe values authenticated with HMAC-SHA256.
+They bind `(event_at_us,id)`, direction, and the fingerprint of the complete
+canonical query excluding only the cursor itself. Siftail rejects altered
+cursors and cursors reused with another query. A random 32-byte key is created
+through the database mutation coordinator and persisted in `settings`; this
+contract adds no schema migration, dependency, or external key service.
+
 ### Current dependency rationale
 
 - `github.com/mattn/go-sqlite3` v1.14.48 is the accepted SQLite driver. It

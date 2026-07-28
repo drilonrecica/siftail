@@ -765,10 +765,17 @@ SSO, JWTs, CAPTCHA, or a public admin API.
 
 ### SFT-019 — Implement the historical query and cursor contract
 
-**Status:** Planned  
+**Status:** Done
 **Milestone:** 0.2.0  
 **Depends on:** SFT-015  
-**Issue/PR:** —
+**Issue/PR:** — (direct maintainer implementation)
+**Completed:** 2026-07-28
+**Completion evidence:** Typed parsing and canonical round-trip tests cover
+absolute/default/preset ranges, boundaries, every filter family, byte limits,
+malformed values, ordering, and URL safety. Real-SQLite tests cover coordinated
+key creation and persistence plus cursor round trips, tampering, malformed
+authenticated payloads, direction/query mismatch, and URL-safe encoding.
+Bounded parser and cursor fuzz targets are included.
 
 **Authoritative references:** `DOMAIN.md` §24; `ARCHITECTURE.md` §§16.1–16.5;
 `PRODUCT.md` §13.
