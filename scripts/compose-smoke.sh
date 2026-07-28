@@ -47,11 +47,11 @@ if ! docker compose version >/dev/null 2>&1; then
   exit 1
 fi
 
-export SIFTAIL_IMAGE="$image"
+export COMPOSE_SIFTAIL_IMAGE="$image"
 export SIFTAIL_PUBLIC_URL="$public_url"
 export SIFTAIL_INGEST_PUBLIC_URL="$ingest_url"
-export SIFTAIL_LOCAL_UI_PORT="$ui_port"
-export SIFTAIL_LOCAL_INGEST_PORT="$ingest_port"
+export COMPOSE_SIFTAIL_LOCAL_UI_PORT="$ui_port"
+export COMPOSE_SIFTAIL_LOCAL_INGEST_PORT="$ingest_port"
 
 compose() {
   docker compose \
@@ -165,7 +165,7 @@ wait_ready
 history_contains_event
 
 docker image tag "$image" "$recreated_image"
-export SIFTAIL_IMAGE="$recreated_image"
+export COMPOSE_SIFTAIL_IMAGE="$recreated_image"
 compose up --detach --wait --force-recreate
 wait_ready
 history_contains_event

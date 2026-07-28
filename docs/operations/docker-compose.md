@@ -11,7 +11,7 @@ ghcr.io/drilonrecica/siftail:0.5.0
 ```
 
 Until that image is published, or when verifying a local build, set
-`SIFTAIL_IMAGE` to an image that already exists in the selected container
+`COMPOSE_SIFTAIL_IMAGE` to an image that already exists in the selected container
 engine. Do not interpret the default reference as evidence that the release
 has been published.
 
@@ -79,10 +79,10 @@ SIFTAIL_INGEST_PUBLIC_URL=http://127.0.0.1:8081/api/v1/ingest
 The local bind addresses and published ports are independently configurable:
 
 ```env
-SIFTAIL_LOCAL_UI_BIND=127.0.0.1
-SIFTAIL_LOCAL_UI_PORT=8080
-SIFTAIL_LOCAL_INGEST_BIND=127.0.0.1
-SIFTAIL_LOCAL_INGEST_PORT=8081
+COMPOSE_SIFTAIL_LOCAL_UI_BIND=127.0.0.1
+COMPOSE_SIFTAIL_LOCAL_UI_PORT=8080
+COMPOSE_SIFTAIL_LOCAL_INGEST_BIND=127.0.0.1
+COMPOSE_SIFTAIL_LOCAL_INGEST_PORT=8081
 ```
 
 Keep both bind addresses on loopback unless you have deliberately designed
@@ -165,11 +165,11 @@ available on UI port `8080`; only readiness drives the Compose health state.
 The application drains accepted work for at most 30 seconds by default.
 Compose gives the container 40 seconds before forced termination. If you
 increase `SIFTAIL_SHUTDOWN_TIMEOUT`, also increase
-`SIFTAIL_STOP_GRACE_PERIOD` so the Compose grace remains longer:
+`COMPOSE_SIFTAIL_STOP_GRACE_PERIOD` so the Compose grace remains longer:
 
 ```env
 SIFTAIL_SHUTDOWN_TIMEOUT=45s
-SIFTAIL_STOP_GRACE_PERIOD=55s
+COMPOSE_SIFTAIL_STOP_GRACE_PERIOD=55s
 ```
 
 Do not override `docker compose stop` with a shorter timeout. A request without
@@ -226,7 +226,7 @@ stopped-server restore, are documented in
 Choose an explicit version, pull it, and recreate only the service:
 
 ```env
-SIFTAIL_IMAGE=ghcr.io/drilonrecica/siftail:0.5.1
+COMPOSE_SIFTAIL_IMAGE=ghcr.io/drilonrecica/siftail:0.5.1
 ```
 
 ```bash
@@ -276,6 +276,11 @@ Coolify consumes the base file, routes its assigned domains to internal ports
 hardcodes `COOLIFY_APP_NAME=siftail-self`, matching the tested Fluent Bit
 self-exclusion and preventing Siftail's own stdout from being recursively
 drained when the collector configuration is correct.
+
+Coolify may place every Compose interpolation control in its generated `.env`
+and attach that file to the container. Deployment-only controls therefore use
+the `COMPOSE_SIFTAIL_` prefix; do not rename them into the application-reserved
+`SIFTAIL_` namespace.
 
 This file does not replace the SFT-052 manual Coolify guide. A one-click
 template, complete drain installation procedure, supported-version walkthrough,

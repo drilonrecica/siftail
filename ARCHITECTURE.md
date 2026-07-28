@@ -2435,7 +2435,7 @@ The supported `compose.yaml` is a production-shaped deployment boundary:
 
 - exactly one `siftail` service and one named volume mounted at `/data`;
 - the versioned `ghcr.io/drilonrecica/siftail:0.5.0` image by default, with an
-  explicit `SIFTAIL_IMAGE` interpolation override for verification or a
+  explicit `COMPOSE_SIFTAIL_IMAGE` interpolation override for verification or a
   deliberate release selection;
 - no published host ports in the base file; container-network reverse proxies
   and Coolify route separately to internal ports `8080` and `8081`;
@@ -2455,6 +2455,11 @@ Compose interpolation requires both `SIFTAIL_PUBLIC_URL` and the complete
 CIDRs remain empty unless the operator identifies the exact networks whose
 forwarded metadata is trusted. A broad value such as `0.0.0.0/0` or `::/0` is
 unsafe and does not enable identity-header authentication.
+
+Compose-only interpolation controls use the `COMPOSE_SIFTAIL_` prefix rather
+than the application-reserved `SIFTAIL_` prefix. This keeps Coolify's generated
+`.env`/`env_file` behavior from injecting deployment-only controls that Siftail
+would correctly reject as unknown process configuration.
 
 Compose files contain no administrator password, ingestion token, secret
 environment value, privileged mode, custom network, host bind mount, Docker

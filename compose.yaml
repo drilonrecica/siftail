@@ -1,10 +1,10 @@
 services:
   siftail:
-    image: "${SIFTAIL_IMAGE:-ghcr.io/drilonrecica/siftail:0.5.0}"
+    image: "${COMPOSE_SIFTAIL_IMAGE:-ghcr.io/drilonrecica/siftail:0.5.0}"
     entrypoint: ["/siftail"]
     command: ["serve"]
     restart: unless-stopped
-    stop_grace_period: "${SIFTAIL_STOP_GRACE_PERIOD:-40s}"
+    stop_grace_period: "${COMPOSE_SIFTAIL_STOP_GRACE_PERIOD:-40s}"
     environment:
       COOLIFY_APP_NAME: siftail-self
       SIFTAIL_DATA_DIR: /data

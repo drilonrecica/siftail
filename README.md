@@ -109,7 +109,7 @@ No public image is implied until the release workflow publishes one.
 [`compose.yaml`](compose.yaml) runs exactly one Siftail service against one
 named `/data` volume. It uses the future versioned
 `ghcr.io/drilonrecica/siftail:0.5.0` image by default, permits an explicit
-`SIFTAIL_IMAGE` override, exposes internal ports `8080` and `8081`, requires
+`COMPOSE_SIFTAIL_IMAGE` override, exposes internal ports `8080` and `8081`, requires
 both public URLs, checks readiness, restarts unless stopped, and allows the
 default 30-second Siftail drain 40 seconds before forced container
 termination. It publishes no host ports, so Coolify and container-network
