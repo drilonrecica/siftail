@@ -1,0 +1,124 @@
+/* Siftail design tokens — the single source of color, type, spacing, and
+   density values (DESIGN.md §27–§28, ADR 0005).
+
+   Every semantic color is defined exactly once with light-dark(). A static
+   dark fallback is declared first so browsers without light-dark() support
+   receive the complete dark theme. Do not add per-theme token blocks. */
+
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 100 800;
+  font-display: swap;
+  src: url("/assets/jetbrains-mono-latin.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6,
+    U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122,
+    U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 100 800;
+  font-display: swap;
+  src: url("/assets/jetbrains-mono-latin-ext.woff2") format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7,
+    U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F,
+    U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F,
+    U+A720-A7FF;
+}
+
+:root {
+  color-scheme: dark light;
+
+  /* Faces */
+  --font-sans: system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Consolas,
+    "Liberation Mono", monospace;
+
+  /* Type scale (root: 15px Compact, 16px Comfortable) */
+  --text-2xs: 0.733rem;
+  --text-xs: 0.8rem;
+  --text-sm: 0.867rem;
+  --text-md: 1rem;
+  --text-lg: 1.133rem;
+  --text-xl: 1.333rem;
+  --text-2xl: 1.6rem;
+  --text-log: 0.833rem;
+
+  /* Spacing, radius, elevation */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+  --radius-sm: 0.3rem;
+  --radius-md: 0.55rem;
+  --radius-lg: 0.8rem;
+  --shadow-raised: 0 6px 18px rgb(0 0 0 / 0.22);
+  --shadow-overlay: 0 18px 48px rgb(0 0 0 / 0.34);
+
+  /* Surfaces */
+  --surface-base: #0f1218;
+  --surface-base: light-dark(#0f1218, #f3f4f8);
+  --surface-raised: #151a24;
+  --surface-raised: light-dark(#151a24, #fbfcfe);
+  --surface-overlay: #1b2230;
+  --surface-overlay: light-dark(#1b2230, #ffffff);
+  --surface-hover: #212a3c;
+  --surface-hover: light-dark(#212a3c, #e8eaf2);
+  --surface-selected: #26304b;
+  --surface-selected: light-dark(#26304b, #e1e5f7);
+
+  /* Text */
+  --text-primary: #e9edf5;
+  --text-primary: light-dark(#e9edf5, #1b202b);
+  --text-secondary: #b4bdcd;
+  --text-secondary: light-dark(#b4bdcd, #444c5e);
+  --text-muted: #808b9d;
+  --text-muted: light-dark(#808b9d, #5f6879);
+  --text-inverse: #0d1017;
+  --text-inverse: light-dark(#0d1017, #f5f7fc);
+
+  /* Borders */
+  --border-subtle: #262e3e;
+  --border-subtle: light-dark(#262e3e, #d6dae5);
+  --border-strong: #3e4a61;
+  --border-strong: light-dark(#3e4a61, #a7afc2);
+
+  /* Accent — the only brand hue; never used for status or severity */
+  --accent: #8b96ec;
+  --accent: light-dark(#8b96ec, #4653c8);
+  --accent-hover: #a2acf2;
+  --accent-hover: light-dark(#a2acf2, #3945b0);
+
+  /* Status and severity */
+  --status-info: #85a9d6;
+  --status-info: light-dark(#85a9d6, #33608f);
+  --status-warning: #e2a93f;
+  --status-warning: light-dark(#e2a93f, #8f5b00);
+  --status-error: #ee7b74;
+  --status-error: light-dark(#ee7b74, #bc3a31);
+  --status-fatal: #f79a94;
+  --status-fatal: light-dark(#f79a94, #8f1d25);
+  --status-success: #6fc08d;
+  --status-success: light-dark(#6fc08d, #1f7a48);
+
+  --focus-ring: #adb7ff;
+  --focus-ring: light-dark(#adb7ff, #4653c8);
+
+  font-size: 15px;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+
+:root[data-density="comfortable"] {
+  font-size: 16px;
+}

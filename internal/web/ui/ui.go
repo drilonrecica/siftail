@@ -9,6 +9,7 @@ import (
 	"html/template"
 	"net/http"
 	"path"
+	"strings"
 )
 
 //go:embed templates/*.html assets/* licenses/*
@@ -483,12 +484,15 @@ func (r *Renderer) Asset(w http.ResponseWriter, request *http.Request) {
 	}
 	name := path.Base(request.URL.Path)
 	contentTypes := map[string]string{
-		"app.css":            "text/css; charset=utf-8",
-		"app.js":             "text/javascript; charset=utf-8",
-		"live.js":            "text/javascript; charset=utf-8",
-		"tokens.js":          "text/javascript; charset=utf-8",
-		"favicon.svg":        "image/svg+xml",
-		"htmx-2.0.10.min.js": "text/javascript; charset=utf-8",
+		"app.css":                        "text/css; charset=utf-8",
+		"tokens.css":                     "text/css; charset=utf-8",
+		"app.js":                         "text/javascript; charset=utf-8",
+		"live.js":                        "text/javascript; charset=utf-8",
+		"tokens.js":                      "text/javascript; charset=utf-8",
+		"favicon.svg":                    "image/svg+xml",
+		"htmx-2.0.10.min.js":             "text/javascript; charset=utf-8",
+		"jetbrains-mono-latin.woff2":     "font/woff2",
+		"jetbrains-mono-latin-ext.woff2": "font/woff2",
 	}
 	contentType, ok := contentTypes[name]
 	if !ok {
@@ -501,7 +505,7 @@ func (r *Renderer) Asset(w http.ResponseWriter, request *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", contentType)
-	if name == "htmx-2.0.10.min.js" {
+	if name == "htmx-2.0.10.min.js" || strings.HasSuffix(name, ".woff2") {
 		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 	} else {
 		w.Header().Set("Cache-Control", "no-cache")

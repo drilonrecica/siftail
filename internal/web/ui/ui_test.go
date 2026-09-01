@@ -492,12 +492,15 @@ func TestEventDetailTemplateEscapesPayloadAndExposesSafeControls(t *testing.T) {
 func TestEmbeddedAssetsTypesIntegrityAndSafety(t *testing.T) {
 	renderer := New()
 	cases := map[string]string{
-		"app.css":            "text/css; charset=utf-8",
-		"app.js":             "text/javascript; charset=utf-8",
-		"live.js":            "text/javascript; charset=utf-8",
-		"tokens.js":          "text/javascript; charset=utf-8",
-		"favicon.svg":        "image/svg+xml",
-		"htmx-2.0.10.min.js": "text/javascript; charset=utf-8",
+		"app.css":                        "text/css; charset=utf-8",
+		"tokens.css":                     "text/css; charset=utf-8",
+		"app.js":                         "text/javascript; charset=utf-8",
+		"live.js":                        "text/javascript; charset=utf-8",
+		"tokens.js":                      "text/javascript; charset=utf-8",
+		"favicon.svg":                    "image/svg+xml",
+		"htmx-2.0.10.min.js":             "text/javascript; charset=utf-8",
+		"jetbrains-mono-latin.woff2":     "font/woff2",
+		"jetbrains-mono-latin-ext.woff2": "font/woff2",
 	}
 	for name, contentType := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -508,11 +511,13 @@ func TestEmbeddedAssetsTypesIntegrityAndSafety(t *testing.T) {
 				response.Header().Get("Content-Type") != contentType {
 				t.Fatalf("asset response = %d %#v", response.Code, response.Header())
 			}
+			immutable := name == "htmx-2.0.10.min.js" ||
+				strings.HasSuffix(name, ".woff2")
 			cache := response.Header().Get("Cache-Control")
-			if name == "htmx-2.0.10.min.js" && !strings.Contains(cache, "immutable") {
+			if immutable && !strings.Contains(cache, "immutable") {
 				t.Fatalf("versioned asset cache = %q", cache)
 			}
-			if name != "htmx-2.0.10.min.js" && cache != "no-cache" {
+			if !immutable && cache != "no-cache" {
 				t.Fatalf("mutable asset cache = %q", cache)
 			}
 			if response.Body.Len() == 0 {
