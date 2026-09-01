@@ -20,25 +20,25 @@ func (b *Browser) serversPage(w http.ResponseWriter, r *http.Request) {
 	session, _ := BrowserSessionFromContext(r.Context())
 	query, notice, err := parseServerPageQuery(r.URL.Query())
 	if err != nil {
-		b.renderServersError(w, session.CSRFToken, http.StatusBadRequest,
+		b.renderServersError(w, r, session.CSRFToken, http.StatusBadRequest,
 			"Check the Server page parameters.", "")
 		return
 	}
 	if b.sources == nil {
-		b.renderServersError(w, session.CSRFToken, http.StatusServiceUnavailable,
+		b.renderServersError(w, r, session.CSRFToken, http.StatusServiceUnavailable,
 			"Servers are temporarily unavailable.", web.RequestIDFromContext(r.Context()))
 		return
 	}
 	page, err := b.sources.ServerPage(r.Context(), query)
 	if err != nil {
-		b.renderServersError(w, session.CSRFToken, http.StatusServiceUnavailable,
+		b.renderServersError(w, r, session.CSRFToken, http.StatusServiceUnavailable,
 			"Servers could not be read because the database is temporarily unavailable.",
 			web.RequestIDFromContext(r.Context()))
 		return
 	}
 	view := buildServersView(query, page, session.CSRFToken)
 	view.Notice = notice
-	b.renderServersView(w, session.CSRFToken, http.StatusOK, view)
+	b.renderServersView(w, r, session.CSRFToken, http.StatusOK, view)
 }
 
 func (b *Browser) serverDetailPage(w http.ResponseWriter, r *http.Request) {
@@ -46,7 +46,7 @@ func (b *Browser) serverDetailPage(w http.ResponseWriter, r *http.Request) {
 	id, err := serverPathID(r)
 	notice, noticeErr := serverDetailNotice(r.URL.Query())
 	if err != nil || noticeErr != nil {
-		b.renderServersError(w, session.CSRFToken, http.StatusBadRequest,
+		b.renderServersError(w, r, session.CSRFToken, http.StatusBadRequest,
 			"Check the Server identifier.", "")
 		return
 	}
@@ -58,12 +58,12 @@ func (b *Browser) serverCreate(w http.ResponseWriter, r *http.Request) {
 	session, _ := BrowserSessionFromContext(r.Context())
 	values, err := exactManagementForm(r, "name", "hostname")
 	if err != nil {
-		b.renderServersError(w, session.CSRFToken, http.StatusBadRequest,
+		b.renderServersError(w, r, session.CSRFToken, http.StatusBadRequest,
 			"Check the create-Server request.", "")
 		return
 	}
 	if b.sources == nil {
-		b.renderServersError(w, session.CSRFToken, http.StatusServiceUnavailable,
+		b.renderServersError(w, r, session.CSRFToken, http.StatusServiceUnavailable,
 			"Servers are temporarily unavailable.", web.RequestIDFromContext(r.Context()))
 		return
 	}
@@ -73,7 +73,7 @@ func (b *Browser) serverCreate(w http.ResponseWriter, r *http.Request) {
 			errors.Is(err, sources.ErrServerNameInUse) {
 			page, readErr := b.sources.ServerPage(r.Context(), sources.ServerPageQuery{})
 			if readErr != nil {
-				b.renderServersError(w, session.CSRFToken, http.StatusServiceUnavailable,
+				b.renderServersError(w, r, session.CSRFToken, http.StatusServiceUnavailable,
 					"Servers are temporarily unavailable.", web.RequestIDFromContext(r.Context()))
 				return
 			}
@@ -87,10 +87,10 @@ func (b *Browser) serverCreate(w http.ResponseWriter, r *http.Request) {
 			view.Name = values.Get("name")
 			view.Hostname = values.Get("hostname")
 			view.ServerError = message
-			b.renderServersView(w, session.CSRFToken, http.StatusUnprocessableEntity, view)
+			b.renderServersView(w, r, session.CSRFToken, http.StatusUnprocessableEntity, view)
 			return
 		}
-		b.renderServersError(w, session.CSRFToken, http.StatusServiceUnavailable,
+		b.renderServersError(w, r, session.CSRFToken, http.StatusServiceUnavailable,
 			"The Server could not be created because the database is temporarily unavailable.",
 			web.RequestIDFromContext(r.Context()))
 		return
@@ -103,12 +103,12 @@ func (b *Browser) tokenCreate(w http.ResponseWriter, r *http.Request) {
 	serverID, idErr := serverPathID(r)
 	values, formErr := exactManagementForm(r, "name")
 	if idErr != nil || formErr != nil {
-		b.renderServersError(w, session.CSRFToken, http.StatusBadRequest,
+		b.renderServersError(w, r, session.CSRFToken, http.StatusBadRequest,
 			"Check the create-token request.", "")
 		return
 	}
 	if b.sources == nil {
-		b.renderServersError(w, session.CSRFToken, http.StatusServiceUnavailable,
+		b.renderServersError(w, r, session.CSRFToken, http.StatusServiceUnavailable,
 			"Servers are temporarily unavailable.", web.RequestIDFromContext(r.Context()))
 		return
 	}
@@ -125,11 +125,11 @@ func (b *Browser) tokenCreate(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if errors.Is(err, sources.ErrServerNotFound) {
-			b.renderServersError(w, session.CSRFToken, http.StatusNotFound,
+			b.renderServersError(w, r, session.CSRFToken, http.StatusNotFound,
 				"Server not found.", "")
 			return
 		}
-		b.renderServersError(w, session.CSRFToken, http.StatusServiceUnavailable,
+		b.renderServersError(w, r, session.CSRFToken, http.StatusServiceUnavailable,
 			"The token could not be created because the database is temporarily unavailable.",
 			web.RequestIDFromContext(r.Context()))
 		return
@@ -137,7 +137,7 @@ func (b *Browser) tokenCreate(w http.ResponseWriter, r *http.Request) {
 	detail, err := b.sources.ServerManagementDetail(r.Context(), serverID)
 	if err != nil {
 		// The plaintext must not be exposed through an error response or log.
-		b.renderServersError(w, session.CSRFToken, http.StatusServiceUnavailable,
+		b.renderServersError(w, r, session.CSRFToken, http.StatusServiceUnavailable,
 			"The token was created but its display page is unavailable. Create a replacement token.",
 			web.RequestIDFromContext(r.Context()))
 		return
@@ -165,11 +165,9 @@ func (b *Browser) tokenCreate(w http.ResponseWriter, r *http.Request) {
 	if !tokenView.GuideAvailable {
 		tokenView.GuideError = "Set SIFTAIL_INGEST_PUBLIC_URL to the complete /api/v1/ingest URL and restart Siftail to generate and test configuration."
 	}
-	if err := b.ui.Shell(w, http.StatusCreated, webui.ShellView{
-		CSRFToken: session.CSRFToken,
-		Mode:      "token-created",
-		Token:     tokenView,
-	}); err != nil {
+	shell := b.shellBase(r, "token-created")
+	shell.Token = tokenView
+	if err := b.ui.Shell(w, http.StatusCreated, shell); err != nil {
 		http.Error(w, "The token display page is unavailable. Create a replacement token.",
 			http.StatusInternalServerError)
 	}
@@ -221,23 +219,23 @@ func (b *Browser) tokenRevoke(w http.ResponseWriter, r *http.Request) {
 	tokenID, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	values, formErr := exactManagementForm(r, "confirmation")
 	if err != nil || tokenID <= 0 || formErr != nil {
-		b.renderServersError(w, session.CSRFToken, http.StatusBadRequest,
+		b.renderServersError(w, r, session.CSRFToken, http.StatusBadRequest,
 			"Check the revoke-token request.", "")
 		return
 	}
 	if b.sources == nil {
-		b.renderServersError(w, session.CSRFToken, http.StatusServiceUnavailable,
+		b.renderServersError(w, r, session.CSRFToken, http.StatusServiceUnavailable,
 			"Servers are temporarily unavailable.", web.RequestIDFromContext(r.Context()))
 		return
 	}
 	token, err := b.sources.TokenMetadata(r.Context(), tokenID)
 	if errors.Is(err, sources.ErrTokenNotFound) {
-		b.renderServersError(w, session.CSRFToken, http.StatusNotFound,
+		b.renderServersError(w, r, session.CSRFToken, http.StatusNotFound,
 			"Ingestion token not found.", "")
 		return
 	}
 	if err != nil {
-		b.renderServersError(w, session.CSRFToken, http.StatusServiceUnavailable,
+		b.renderServersError(w, r, session.CSRFToken, http.StatusServiceUnavailable,
 			"The token could not be read because the database is temporarily unavailable.",
 			web.RequestIDFromContext(r.Context()))
 		return
@@ -259,7 +257,7 @@ func (b *Browser) tokenRevoke(w http.ResponseWriter, r *http.Request) {
 				http.StatusSeeOther)
 			return
 		}
-		b.renderServersError(w, session.CSRFToken, http.StatusServiceUnavailable,
+		b.renderServersError(w, r, session.CSRFToken, http.StatusServiceUnavailable,
 			"The token could not be revoked because the database is temporarily unavailable.",
 			web.RequestIDFromContext(r.Context()))
 		return
@@ -278,17 +276,17 @@ func (b *Browser) renderServerDetail(
 	tokenError, tokenName, revokeError string,
 ) {
 	if b.sources == nil {
-		b.renderServersError(w, csrfToken, http.StatusServiceUnavailable,
+		b.renderServersError(w, r, csrfToken, http.StatusServiceUnavailable,
 			"Servers are temporarily unavailable.", web.RequestIDFromContext(r.Context()))
 		return
 	}
 	detail, err := b.sources.ServerManagementDetail(r.Context(), serverID)
 	if errors.Is(err, sources.ErrServerNotFound) {
-		b.renderServersError(w, csrfToken, http.StatusNotFound, "Server not found.", "")
+		b.renderServersError(w, r, csrfToken, http.StatusNotFound, "Server not found.", "")
 		return
 	}
 	if err != nil {
-		b.renderServersError(w, csrfToken, http.StatusServiceUnavailable,
+		b.renderServersError(w, r, csrfToken, http.StatusServiceUnavailable,
 			"Server details could not be read because the database is temporarily unavailable.",
 			web.RequestIDFromContext(r.Context()))
 		return
@@ -298,9 +296,9 @@ func (b *Browser) renderServerDetail(
 	view.TokenError = tokenError
 	view.TokenName = tokenName
 	view.RevokeError = revokeError
-	if err := b.ui.Shell(w, status, webui.ShellView{
-		CSRFToken: csrfToken, Mode: "server-detail", Server: view,
-	}); err != nil {
+	shell := b.shellBase(r, "server-detail")
+	shell.Server = view
+	if err := b.ui.Shell(w, status, shell); err != nil {
 		http.Error(w, "Servers are temporarily unavailable.", http.StatusInternalServerError)
 	}
 }
@@ -451,24 +449,26 @@ func formatManagementTime(value int64) string {
 
 func (b *Browser) renderServersView(
 	w http.ResponseWriter,
+	r *http.Request,
 	csrfToken string,
 	status int,
 	view webui.ServersView,
 ) {
-	if err := b.ui.Shell(w, status, webui.ShellView{
-		CSRFToken: csrfToken, Mode: "servers", Servers: view,
-	}); err != nil {
+	shell := b.shellBase(r, "servers")
+	shell.Servers = view
+	if err := b.ui.Shell(w, status, shell); err != nil {
 		http.Error(w, "Servers are temporarily unavailable.", http.StatusInternalServerError)
 	}
 }
 
 func (b *Browser) renderServersError(
 	w http.ResponseWriter,
+	r *http.Request,
 	csrfToken string,
 	status int,
 	message, requestID string,
 ) {
-	b.renderServersView(w, csrfToken, status, webui.ServersView{
+	b.renderServersView(w, r, csrfToken, status, webui.ServersView{
 		Error: message, ErrorRequestID: requestID,
 	})
 }

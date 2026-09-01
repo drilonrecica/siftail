@@ -148,9 +148,11 @@ func TestHistoryExportDialogIsExplicitBoundedAndEscaped(t *testing.T) {
 			t.Errorf("History export dialog missing %q", want)
 		}
 	}
+	// The shell owns exactly two server-rendered CSRF tokens (preferences and
+	// sign-out); the export dialog itself must not embed one.
 	if strings.Contains(body, `<script>source`) ||
 		strings.Contains(body, `<script>payload`) ||
-		strings.Count(body, `name="csrf_token"`) != 1 {
+		strings.Count(body, `name="csrf_token"`) != 2 {
 		t.Fatalf("History export dialog exposed unsafe content or fragment CSRF: %s", body)
 	}
 }

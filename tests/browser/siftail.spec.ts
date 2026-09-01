@@ -957,6 +957,11 @@ test("keyboard, themes, reduced motion, mobile inspection, and axe smoke", async
   await login(page);
   await page.locator("[data-theme-select]").selectOption("dark");
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  // The preference persists server-side and is rendered before first paint,
+  // so a full reload keeps the theme with no flash and no client storage.
+  await page.reload();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  await expect(page.locator("[data-theme-select]")).toHaveValue("dark");
   const darkResults = await new AxeBuilder({ page })
     .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"])
     .analyze();

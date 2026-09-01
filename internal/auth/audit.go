@@ -16,10 +16,9 @@ import (
 const auditTimeLayout = "2006-01-02T15:04:05Z"
 
 func (b *Browser) auditPage(w http.ResponseWriter, r *http.Request) {
-	session, _ := BrowserSessionFromContext(r.Context())
 	query, redirectURL, err := parseAuditPageQuery(r.URL.Query(), b.now())
 	if err != nil {
-		b.renderAudit(w, session.CSRFToken, http.StatusBadRequest, webui.AuditView{
+		b.renderAudit(w, r, http.StatusBadRequest, webui.AuditView{
 			Error: "Check the Audit time range and filters.",
 		})
 		return
@@ -29,7 +28,7 @@ func (b *Browser) auditPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if b.audit == nil {
-		b.renderAudit(w, session.CSRFToken, http.StatusServiceUnavailable, webui.AuditView{
+		b.renderAudit(w, r, http.StatusServiceUnavailable, webui.AuditView{
 			Error:          "Security audit history is temporarily unavailable.",
 			ErrorRequestID: web.RequestIDFromContext(r.Context()),
 		})
@@ -37,25 +36,25 @@ func (b *Browser) auditPage(w http.ResponseWriter, r *http.Request) {
 	}
 	page, err := b.audit.List(r.Context(), query)
 	if err != nil {
-		b.renderAudit(w, session.CSRFToken, http.StatusServiceUnavailable, webui.AuditView{
+		b.renderAudit(w, r, http.StatusServiceUnavailable, webui.AuditView{
 			Error:          "Security audit history could not be read because local storage is temporarily unavailable.",
 			ErrorRequestID: web.RequestIDFromContext(r.Context()),
 		})
 		return
 	}
 	view := buildAuditView(query, page)
-	b.renderAudit(w, session.CSRFToken, http.StatusOK, view)
+	b.renderAudit(w, r, http.StatusOK, view)
 }
 
 func (b *Browser) renderAudit(
 	w http.ResponseWriter,
-	csrfToken string,
+	r *http.Request,
 	status int,
 	view webui.AuditView,
 ) {
-	if err := b.ui.Shell(w, status, webui.ShellView{
-		CSRFToken: csrfToken, Mode: "audit", Audit: view,
-	}); err != nil {
+	shell := b.shellBase(r, "audit")
+	shell.Audit = view
+	if err := b.ui.Shell(w, status, shell); err != nil {
 		http.Error(w, "Security audit history is temporarily unavailable.",
 			http.StatusInternalServerError)
 	}

@@ -15,28 +15,28 @@ func (b *Browser) settingsPage(w http.ResponseWriter, r *http.Request) {
 	session, _ := BrowserSessionFromContext(r.Context())
 	notice, err := settingsNotice(r.URL.Query())
 	if err != nil {
-		b.renderSettings(w, session.CSRFToken, http.StatusBadRequest, webui.SettingsView{
+		b.renderSettings(w, r, session.CSRFToken, http.StatusBadRequest, webui.SettingsView{
 			Error: "Check the Settings page parameters.",
 		})
 		return
 	}
 	view, err := b.loadSettingsView(r, session.CSRFToken)
 	if err != nil {
-		b.renderSettings(w, session.CSRFToken, http.StatusServiceUnavailable, webui.SettingsView{
+		b.renderSettings(w, r, session.CSRFToken, http.StatusServiceUnavailable, webui.SettingsView{
 			Error:          "Retention settings could not be read because the database is temporarily unavailable.",
 			ErrorRequestID: web.RequestIDFromContext(r.Context()),
 		})
 		return
 	}
 	view.Notice = notice
-	b.renderSettings(w, session.CSRFToken, http.StatusOK, view)
+	b.renderSettings(w, r, session.CSRFToken, http.StatusOK, view)
 }
 
 func (b *Browser) retentionSettingsSave(w http.ResponseWriter, r *http.Request) {
 	session, _ := BrowserSessionFromContext(r.Context())
 	values, err := exactManagementForm(r, "retention_days", "maximum_database_gib")
 	if err != nil {
-		b.renderSettings(w, session.CSRFToken, http.StatusBadRequest, webui.SettingsView{
+		b.renderSettings(w, r, session.CSRFToken, http.StatusBadRequest, webui.SettingsView{
 			Error: "Check the retention-settings request.",
 		})
 		return
@@ -61,13 +61,13 @@ func (b *Browser) retentionSettingsSave(w http.ResponseWriter, r *http.Request) 
 		view.DatabaseError = "Maximum database size must be a whole number from 1 to 1,024 GiB."
 	}
 	if ageErr != nil || sizeErr != nil {
-		b.renderSettings(w, session.CSRFToken, http.StatusUnprocessableEntity, view)
+		b.renderSettings(w, r, session.CSRFToken, http.StatusUnprocessableEntity, view)
 		return
 	}
 	if b.retention == nil {
 		view.Error = "Retention settings are temporarily unavailable."
 		view.ErrorRequestID = web.RequestIDFromContext(r.Context())
-		b.renderSettings(w, session.CSRFToken, http.StatusServiceUnavailable, view)
+		b.renderSettings(w, r, session.CSRFToken, http.StatusServiceUnavailable, view)
 		return
 	}
 	_, err = b.retention.Save(r.Context(), retention.Input{
@@ -75,18 +75,18 @@ func (b *Browser) retentionSettingsSave(w http.ResponseWriter, r *http.Request) 
 	})
 	if errors.Is(err, retention.ErrInvalidAgeLimit) {
 		view.RetentionError = "Retention must be a whole number from 1 to 3,650 days."
-		b.renderSettings(w, session.CSRFToken, http.StatusUnprocessableEntity, view)
+		b.renderSettings(w, r, session.CSRFToken, http.StatusUnprocessableEntity, view)
 		return
 	}
 	if errors.Is(err, retention.ErrInvalidSizeLimit) {
 		view.DatabaseError = "Maximum database size must be a whole number from 1 to 1,024 GiB."
-		b.renderSettings(w, session.CSRFToken, http.StatusUnprocessableEntity, view)
+		b.renderSettings(w, r, session.CSRFToken, http.StatusUnprocessableEntity, view)
 		return
 	}
 	if err != nil {
 		view.Error = "Retention settings could not be saved because the database is temporarily unavailable."
 		view.ErrorRequestID = web.RequestIDFromContext(r.Context())
-		b.renderSettings(w, session.CSRFToken, http.StatusServiceUnavailable, view)
+		b.renderSettings(w, r, session.CSRFToken, http.StatusServiceUnavailable, view)
 		return
 	}
 	http.Redirect(w, r, "/settings?notice=retention-saved", http.StatusSeeOther)
@@ -112,14 +112,15 @@ func (b *Browser) loadSettingsView(
 
 func (b *Browser) renderSettings(
 	w http.ResponseWriter,
+	r *http.Request,
 	csrfToken string,
 	status int,
 	view webui.SettingsView,
 ) {
 	view.CSRFToken = csrfToken
-	if err := b.ui.Shell(w, status, webui.ShellView{
-		CSRFToken: csrfToken, Mode: "settings", Settings: view,
-	}); err != nil {
+	shell := b.shellBase(r, "settings")
+	shell.Settings = view
+	if err := b.ui.Shell(w, status, shell); err != nil {
 		http.Error(w, "Retention settings are temporarily unavailable.",
 			http.StatusInternalServerError)
 	}

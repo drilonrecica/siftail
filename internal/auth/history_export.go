@@ -14,7 +14,6 @@ import (
 
 	"github.com/drilonrecica/siftail/internal/audit"
 	"github.com/drilonrecica/siftail/internal/logs"
-	webui "github.com/drilonrecica/siftail/internal/web/ui"
 )
 
 const historyExportConfirmation = "export matching history"
@@ -249,9 +248,9 @@ func (b *Browser) renderHistoryExportError(
 		view, err := b.historyView(r, query, false)
 		if err == nil {
 			view.ExportError = message
-			if err := b.ui.Shell(w, status, webui.ShellView{
-				CSRFToken: csrfToken, Mode: "history", History: view,
-			}); err == nil {
+			shell := b.shellBase(r, "history")
+			shell.History = view
+			if err := b.ui.Shell(w, status, shell); err == nil {
 				return
 			}
 		}

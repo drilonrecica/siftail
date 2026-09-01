@@ -20,13 +20,13 @@ func (b *Browser) statusPage(w http.ResponseWriter, r *http.Request) {
 	session, _ := BrowserSessionFromContext(r.Context())
 	notice, err := statusNotice(r.URL.Query())
 	if err != nil {
-		b.renderStatus(w, session.CSRFToken, http.StatusBadRequest, webui.StatusView{
+		b.renderStatus(w, r, session.CSRFToken, http.StatusBadRequest, webui.StatusView{
 			Severity: "Unavailable", Error: "Check the Status page parameters.",
 		})
 		return
 	}
 	if b.status == nil {
-		b.renderStatus(w, session.CSRFToken, http.StatusServiceUnavailable, webui.StatusView{
+		b.renderStatus(w, r, session.CSRFToken, http.StatusServiceUnavailable, webui.StatusView{
 			Severity: "Unavailable", Error: "Status is temporarily unavailable.",
 			ErrorRequestID: web.RequestIDFromContext(r.Context()),
 		})
@@ -34,7 +34,7 @@ func (b *Browser) statusPage(w http.ResponseWriter, r *http.Request) {
 	}
 	snapshot, err := b.status.Read(r.Context())
 	if err != nil {
-		b.renderStatus(w, session.CSRFToken, http.StatusServiceUnavailable, webui.StatusView{
+		b.renderStatus(w, r, session.CSRFToken, http.StatusServiceUnavailable, webui.StatusView{
 			Severity:       "Unavailable",
 			Error:          "Status could not be read because local storage is temporarily unavailable.",
 			ErrorRequestID: web.RequestIDFromContext(r.Context()),
@@ -58,13 +58,13 @@ func (b *Browser) statusPage(w http.ResponseWriter, r *http.Request) {
 			)
 		}
 	}
-	b.renderStatus(w, session.CSRFToken, http.StatusOK, view)
+	b.renderStatus(w, r, session.CSRFToken, http.StatusOK, view)
 }
 
 func (b *Browser) databaseCheck(w http.ResponseWriter, r *http.Request) {
 	session, _ := BrowserSessionFromContext(r.Context())
 	if _, err := exactManagementForm(r); err != nil {
-		b.renderStatus(w, session.CSRFToken, http.StatusBadRequest, webui.StatusView{
+		b.renderStatus(w, r, session.CSRFToken, http.StatusBadRequest, webui.StatusView{
 			Severity: "Unavailable", Error: "Check the database-check request.",
 		})
 		return
@@ -94,13 +94,14 @@ func (b *Browser) databaseCheck(w http.ResponseWriter, r *http.Request) {
 
 func (b *Browser) renderStatus(
 	w http.ResponseWriter,
+	r *http.Request,
 	csrfToken string,
 	httpStatus int,
 	view webui.StatusView,
 ) {
-	if err := b.ui.Shell(w, httpStatus, webui.ShellView{
-		CSRFToken: csrfToken, Mode: "status", Status: view,
-	}); err != nil {
+	shell := b.shellBase(r, "status")
+	shell.Status = view
+	if err := b.ui.Shell(w, httpStatus, shell); err != nil {
 		http.Error(w, "Status is temporarily unavailable.", http.StatusInternalServerError)
 	}
 }

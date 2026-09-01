@@ -16,9 +16,9 @@ import (
 func (b *Browser) backupPage(w http.ResponseWriter, r *http.Request) {
 	session, _ := BrowserSessionFromContext(r.Context())
 	view := b.backupView(session.CSRFToken)
-	if err := b.ui.Shell(w, http.StatusOK, webui.ShellView{
-		CSRFToken: session.CSRFToken, Mode: "backup", Backup: view,
-	}); err != nil {
+	shell := b.shellBase(r, "backup")
+	shell.Backup = view
+	if err := b.ui.Shell(w, http.StatusOK, shell); err != nil {
 		http.Error(w, "Backup is temporarily unavailable.",
 			http.StatusInternalServerError)
 	}
@@ -50,14 +50,14 @@ func (b *Browser) startBackup(
 ) {
 	session, _ := BrowserSessionFromContext(r.Context())
 	if b.backups == nil {
-		b.renderBackupError(w, session.CSRFToken, http.StatusServiceUnavailable,
+		b.renderBackupError(w, r, session.CSRFToken, http.StatusServiceUnavailable,
 			"Backup is temporarily unavailable.")
 		return
 	}
 	outputPath := r.PostForm.Get("output_path")
 	if len(r.PostForm) != 2 || len(r.PostForm["csrf_token"]) != 1 ||
 		len(r.PostForm["output_path"]) != 1 || !validBackupPathInput(outputPath) {
-		b.renderBackupError(w, session.CSRFToken, http.StatusBadRequest,
+		b.renderBackupError(w, r, session.CSRFToken, http.StatusBadRequest,
 			"Enter a valid server-side output path.")
 		return
 	}
@@ -67,11 +67,11 @@ func (b *Browser) startBackup(
 	}
 	if _, err := start(r.Context(), outputPath); err != nil {
 		if errors.Is(err, backup.ErrBackupInProgress) {
-			b.renderBackupError(w, session.CSRFToken, http.StatusConflict,
+			b.renderBackupError(w, r, session.CSRFToken, http.StatusConflict,
 				"A backup operation is already in progress.")
 			return
 		}
-		b.renderBackupError(w, session.CSRFToken, http.StatusServiceUnavailable,
+		b.renderBackupError(w, r, session.CSRFToken, http.StatusServiceUnavailable,
 			"Backup could not be started.")
 		return
 	}
@@ -81,7 +81,7 @@ func (b *Browser) startBackup(
 func (b *Browser) backupVerifyStart(w http.ResponseWriter, r *http.Request) {
 	session, _ := BrowserSessionFromContext(r.Context())
 	if b.backups == nil {
-		b.renderBackupError(w, session.CSRFToken, http.StatusServiceUnavailable,
+		b.renderBackupError(w, r, session.CSRFToken, http.StatusServiceUnavailable,
 			"Backup verification is temporarily unavailable.")
 		return
 	}
@@ -89,17 +89,17 @@ func (b *Browser) backupVerifyStart(w http.ResponseWriter, r *http.Request) {
 	if len(r.PostForm) != 2 || len(r.PostForm["csrf_token"]) != 1 ||
 		len(r.PostForm["artifact_path"]) != 1 ||
 		!validBackupPathInput(artifactPath) {
-		b.renderBackupError(w, session.CSRFToken, http.StatusBadRequest,
+		b.renderBackupError(w, r, session.CSRFToken, http.StatusBadRequest,
 			"Enter a valid server-side artifact path.")
 		return
 	}
 	if _, err := b.backups.StartVerify(r.Context(), artifactPath); err != nil {
 		if errors.Is(err, backup.ErrBackupInProgress) {
-			b.renderBackupError(w, session.CSRFToken, http.StatusConflict,
+			b.renderBackupError(w, r, session.CSRFToken, http.StatusConflict,
 				"A backup operation is already in progress.")
 			return
 		}
-		b.renderBackupError(w, session.CSRFToken, http.StatusServiceUnavailable,
+		b.renderBackupError(w, r, session.CSRFToken, http.StatusServiceUnavailable,
 			"Backup verification could not be started.")
 		return
 	}
@@ -108,15 +108,16 @@ func (b *Browser) backupVerifyStart(w http.ResponseWriter, r *http.Request) {
 
 func (b *Browser) renderBackupError(
 	w http.ResponseWriter,
+	r *http.Request,
 	csrfToken string,
 	status int,
 	message string,
 ) {
 	view := b.backupView(csrfToken)
 	view.Error = message
-	if err := b.ui.Shell(w, status, webui.ShellView{
-		CSRFToken: csrfToken, Mode: "backup", Backup: view,
-	}); err != nil {
+	shell := b.shellBase(r, "backup")
+	shell.Backup = view
+	if err := b.ui.Shell(w, status, shell); err != nil {
 		http.Error(w, "Backup is temporarily unavailable.",
 			http.StatusInternalServerError)
 	}

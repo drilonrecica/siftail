@@ -19,27 +19,25 @@ func (b *Browser) sourcesPage(w http.ResponseWriter, r *http.Request) {
 	session, _ := BrowserSessionFromContext(r.Context())
 	query, notice, err := parseSourceCatalogQuery(r.URL.Query())
 	if err != nil {
-		b.renderSourcesError(w, session.CSRFToken, http.StatusBadRequest,
+		b.renderSourcesError(w, r, session.CSRFToken, http.StatusBadRequest,
 			"Check the source page parameters.", "")
 		return
 	}
 	if b.sources == nil {
-		b.renderSourcesError(w, session.CSRFToken, http.StatusServiceUnavailable,
+		b.renderSourcesError(w, r, session.CSRFToken, http.StatusServiceUnavailable,
 			"Sources are temporarily unavailable.", web.RequestIDFromContext(r.Context()))
 		return
 	}
 	page, err := b.sources.Catalog(r.Context(), query)
 	if err != nil {
-		b.renderSourcesError(w, session.CSRFToken, http.StatusServiceUnavailable,
+		b.renderSourcesError(w, r, session.CSRFToken, http.StatusServiceUnavailable,
 			"Sources could not be read because the database is temporarily unavailable.",
 			web.RequestIDFromContext(r.Context()))
 		return
 	}
-	if err := b.ui.Shell(w, http.StatusOK, webui.ShellView{
-		CSRFToken: session.CSRFToken,
-		Mode:      "sources",
-		Sources:   buildSourcesView(query, page, notice),
-	}); err != nil {
+	shell := b.shellBase(r, "sources")
+	shell.Sources = buildSourcesView(query, page, notice)
+	if err := b.ui.Shell(w, http.StatusOK, shell); err != nil {
 		http.Error(w, "Sources are temporarily unavailable.", http.StatusInternalServerError)
 	}
 }
@@ -49,7 +47,7 @@ func (b *Browser) sourceDetailPage(w http.ResponseWriter, r *http.Request) {
 	id, idErr := sourcePathID(r)
 	notice, noticeErr := sourceDetailNotice(r.URL.Query())
 	if idErr != nil || noticeErr != nil {
-		b.renderSourcesError(w, session.CSRFToken, http.StatusBadRequest,
+		b.renderSourcesError(w, r, session.CSRFToken, http.StatusBadRequest,
 			"Check the source identifier.", "")
 		return
 	}
@@ -62,12 +60,12 @@ func (b *Browser) sourceAlias(w http.ResponseWriter, r *http.Request) {
 	id, err := sourcePathID(r)
 	alias, formErr := sourceMutationValue(r, "alias")
 	if err != nil || formErr != nil {
-		b.renderSourcesError(w, session.CSRFToken, http.StatusBadRequest,
+		b.renderSourcesError(w, r, session.CSRFToken, http.StatusBadRequest,
 			"Check the source alias request.", "")
 		return
 	}
 	if b.sources == nil {
-		b.renderSourcesError(w, session.CSRFToken, http.StatusServiceUnavailable,
+		b.renderSourcesError(w, r, session.CSRFToken, http.StatusServiceUnavailable,
 			"Sources are temporarily unavailable.", web.RequestIDFromContext(r.Context()))
 		return
 	}
@@ -95,7 +93,7 @@ func (b *Browser) sourceClearLogs(w http.ResponseWriter, r *http.Request) {
 	id, err := sourcePathID(r)
 	confirmation, formErr := sourceMutationValue(r, "confirmation")
 	if err != nil || formErr != nil {
-		b.renderSourcesError(w, session.CSRFToken, http.StatusBadRequest,
+		b.renderSourcesError(w, r, session.CSRFToken, http.StatusBadRequest,
 			"Check the clear-logs request.", "")
 		return
 	}
@@ -105,7 +103,7 @@ func (b *Browser) sourceClearLogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if confirmation != detail.Source.DisplayName() {
-		b.renderSourceDetailView(w, session.CSRFToken, detail, "",
+		b.renderSourceDetailView(w, r, session.CSRFToken, detail, "",
 			http.StatusUnprocessableEntity, "",
 			"Type the displayed source name exactly to clear retained logs.", "")
 		return
@@ -128,7 +126,7 @@ func (b *Browser) sourceRemove(w http.ResponseWriter, r *http.Request) {
 	id, err := sourcePathID(r)
 	confirmation, formErr := sourceMutationValue(r, "confirmation")
 	if err != nil || formErr != nil {
-		b.renderSourcesError(w, session.CSRFToken, http.StatusBadRequest,
+		b.renderSourcesError(w, r, session.CSRFToken, http.StatusBadRequest,
 			"Check the remove-source request.", "")
 		return
 	}
@@ -138,7 +136,7 @@ func (b *Browser) sourceRemove(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if confirmation != "remove "+detail.Source.DisplayName() {
-		b.renderSourceDetailView(w, session.CSRFToken, detail, "",
+		b.renderSourceDetailView(w, r, session.CSRFToken, detail, "",
 			http.StatusUnprocessableEntity, "", "",
 			"Type the complete removal phrase exactly.")
 		return
@@ -180,10 +178,10 @@ func (b *Browser) renderSourceMutationFailure(
 	err error,
 ) {
 	if errors.Is(err, sources.ErrSourceNotFound) {
-		b.renderSourcesError(w, csrfToken, http.StatusNotFound, "Source not found.", "")
+		b.renderSourcesError(w, r, csrfToken, http.StatusNotFound, "Source not found.", "")
 		return
 	}
-	b.renderSourcesError(w, csrfToken, http.StatusServiceUnavailable,
+	b.renderSourcesError(w, r, csrfToken, http.StatusServiceUnavailable,
 		"The source operation could not be completed because the database is temporarily unavailable.",
 		web.RequestIDFromContext(r.Context()))
 }
@@ -198,27 +196,28 @@ func (b *Browser) renderSourceDetail(
 	aliasError, clearError, removeError string,
 ) {
 	if b.sources == nil {
-		b.renderSourcesError(w, csrfToken, http.StatusServiceUnavailable,
+		b.renderSourcesError(w, r, csrfToken, http.StatusServiceUnavailable,
 			"Sources are temporarily unavailable.", web.RequestIDFromContext(r.Context()))
 		return
 	}
 	detail, err := b.sources.SourceDetail(r.Context(), id)
 	if errors.Is(err, sources.ErrSourceNotFound) {
-		b.renderSourcesError(w, csrfToken, http.StatusNotFound, "Source not found.", "")
+		b.renderSourcesError(w, r, csrfToken, http.StatusNotFound, "Source not found.", "")
 		return
 	}
 	if err != nil {
-		b.renderSourcesError(w, csrfToken, http.StatusServiceUnavailable,
+		b.renderSourcesError(w, r, csrfToken, http.StatusServiceUnavailable,
 			"Source details could not be read because the database is temporarily unavailable.",
 			web.RequestIDFromContext(r.Context()))
 		return
 	}
-	b.renderSourceDetailView(w, csrfToken, detail, notice, status,
+	b.renderSourceDetailView(w, r, csrfToken, detail, notice, status,
 		aliasError, clearError, removeError)
 }
 
 func (b *Browser) renderSourceDetailView(
 	w http.ResponseWriter,
+	r *http.Request,
 	csrfToken string,
 	detail sources.SourceDetail,
 	notice string,
@@ -229,11 +228,9 @@ func (b *Browser) renderSourceDetailView(
 	view.AliasError = aliasError
 	view.ClearError = clearError
 	view.RemoveError = removeError
-	if err := b.ui.Shell(w, status, webui.ShellView{
-		CSRFToken: csrfToken,
-		Mode:      "source-detail",
-		Source:    view,
-	}); err != nil {
+	shell := b.shellBase(r, "source-detail")
+	shell.Source = view
+	if err := b.ui.Shell(w, status, shell); err != nil {
 		http.Error(w, "Sources are temporarily unavailable.", http.StatusInternalServerError)
 	}
 }
@@ -431,17 +428,14 @@ func formatSourceTime(value int64) string {
 
 func (b *Browser) renderSourcesError(
 	w http.ResponseWriter,
+	r *http.Request,
 	csrfToken string,
 	status int,
 	message, requestID string,
 ) {
-	if err := b.ui.Shell(w, status, webui.ShellView{
-		CSRFToken: csrfToken,
-		Mode:      "sources",
-		Sources: webui.SourcesView{
-			Error: message, ErrorRequestID: requestID,
-		},
-	}); err != nil {
+	shell := b.shellBase(r, "sources")
+	shell.Sources = webui.SourcesView{Error: message, ErrorRequestID: requestID}
+	if err := b.ui.Shell(w, status, shell); err != nil {
 		http.Error(w, "Sources are temporarily unavailable.", http.StatusInternalServerError)
 	}
 }

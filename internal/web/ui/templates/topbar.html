@@ -13,17 +13,22 @@
       <a href="/backup"{{if eq $p.NavSection "backup"}} aria-current="page"{{end}}>Backup</a>
     </nav>
     <div class="header-actions">
-      <label class="compact-control" for="theme">Theme</label>
-      <select id="theme" name="theme" data-theme-select>
-        <option value="system">System</option>
-        <option value="dark">Dark</option>
-        <option value="light">Light</option>
-      </select>
-      <label class="compact-control" for="density">Density</label>
-      <select id="density" name="density" data-density-select>
-        <option value="compact">Compact</option>
-        <option value="comfortable">Comfortable</option>
-      </select>
+      <form class="prefs-form" method="post" action="/preferences" data-prefs-form>
+        <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+        <input type="hidden" name="return" value="{{.Path}}">
+        <label class="compact-control" for="theme">Theme</label>
+        <select id="theme" name="theme" data-theme-select>
+          <option value="system"{{if eq .Prefs.Theme "system"}} selected{{end}}>System</option>
+          <option value="dark"{{if eq .Prefs.Theme "dark"}} selected{{end}}>Dark</option>
+          <option value="light"{{if eq .Prefs.Theme "light"}} selected{{end}}>Light</option>
+        </select>
+        <label class="compact-control" for="density">Density</label>
+        <select id="density" name="density" data-density-select>
+          <option value="compact"{{if eq .Prefs.Density "compact"}} selected{{end}}>Compact</option>
+          <option value="comfortable"{{if eq .Prefs.Density "comfortable"}} selected{{end}}>Comfortable</option>
+        </select>
+        <noscript><button class="button button-quiet" type="submit">Apply</button></noscript>
+      </form>
       <form method="post" action="/session/logout">
         <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
         <button class="button button-quiet" type="submit">Sign out</button>

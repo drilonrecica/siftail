@@ -136,6 +136,7 @@ func (b *Browser) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /session", b.login)
 	mux.HandleFunc("/assets/", b.ui.Asset)
 	mux.Handle("POST /session/logout", b.Protect(http.HandlerFunc(b.logout)))
+	mux.Handle("POST /preferences", b.Protect(http.HandlerFunc(b.preferencesSave)))
 	mux.Handle("GET /logs", b.Protect(http.HandlerFunc(b.historyPage)))
 	mux.Handle("GET /logs/rows", b.Protect(http.HandlerFunc(b.historyRows)))
 	mux.Handle("GET /logs/events/{id}", b.Protect(http.HandlerFunc(b.eventDetail)))
@@ -185,6 +186,7 @@ func (b *Browser) loginPage(w http.ResponseWriter, r *http.Request) {
 		AdministratorMissing: !exists,
 		ReturnPath:           safeReturnPath(r.URL.Query().Get("return")),
 		Expired:              r.URL.Query().Get("expired") == "1",
+		Prefs:                preferences(r),
 	}
 	if err := b.ui.Login(w, http.StatusOK, data); err != nil {
 		http.Error(w, "Sign-in is temporarily unavailable.", http.StatusInternalServerError)
@@ -455,6 +457,7 @@ func (b *Browser) writeLoginFailure(
 	view := webui.LoginView{
 		ReturnPath: safeReturnPath(r.PostForm.Get("return")),
 		Error:      message,
+		Prefs:      preferences(r),
 	}
 	if err := b.ui.Login(w, status, view); err != nil {
 		http.Error(w, "Sign-in is temporarily unavailable.", http.StatusInternalServerError)

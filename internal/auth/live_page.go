@@ -22,7 +22,6 @@ type livePageQuery struct {
 }
 
 func (b *Browser) livePage(w http.ResponseWriter, r *http.Request) {
-	session, _ := BrowserSessionFromContext(r.Context())
 	query, err := parseLivePageQuery(r.URL.Query())
 	if err != nil {
 		http.Error(w, "Check the Live filters.", http.StatusBadRequest)
@@ -37,11 +36,9 @@ func (b *Browser) livePage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Logs are temporarily unavailable.", http.StatusServiceUnavailable)
 		return
 	}
-	if err := b.ui.Shell(w, http.StatusOK, webui.ShellView{
-		CSRFToken: session.CSRFToken,
-		Mode:      "live",
-		Live:      buildLiveView(query, sources),
-	}); err != nil {
+	shell := b.shellBase(r, "live")
+	shell.Live = buildLiveView(query, sources)
+	if err := b.ui.Shell(w, http.StatusOK, shell); err != nil {
 		http.Error(w, "Logs are temporarily unavailable.", http.StatusInternalServerError)
 	}
 }

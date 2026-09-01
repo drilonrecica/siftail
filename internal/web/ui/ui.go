@@ -18,16 +18,26 @@ type Renderer struct {
 	templates *template.Template
 }
 
+// PrefsView carries the non-secret interface preferences rendered as
+// data-theme and data-density attributes before first paint.
+type PrefsView struct {
+	Theme   string
+	Density string
+}
+
 type LoginView struct {
 	AdministratorMissing bool
 	ReturnPath           string
 	Expired              bool
 	Error                string
+	Prefs                PrefsView
 }
 
 type ShellView struct {
 	CSRFToken string
 	Mode      string
+	Path      string
+	Prefs     PrefsView
 	History   HistoryView
 	Live      LiveView
 	Sources   SourcesView

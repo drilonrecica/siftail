@@ -19,11 +19,10 @@ func (b *Browser) historyPage(w http.ResponseWriter, r *http.Request) {
 		b.livePage(w, r)
 		return
 	}
-	session, _ := BrowserSessionFromContext(r.Context())
 	values := cloneURLValues(r.URL.Query())
 	query, err := logs.ParseHistoryQuery(values, b.now())
 	if err != nil {
-		b.renderHistoryShellError(w, session.CSRFToken, http.StatusBadRequest,
+		b.renderHistoryShellError(w, r, http.StatusBadRequest,
 			"Check the time range and filters.", "")
 		return
 	}
@@ -35,14 +34,12 @@ func (b *Browser) historyPage(w http.ResponseWriter, r *http.Request) {
 	view, err := b.historyView(r, query, false)
 	if err != nil {
 		status, message, requestID := historyHTTPError(r, err)
-		b.renderHistoryShellError(w, session.CSRFToken, status, message, requestID)
+		b.renderHistoryShellError(w, r, status, message, requestID)
 		return
 	}
-	if err := b.ui.Shell(w, http.StatusOK, webui.ShellView{
-		CSRFToken: session.CSRFToken,
-		Mode:      "history",
-		History:   view,
-	}); err != nil {
+	shell := b.shellBase(r, "history")
+	shell.History = view
+	if err := b.ui.Shell(w, http.StatusOK, shell); err != nil {
 		http.Error(w, "Logs are temporarily unavailable.", http.StatusInternalServerError)
 	}
 }
@@ -260,7 +257,7 @@ func historyHasFilters(query logs.HistoryQuery) bool {
 
 func (b *Browser) renderHistoryShellError(
 	w http.ResponseWriter,
-	csrfToken string,
+	r *http.Request,
 	status int,
 	message, requestID string,
 ) {
@@ -271,11 +268,9 @@ func (b *Browser) renderHistoryShellError(
 		Error:          message,
 		ErrorRequestID: requestID,
 	}
-	if err := b.ui.Shell(w, status, webui.ShellView{
-		CSRFToken: csrfToken,
-		Mode:      "history",
-		History:   view,
-	}); err != nil {
+	shell := b.shellBase(r, "history")
+	shell.History = view
+	if err := b.ui.Shell(w, status, shell); err != nil {
 		http.Error(w, "Logs are temporarily unavailable.", http.StatusInternalServerError)
 	}
 }

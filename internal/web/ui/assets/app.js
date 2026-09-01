@@ -1,25 +1,10 @@
 "use strict";
 
 (() => {
-  const storage = {
-    get(key, fallback) {
-      try {
-        return window.localStorage.getItem(key) || fallback;
-      } catch {
-        return fallback;
-      }
-    },
-    set(key, value) {
-      try {
-        window.localStorage.setItem(key, value);
-      } catch {
-        // Preferences remain usable for this page when storage is unavailable.
-      }
-    },
-  };
-
-  const themeSelect = document.querySelector("[data-theme-select]");
-  const densitySelect = document.querySelector("[data-density-select]");
+  // Theme and density are server-rendered on <html> from the preference
+  // cookie. This enhancement applies changes instantly and persists them in
+  // the background; without it the form's noscript submit does the same.
+  const prefsForm = document.querySelector("[data-prefs-form]");
   const applyTheme = (theme) => {
     if (theme === "dark" || theme === "light") {
       document.documentElement.dataset.theme = theme;
@@ -31,24 +16,23 @@
     document.documentElement.dataset.density =
       density === "comfortable" ? "comfortable" : "compact";
   };
-
-  const theme = storage.get("siftail.theme", "system");
-  const density = storage.get("siftail.density", "compact");
-  applyTheme(theme);
-  applyDensity(density);
-
-  if (themeSelect) {
-    themeSelect.value = theme;
-    themeSelect.addEventListener("change", () => {
-      applyTheme(themeSelect.value);
-      storage.set("siftail.theme", themeSelect.value);
-    });
-  }
-  if (densitySelect) {
-    densitySelect.value = density;
-    densitySelect.addEventListener("change", () => {
-      applyDensity(densitySelect.value);
-      storage.set("siftail.density", densitySelect.value);
+  if (prefsForm) {
+    prefsForm.addEventListener("change", () => {
+      const data = new FormData(prefsForm);
+      applyTheme(String(data.get("theme")));
+      applyDensity(String(data.get("density")));
+      void fetch(prefsForm.action, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
+        },
+        body: new URLSearchParams(data).toString(),
+        credentials: "same-origin",
+        redirect: "manual",
+      }).catch(() => {
+        // The applied preference still styles this page; persistence retries
+        // on the next change or full form submission.
+      });
     });
   }
 
