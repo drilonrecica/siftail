@@ -1,0 +1,25 @@
+{{/* Shared component partials (DESIGN.md §30). Pages must render these
+     primitives instead of re-inventing their markup. */}}
+
+{{define "severity.html"}}<span class="severity severity-{{.}}">{{severityCode .}}</span>{{end}}
+
+{{define "empty-state.html"}}<div class="empty-state">
+  <h2>{{.Title}}</h2>
+  <p>{{.Message}}</p>
+  {{if .Actions}}<div class="empty-state-actions">
+    {{range .Actions}}<a class="button" href="{{.URL}}">{{.Label}}</a>
+    {{end}}</div>{{end}}
+</div>{{end}}
+
+{{define "pagination.html"}}<nav class="pagination" aria-label="Pagination">
+  {{if .PrevURL}}<button class="button button-quiet" type="button"
+    hx-get="{{.PrevURL}}" hx-target="{{.Target}}" hx-swap="none"
+    hx-disabled-elt="this">
+    {{.PrevLabel}}<span class="htmx-indicator"> Loading…</span>
+  </button>{{end}}
+  {{if .NextURL}}<button class="button button-quiet" type="button"
+    hx-get="{{.NextURL}}" hx-target="{{.Target}}" hx-swap="none"
+    hx-disabled-elt="this">
+    {{.NextLabel}}<span class="htmx-indicator"> Loading…</span>
+  </button>{{else if .EndLabel}}<p class="pagination-end">{{.EndLabel}}</p>{{end}}
+</nav>{{end}}

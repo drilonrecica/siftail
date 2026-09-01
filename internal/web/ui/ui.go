@@ -430,8 +430,57 @@ type AuditRowView struct {
 	RequestID string
 }
 
+// severityCodes maps canonical levels to the fixed-width three-letter codes
+// every log surface renders (DESIGN.md §12.3). live.js carries the same map
+// for browser-built rows; a test asserts the two stay identical.
+var severityCodes = map[string]string{
+	"trace":   "TRC",
+	"debug":   "DBG",
+	"info":    "INF",
+	"warn":    "WRN",
+	"error":   "ERR",
+	"fatal":   "FTL",
+	"unknown": "UNK",
+}
+
+// SeverityCode returns the fixed-width display code for a canonical level,
+// falling back to the unknown code for anything unrecognized.
+func SeverityCode(level string) string {
+	if code, ok := severityCodes[level]; ok {
+		return code
+	}
+	return "UNK"
+}
+
+// PaginationView renders the shared bidirectional pagination component.
+type PaginationView struct {
+	PrevURL   string
+	PrevLabel string
+	NextURL   string
+	NextLabel string
+	EndLabel  string
+	Target    string
+}
+
+// ActionLink is a labeled navigation action, used by empty states.
+type ActionLink struct {
+	Label string
+	URL   string
+}
+
+// EmptyStateView renders the shared empty-state component with real action
+// controls (DESIGN.md §24).
+type EmptyStateView struct {
+	Title   string
+	Message string
+	Actions []ActionLink
+}
+
 func New() *Renderer {
-	return &Renderer{templates: template.Must(template.ParseFS(files, "templates/*.html"))}
+	templates := template.New("").Funcs(template.FuncMap{
+		"severityCode": SeverityCode,
+	})
+	return &Renderer{templates: template.Must(templates.ParseFS(files, "templates/*.html"))}
 }
 
 func (r *Renderer) Login(w http.ResponseWriter, status int, view LoginView) error {

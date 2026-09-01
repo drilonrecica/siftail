@@ -47,6 +47,12 @@ select {
   font: inherit;
 }
 
+input[type="checkbox"],
+input[type="radio"],
+progress {
+  accent-color: var(--accent);
+}
+
 input,
 select {
   width: 100%;
@@ -60,7 +66,7 @@ button,
   justify-content: center;
   padding: var(--space-2) var(--space-4);
   cursor: pointer;
-  font-weight: 650;
+  font-weight: 600;
 }
 
 :focus-visible {
@@ -92,7 +98,7 @@ button,
   gap: var(--space-2);
   color: var(--text-primary);
   font-size: 1rem;
-  font-weight: 720;
+  font-weight: 700;
   text-decoration: none;
 }
 
@@ -105,7 +111,7 @@ button,
   border-radius: 0.45rem;
   background: var(--surface-selected);
   color: var(--accent);
-  font-weight: 800;
+  font-weight: 700;
 }
 
 .login-page {
@@ -183,9 +189,16 @@ button,
   background: var(--accent-hover);
 }
 
+/* Destructive actions read as destructive: filled, visually heavier than
+   quiet buttons (DESIGN.md §30.2). */
 .button-danger {
   border-color: var(--status-error);
-  color: var(--status-error);
+  background: var(--status-error);
+  color: var(--text-inverse);
+}
+
+.button-danger:hover {
+  background: color-mix(in srgb, var(--status-error) 84%, var(--text-inverse));
 }
 
 .button-quiet {
@@ -204,7 +217,7 @@ button,
   margin: 0;
   color: var(--status-error);
   font-size: 0.85rem;
-  font-weight: 650;
+  font-weight: 600;
 }
 
 .notice h2 {
@@ -542,7 +555,7 @@ code {
 .audit-filters label {
   display: grid;
   gap: var(--space-1);
-  font-weight: 650;
+  font-weight: 600;
 }
 
 .audit-retention-notice {
@@ -607,7 +620,7 @@ code {
   padding: var(--space-1) var(--space-3);
   border: 1px solid var(--border-strong);
   border-radius: 999px;
-  font-weight: 750;
+  font-weight: 600;
 }
 
 .status-indicator[data-severity="Healthy"] {
@@ -725,7 +738,7 @@ code {
   gap: var(--space-1);
   color: var(--text-secondary);
   font-size: 0.8rem;
-  font-weight: 650;
+  font-weight: 600;
 }
 
 .source-filters {
@@ -825,7 +838,7 @@ code {
 
 .more-filters summary {
   cursor: pointer;
-  font-weight: 650;
+  font-weight: 600;
 }
 
 .structured-filters {
@@ -1188,8 +1201,15 @@ code {
 }
 
 .severity {
-  font-weight: 750;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
+}
+
+.severity-fatal {
+  font-weight: 700;
 }
 
 .severity-warn {
@@ -1286,7 +1306,24 @@ code {
 
 .empty-state h2 {
   margin-bottom: var(--space-2);
-  font-size: 1.1rem;
+  font-size: var(--text-lg);
+}
+
+.empty-state-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+}
+
+.pagination {
+  display: flex;
+  min-height: 4rem;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  padding: var(--space-3);
 }
 
 .catalog-heading {
@@ -1431,7 +1468,7 @@ code {
 .source-action-form label {
   display: grid;
   gap: var(--space-1);
-  font-weight: 650;
+  font-weight: 600;
 }
 
 .source-action-form .button {

@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"bytes"
 	"crypto/sha512"
 	"encoding/hex"
 	"net/http"
@@ -641,5 +642,56 @@ func TestAssetHandlerRejectsUnknownAndMutation(t *testing.T) {
 	renderer.Asset(head, httptest.NewRequest(http.MethodHead, "/assets/app.css", nil))
 	if head.Code != http.StatusOK || head.Body.Len() != 0 {
 		t.Fatalf("HEAD response = %d %d bytes", head.Code, head.Body.Len())
+	}
+}
+
+func TestSharedComponentPartials(t *testing.T) {
+	renderer := New()
+
+	severity := &bytes.Buffer{}
+	if err := renderer.templates.ExecuteTemplate(severity, "severity.html", "error"); err != nil {
+		t.Fatal(err)
+	}
+	if severity.String() != `<span class="severity severity-error">ERR</span>` {
+		t.Fatalf("severity partial = %q", severity.String())
+	}
+
+	for level, code := range map[string]string{
+		"trace": "TRC", "debug": "DBG", "info": "INF", "warn": "WRN",
+		"error": "ERR", "fatal": "FTL", "unknown": "UNK", "bogus": "UNK",
+	} {
+		if got := SeverityCode(level); got != code {
+			t.Errorf("SeverityCode(%q) = %q, want %q", level, got, code)
+		}
+	}
+
+	empty := &bytes.Buffer{}
+	if err := renderer.templates.ExecuteTemplate(empty, "empty-state.html", EmptyStateView{
+		Title:   "No log sources yet",
+		Message: `<script>x</script>`,
+		Actions: []ActionLink{{Label: "Create server", URL: "/servers"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	body := empty.String()
+	if !strings.Contains(body, "No log sources yet") ||
+		!strings.Contains(body, `href="/servers"`) ||
+		!strings.Contains(body, "Create server") ||
+		strings.Contains(body, "<script>") {
+		t.Fatalf("empty-state partial = %q", body)
+	}
+
+	pagination := &bytes.Buffer{}
+	if err := renderer.templates.ExecuteTemplate(pagination, "pagination.html", PaginationView{
+		PrevURL: "/logs/rows?newer=1", PrevLabel: "Load newer",
+		NextURL: "/logs/rows?older=1", NextLabel: "Load older",
+		Target: "#history-region",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(pagination.String(), "Load newer") ||
+		!strings.Contains(pagination.String(), "Load older") ||
+		!strings.Contains(pagination.String(), `aria-label="Pagination"`) {
+		t.Fatalf("pagination partial = %q", pagination.String())
 	}
 }
