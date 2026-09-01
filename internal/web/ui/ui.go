@@ -41,6 +41,56 @@ type ShellView struct {
 	Backup    BackupView
 }
 
+// PageMeta describes the per-page shell chrome so templates never branch on
+// Mode for titles, eyebrows, headings, or navigation state.
+type PageMeta struct {
+	Title      string
+	Eyebrow    string
+	Heading    string
+	Context    string
+	NavSection string
+}
+
+func pageMeta(title, eyebrow, heading, context, navSection string) PageMeta {
+	return PageMeta{
+		Title:      title,
+		Eyebrow:    eyebrow,
+		Heading:    heading,
+		Context:    context,
+		NavSection: navSection,
+	}
+}
+
+// PageMeta derives the shell chrome for the active Mode. It is the single
+// authority for page titles, eyebrows, headings, context lines, and the
+// active navigation section.
+func (v ShellView) PageMeta() PageMeta {
+	switch v.Mode {
+	case "live":
+		return pageMeta("Logs", "Live", "Logs", v.Live.SourceSummary, "logs")
+	case "sources":
+		return pageMeta("Sources", "Source catalog", "Sources", "Stable sources discovered from committed logs", "sources")
+	case "source-detail":
+		return pageMeta("Sources", "Source catalog", "Sources", v.Source.Server+" · "+v.Source.Project+" / "+v.Source.Environment, "sources")
+	case "servers":
+		return pageMeta("Servers", "Ingestion administration", "Servers", "Trusted identities for authenticated ingestion", "servers")
+	case "server-detail":
+		return pageMeta("Servers", "Ingestion administration", "Servers", v.Server.Name, "servers")
+	case "token-created":
+		return pageMeta("Servers", "Ingestion administration", "Servers", v.Token.ServerName+" · token shown once", "servers")
+	case "settings":
+		return pageMeta("Settings", "Runtime settings", "Settings", "Bounded local storage controls", "settings")
+	case "status":
+		return pageMeta("Status", "Appliance status", "Status", v.Status.Severity+" · sanitized local operational state", "status")
+	case "audit":
+		return pageMeta("Audit", "Security history", "Audit", "Immutable, bounded administrative security events", "audit")
+	case "backup":
+		return pageMeta("Backup", "Recovery preparation", "Backup", "Verified local SQLite recovery artifacts", "backup")
+	default:
+		return pageMeta("Logs", "History", "Logs", v.History.SourceSummary+" · "+v.History.RangeSummary, "logs")
+	}
+}
+
 type SelectOption struct {
 	Value    string
 	Label    string

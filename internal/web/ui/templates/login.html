@@ -1,14 +1,7 @@
 {{define "login.html"}}<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="color-scheme" content="dark light">
-  <title>Sign in · Siftail</title>
-  <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/assets/app.css">
-  <script src="/assets/htmx-2.0.10.min.js" defer></script>
-  <script src="/assets/app.js" defer></script>
+  {{template "head.html" "Sign in"}}
 </head>
 <body class="login-page" hx-history="false">
   <a class="skip-link" href="#main-content">Skip to main content</a>

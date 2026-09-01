@@ -1,0 +1,32 @@
+{{define "topbar.html"}}{{$p := .PageMeta}}<header class="app-header">
+    <a class="brand" href="/logs" aria-label="Siftail logs">
+      <span class="brand-mark" aria-hidden="true">S</span>
+      <span>Siftail</span>
+    </a>
+    <nav class="primary-nav" aria-label="Primary">
+      <a href="/logs"{{if eq $p.NavSection "logs"}} aria-current="page"{{end}}>Logs</a>
+      <a href="/sources"{{if eq $p.NavSection "sources"}} aria-current="page"{{end}}>Sources</a>
+      <a href="/servers"{{if eq $p.NavSection "servers"}} aria-current="page"{{end}}>Servers</a>
+      <a href="/settings"{{if eq $p.NavSection "settings"}} aria-current="page"{{end}}>Settings</a>
+      <a href="/status"{{if eq $p.NavSection "status"}} aria-current="page"{{end}}>Status</a>
+      <a href="/audit"{{if eq $p.NavSection "audit"}} aria-current="page"{{end}}>Audit</a>
+      <a href="/backup"{{if eq $p.NavSection "backup"}} aria-current="page"{{end}}>Backup</a>
+    </nav>
+    <div class="header-actions">
+      <label class="compact-control" for="theme">Theme</label>
+      <select id="theme" name="theme" data-theme-select>
+        <option value="system">System</option>
+        <option value="dark">Dark</option>
+        <option value="light">Light</option>
+      </select>
+      <label class="compact-control" for="density">Density</label>
+      <select id="density" name="density" data-density-select>
+        <option value="compact">Compact</option>
+        <option value="comfortable">Comfortable</option>
+      </select>
+      <form method="post" action="/session/logout">
+        <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+        <button class="button button-quiet" type="submit">Sign out</button>
+      </form>
+    </div>
+  </header>{{end}}
