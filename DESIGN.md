@@ -2,77 +2,71 @@
 
 **Status:** Authoritative product design specification  
 **Product:** Siftail  
-**Audience:** Maintainer, coding agents, designers, reviewers, contributors
+**Audience:** Maintainer, coding agents, designers, reviewers, contributors  
+**Supersedes:** The pre-`0.6.0` design specification, per ADR 0005
 
 ---
 
 ## 1. Purpose
 
-This document defines how Siftail should look, behave, communicate, and remain accessible across desktop and emergency mobile use.
+This document defines how Siftail looks, behaves, communicates, and remains
+accessible across desktop and emergency mobile use.
 
 It is authoritative for:
 
-- information architecture;
-- navigation;
-- History and Live workflows;
-- source selection;
+- information architecture and navigation;
+- the History and Live workflows;
+- source selection and the command palette;
 - log-row presentation;
 - filtering and search interactions;
 - setup and administration flows;
-- visual system;
+- the visual system, tokens, and typography;
 - brand application;
 - responsive behavior;
-- keyboard interactions;
-- loading, error, and empty states;
+- keyboard interaction and shortcut scoping;
+- loading, error, empty, and notification states;
 - accessibility;
 - motion;
 - interface copy.
 
-The interface must reinforce the product scope: Siftail is an operational console, not an analytics dashboard.
+The interface must reinforce the product scope: Siftail is an operational
+console, not an analytics dashboard.
 
 ---
 
 ## 2. Design vision
 
-Siftail should feel like a **restrained operational console with a slight retro-terminal character and friendly indie polish**.
+Siftail is a **night-shift instrument**: the tool a self-hoster reaches for at
+02:00 during an incident. Everything about the interface serves fast, calm,
+keyboard-driven investigation.
 
 It should be:
 
-- dense but legible;
-- calm under failure;
-- quick to navigate;
-- clear about current scope and filters;
-- visually stable during high event rates;
-- professional enough for production use;
-- distinct without decorative excess.
+- keyboard-first — every investigation action reachable without the mouse;
+- dense but legible — log rows maximize signal per vertical pixel;
+- calm under failure — degraded states are stated plainly, never dramatized;
+- visually quiet — chrome recedes, log content and severity carry the color;
+- stable during high event rates — no layout shift, no per-event animation;
+- precise — tabular timestamps, fixed-width severity codes, exact copy.
 
 It should not look like:
 
 - a generic card-heavy SaaS dashboard;
-- a fake terminal;
+- a fake terminal or retro CRT simulation;
 - a colorful analytics suite;
-- a consumer chat application;
-- an enterprise monitoring wallboard;
-- a retro CRT simulation.
+- an enterprise monitoring wallboard.
 
-The retro influence is subtle:
+The instrument character comes from function, not decoration:
 
-- monospace log content;
-- compact information density;
-- crisp separators;
-- small terminal-like connection indicators;
-- strong keyboard affordances;
-- precise timestamps and identifiers.
+- monospace log surfaces with consistent alignment;
+- fixed-width three-letter severity codes;
+- a visible tail line marking the newest edge of a log list;
+- strong keyboard affordances with discoverable shortcuts;
+- one restrained accent color that never competes with severity.
 
-Do not use:
-
-- scanlines;
-- flickering cursors;
-- typing animations;
-- green-on-black everywhere;
-- distorted CRT effects;
-- decorative command prompts;
-- neon gradients.
+Do not use scanlines, flickering cursors, typing animations, green-on-black
+styling, decorative command prompts, neon gradients, decorative charts, card
+grids for logs, mascots, or humorous error copy.
 
 ---
 
@@ -80,66 +74,44 @@ Do not use:
 
 ### 3.1 Name
 
-Use `Siftail` in human-facing product copy and `siftail` for technical identifiers.
+Use `Siftail` in human-facing product copy and `siftail` for technical
+identifiers.
 
 ### 3.2 Tagline
-
-Primary tagline:
 
 > Fast, private logs for self-hosted apps.
 
 ### 3.3 Name explanation
 
-The product meaning should be explained subtly, at most in selected introductory copy:
+Explain the product meaning subtly, at most in selected introductory copy:
 
-> Sift through historical logs and tail live events from one lightweight, private interface.
+> Sift through historical logs and tail live events from one lightweight,
+> private interface.
 
-Do not repeatedly state that Siftail is a combination of “sift” and “tail.”
+Do not repeatedly state that Siftail combines "sift" and "tail." The tail
+line (§12.6) expresses the identity functionally.
 
 ### 3.4 Logo concept
 
-A compact mark should suggest:
-
-- several log lines entering;
-- filtering or narrowing;
-- one clear continuing stream;
-- a contained private boundary.
-
-It must remain recognizable at favicon scale.
-
-Avoid:
-
-- literal plumbing;
-- a magnifying glass as the only motif;
-- database-cylinder clichés;
-- shield-heavy security branding;
-- mascots.
+A compact mark suggesting several log lines narrowing into one clear stream
+within a contained boundary. It must remain recognizable at favicon scale.
+Avoid literal plumbing, a magnifying glass as the only motif,
+database-cylinder clichés, shield-heavy security branding, and mascots.
 
 ### 3.5 Brand voice
 
-Voice qualities:
-
-- direct;
-- factual;
-- calm;
-- technically literate;
-- honest about limitations;
-- lightly friendly;
-- never jokey during errors.
-
-Preferred copy:
-
-> No logs matched these filters.
-
-Avoid:
-
-> Uh-oh! Your logs are hiding 🙈
+Direct, factual, calm, technically literate, honest about limitations,
+lightly friendly, never jokey during errors.
 
 Preferred:
+
+> No logs matched these filters.
 
 > Ingestion is paused because the database is out of writable space.
 
 Avoid:
+
+> Uh-oh! Your logs are hiding 🙈
 
 > Something went wrong.
 
@@ -149,61 +121,46 @@ Avoid:
 
 ### 4.1 Optimize for investigation
 
-The interface should help answer:
-
-- which source emitted this;
-- when it happened;
-- what the message says;
-- what happened immediately before and after;
-- whether it is still occurring;
-- whether a container changed.
+The interface should help answer: which source emitted this; when it
+happened; what the message says; what happened immediately before and after;
+whether it is still occurring; whether a container changed.
 
 ### 4.2 Preserve context
 
-Avoid full-page transitions and destructive replacement of content during filtering. Keep the operator oriented.
+Avoid full-page transitions and destructive replacement of content during
+filtering. Keep the operator oriented.
 
 ### 4.3 Make state explicit
 
-Always make these states visible when relevant:
+Always make these states visible when relevant: History or Live; active
+source scope; active time range; active filters; live connection state;
+pause state; result truncation; storage degradation; loading state; source
+inactivity.
 
-- History or Live;
-- active source scope;
-- active time range;
-- active filters;
-- live connection state;
-- pause state;
-- result truncation;
-- storage degradation;
-- loading state;
-- source inactivity.
+### 4.4 Keyboard first, mouse equal
 
-### 4.4 Use density deliberately
+Every investigation action has a shortcut, and every shortcut has a visible
+clickable equivalent. Shortcuts are scoped (§32) so they can never destroy
+form input or surprise the operator on administration pages.
 
-Logs benefit from compact layout. Controls should be comfortable enough to operate, but log rows should maximize useful vertical information.
+### 4.5 Use density deliberately
 
-### 4.5 Do not rely on color alone
+Logs benefit from compact layout. Controls are comfortable enough to
+operate; log rows maximize useful vertical information.
 
-Severity, connection state, validation, and warnings require text, shape, icon, or position in addition to color.
+### 4.6 Do not rely on color alone
 
-### 4.6 Keep browser and server responsibilities clear
+Severity, connection state, validation, and warnings require text, shape, or
+position in addition to color. Severity codes (§12.3) are always visible.
 
-Server owns:
+### 4.7 Keep browser and server responsibilities clear
 
-- query validation;
-- rendered historical fragments;
-- source and settings truth;
-- authentication;
-- authorization;
-- persistent event details.
+Server owns: query validation; rendered historical fragments; source and
+settings truth; authentication and authorization; persistent event details;
+**theme and density preferences** (§19.5).
 
-Browser owns transient preferences and live-view behavior:
-
-- theme;
-- density;
-- scroll position;
-- pending live-row counter;
-- selected keyboard row;
-- paused rendering state.
+Browser owns transient view behavior: scroll position; pending live-row
+counter; selected keyboard row; paused rendering state; expansion state.
 
 ---
 
@@ -211,52 +168,60 @@ Browser owns transient preferences and live-view behavior:
 
 ### 5.1 Primary navigation
 
-Recommended items:
+Three primary destinations, in order:
 
 ```text
-Logs
-Sources
-Servers
-Status
-Settings
-Audit
+Logs   Sources   Servers
 ```
 
-`Logs` is the primary destination and should be first.
+`Logs` is the primary destination and always first.
 
-Do not add a Dashboard item.
+Four administration destinations group under a **System** menu in the header:
 
-Navigation may collapse low-frequency items under an Administration section at narrower widths.
+```text
+System ▾
+  Status
+  Settings
+  Audit
+  Backup
+```
+
+The System menu also contains the theme and density preference controls and
+the sign-out action. Do not add a Dashboard item.
 
 ### 5.2 Primary routes
 
 ```text
 /login
-/logs
+/logs            (?mode=history default, ?mode=live)
 /sources
 /servers
 /status
 /settings
 /audit
+/backup
+POST /preferences
 ```
 
 ### 5.3 Landing behavior
 
 After authentication:
 
-- first use: open Logs with a source-selection prompt and last-one-hour fallback;
-- returning use: restore the previous investigation state from URL or browser-local state;
-- do not force an overview dashboard;
-- if the previous source no longer exists, explain and offer source selection.
+- first use with no sources: open Logs showing the first-run empty state with
+  its setup path (§24.1);
+- returning use: restore the previous investigation state from the URL;
+- if the previous source no longer exists, explain and offer source
+  selection;
+- never force an overview dashboard.
 
 ### 5.4 Logs workspace hierarchy
 
 ```text
-Global header/navigation
-└── Source context / quick switcher
-    └── History | Live mode switch
-        └── Filter bar
-            └── Status/result summary
+Global header (primary nav · health · palette · System)
+└── History | Live mode switch
+    └── Filter bar (source scope, time, levels, streams, text)
+        └── Status/result summary
+            └── Tail line (newest edge)
                 └── Log event list
                     └── Expanded event details
 ```
@@ -265,38 +230,54 @@ Global header/navigation
 
 ## 6. Global application shell
 
-### 6.1 Desktop layout
+### 6.1 Header layout
 
-Recommended:
-
-- compact top bar or narrow left rail;
-- product mark and name;
-- primary navigation;
-- source quick switcher;
-- status indicator when degraded;
-- account menu.
-
-A persistent wide sidebar tree is not required by default because it consumes space and can become noisy across multiple servers. Source navigation belongs primarily in filters and the quick switcher.
-
-### 6.2 Header behavior
-
-The header must remain visually quiet. It should not compete with logs.
-
-Possible elements:
+One slim, visually quiet top bar on every authenticated page:
 
 ```text
-[Siftail] [Logs Sources Servers Status]      [⌘K Source] [Health] [Account]
+[◆ Siftail]  Logs  Sources  Servers          [●health] [⌘K] [System ▾]
 ```
 
-At narrow widths, use a compact menu while keeping current mode/source visible.
+- Brand mark and name link to `/logs`.
+- Primary navigation marks the active destination with `aria-current="page"`
+  and an accent underline.
+- The health indicator is a small dot plus visually hidden text naming the
+  current status severity; it links to `/status`. When status is Healthy the
+  dot uses a muted neutral; Attention uses warning; Degraded/Unavailable use
+  error. The dot is omitted (plain Status link remains in System) if a cheap
+  cached severity value is unavailable.
+- The palette button is labeled with the platform shortcut (`⌘K` or
+  `Ctrl K`) and opens the command palette (§32.4).
+- The System menu is a native `<details>`-based menu containing Status,
+  Settings, Audit, Backup, the preference controls, and Sign out.
+
+The header must not compete with logs: no additional accent fills, no
+buttons with primary emphasis, no badges other than the health dot.
+
+### 6.2 Narrow widths
+
+At narrow widths the primary items remain visible as long as space allows;
+below that the header collapses to brand, health, palette, and a single menu
+containing all destinations. Current mode and source context remain visible
+in the workspace heading.
 
 ### 6.3 Global degraded banner
 
-Critical states such as disk-full mode display a persistent banner below the header:
+Critical states such as disk-full mode display a persistent banner below the
+header on every authenticated page:
 
-> **Ingestion unavailable:** the database cannot write because storage is full. Existing logs remain available. Free disk space or reduce retention.
+> **Ingestion unavailable:** the database cannot write because storage is
+> full. Existing logs remain available. Free disk space or reduce retention.
 
-The banner includes a Status link, not a generic dismiss button. Critical unresolved conditions should not be dismissible permanently.
+The banner includes a Status link, not a dismiss button. Critical unresolved
+conditions are not dismissible.
+
+### 6.4 Workspace heading
+
+Each page renders an eyebrow (small caps label naming the section), an `h1`,
+and a context line. Page metadata comes from one server-side definition per
+page; the shell must not contain per-page conditional chains for titles,
+eyebrows, or headings.
 
 ---
 
@@ -304,44 +285,37 @@ The banner includes a Status link, not a generic dismiss button. Critical unreso
 
 ### 7.1 Login screen
 
-Content:
+A centered card on the base surface sharing the shell's head and brand
+partials (no authenticated chrome). Content:
 
 - Siftail mark and name;
-- concise product line;
-- username;
-- password;
+- concise product line: "Sign in to inspect your private application logs.";
+- username and password with visible labels;
 - sign-in button;
-- no registration link;
-- no forgotten-password email flow;
-- recovery guidance pointing to CLI without exposing host details.
+- no registration link, no forgotten-password email flow;
+- recovery copy: "Lost access? Reset the administrator password with the
+  Siftail CLI on the host."
 
-Suggested supporting copy:
-
-> Sign in to inspect your private application logs.
-
-Recovery copy:
-
-> Lost access? Reset the administrator password with the Siftail CLI on the host.
+The login page is themed server-side from the preference cookie like every
+other page.
 
 ### 7.2 Error behavior
 
-Use one uniform error:
+One uniform error:
 
 > Sign-in failed. Check your credentials and try again.
-
-Do not reveal whether username exists or whether throttling is account- or IP-based.
 
 During throttling:
 
 > Too many attempts. Try again shortly.
 
+Do not reveal whether the username exists or how throttling is keyed.
+
 ### 7.3 Accessibility
 
-- username focus on initial load;
-- labels visible, not placeholder-only;
-- error associated with form;
-- password manager compatible;
-- no animation that shifts form during failure.
+Username focus on initial load; visible labels; error associated with the
+form via `role="alert"`; password-manager compatible; no animation that
+shifts the form during failure.
 
 ---
 
@@ -349,55 +323,37 @@ During throttling:
 
 ### 8.1 Mode switch
 
-Use an explicit two-option control:
+An explicit two-option segmented control:
 
 ```text
 History | Live
 ```
 
-This is a semantic tab or segmented control with correct ARIA behavior.
+Because switching modes performs navigation, the control renders as links
+styled as a segmented control — **not** with `tab`/`tablist` roles. The
+active mode is marked with `aria-current="page"`.
 
-History and Live share source and severity filters but remain distinct states.
-
-Do not append live records into a historical result set automatically.
+History and Live share source and severity filters but remain distinct
+states. Do not append live records into a historical result set
+automatically.
 
 ### 8.2 Current source context
 
-Display a compact breadcrumb or context line:
+A compact context line in the workspace heading:
 
 ```text
 Hetzner Production / NextUp / production / api
 ```
 
-Collapse dimensions with only one available value where useful, but expanded details must always expose complete source identity.
+Collapse dimensions with only one available value where useful; expanded
+details always expose complete source identity.
 
-### 8.3 Source quick switcher
+### 8.3 Source switching
 
-Open with:
-
-- `Ctrl+K` or `Cmd+K`;
-- `/` when focus is not in an input.
-
-Search terms can match:
-
-- server;
-- project;
-- environment;
-- application;
-- service;
-- alias.
-
-Example entries:
-
-```text
-NextUp · production · api
-Qisara · production · worker
-BletaQA · staging · web
-```
-
-Include server name as secondary context when more than one server exists.
-
-The quick switcher is not a command palette for arbitrary administration. Keep it focused on source selection.
+Sources are switched through the filter bar selects or through the command
+palette (§32.4), which fuzzy-matches server, project, environment,
+application, service, and alias and shows server context when more than one
+server exists.
 
 ---
 
@@ -411,36 +367,26 @@ Canonical hierarchy:
 Server → Project → Environment → Application → Service
 ```
 
-Use separate cascading selects or compact popovers.
-
 Rules:
 
 - hide or collapse a dimension with exactly one relevant option;
 - changing a parent resets invalid child selections;
-- labels use aliases when available;
-- original source label remains discoverable in detail;
-- “All services” is allowed within an application;
-- broad “all servers” history is permitted only with bounded range and clear cost.
+- labels use aliases when available; original labels remain discoverable in
+  detail;
+- "All services" is allowed within an application;
+- broad all-servers History is permitted only with bounded range.
 
 ### 9.2 Selector update behavior
 
-Source selectors update results immediately after a valid selection.
-
-History URL updates through HTMX push/replace state.
-
-Live stream reconnects explicitly with visible `Connecting` state.
+Source selectors update results immediately after a valid selection. History
+updates URL state through HTMX push/replace. Live reconnects explicitly with
+a visible `Connecting` state.
 
 ### 9.3 Missing/inactive source
 
-Inactive source label:
-
-```text
-NextUp API  Inactive
-```
-
-Do not hide inactive sources immediately. Allow historical investigation.
-
-If a source is removed while open:
+Inactive sources render an `Inactive` text badge and are not hidden;
+historical investigation remains possible. If a source is removed while
+open:
 
 > This source was removed. Choose another source.
 
@@ -450,18 +396,8 @@ If a source is removed while open:
 
 ### 10.1 Default state
 
-Returning browser:
-
-- restore last valid source;
-- restore previous range and filters where sensible.
-
-New source or first use:
-
-- last one hour;
-- all levels;
-- all streams;
-- no text filter;
-- newest first.
+New source or first use: last one hour; all levels; all streams; no text
+filter; newest first. Returning browser: restore from URL.
 
 ### 10.2 Time controls
 
@@ -471,146 +407,79 @@ Quick presets:
 15m · 1h · 6h · 24h · 7d · Custom
 ```
 
-Display absolute range in a tooltip or summary:
-
-```text
-27 Jul 2026, 20:00–21:00
-```
-
-Use the browser locale and browser timezone for row and range display. Event details
-also show the canonical UTC timestamp. Version one has no server-side timezone setting.
-
-Custom range requirements:
-
-- clear From and To labels;
-- validation that To is after From;
-- half-open semantics `[From, To)`;
-- maximum range of 31 days;
-- Apply action if native controls create partial intermediate values.
-
-Resolve a relative preset to absolute endpoints when it is applied and keep those
-endpoints in every pagination URL.
+- Presets resolve to absolute endpoints when applied and keep those
+  endpoints in every pagination URL.
+- Custom range uses labeled From and To fields with `datetime-local` inputs
+  (UTC text entry remains the no-JS fallback), validation that To is after
+  From, half-open semantics `[From, To)`, and a maximum range of 31 days.
+- Row and range display use the browser locale and timezone; event details
+  also show canonical UTC.
 
 ### 10.3 Level filter
 
-Multiple explicit levels:
-
-```text
-trace debug info warn error fatal unknown
-```
-
-Provide shortcuts:
-
-- Errors = error + fatal;
-- Problems = warn + error + fatal;
-- All.
-
-Each option includes visible text, not color only.
+Multiple explicit levels: `trace debug info warn error fatal unknown`, with
+shortcuts Errors (error+fatal), Problems (warn+error+fatal), and All. Each
+option shows visible text. Level checkboxes are real named form controls so
+filtering works without JavaScript; the canonical URL serialization remains
+the CSV form (`levels=error,fatal`).
 
 ### 10.4 Stream filter
 
-Independent multiselect:
-
-```text
-stdout stderr unknown
-```
-
-Do not label stderr as Error.
+Independent multiselect: `stdout stderr unknown`. Never label stderr as
+Error. Stream checkboxes follow the same named-control rule as levels.
 
 ### 10.5 Text search
 
-Fields:
-
-- Contains;
-- Does not contain.
-
-Behavior:
-
-- debounce contains/excludes by approximately 300–500 ms;
-- Enter executes immediately;
-- show active search as part of result summary;
-- do not run on every keystroke without delay;
-- search controls are clearly scoped to message text;
-- comparison is literal with ASCII-only case folding;
-- valid non-ASCII text is compared exactly;
-- `%`, `_`, and backslash are ordinary characters, not wildcard syntax.
-
-Placeholder examples:
-
-```text
-Contains message text
-Exclude message text
-```
-
+Fields: Contains; Does not contain. Debounce by 300–500 ms; Enter executes
+immediately; active search appears in the result summary. Comparison is
+literal with ASCII-only case folding; `%`, `_`, and backslash are ordinary
+characters. Placeholders: "Contains message text" / "Exclude message text".
 Avoid implying regex support.
 
 ### 10.6 Structured filters
 
-Initially support exact filters for:
+Exact filters for request ID, logger, HTTP method, HTTP status, error type,
+and container instance live under a "More filters" disclosure. Do not expose
+arbitrary JSON paths.
 
-- request ID;
-- logger;
-- HTTP method;
-- HTTP status;
-- error type;
-- container instance.
+### 10.7 Filter bar behavior
 
-These may live under a “More filters” disclosure to keep the main bar compact.
+The filter disclosure is collapsible at every width, defaulting open on
+desktop. Its collapsed summary line names the active scope so a collapsed
+bar never hides state (§4.3).
 
-Do not expose arbitrary JSON paths.
+### 10.8 Result summary
 
-### 10.7 Result summary
+Show loaded event count, current range, source scope, active text filters,
+and whether more results exist in either direction. Prefer
+"200 events loaded · more available" over an expensive total count.
 
-Show:
+### 10.9 Pagination
 
-- loaded event count;
-- current range;
-- source scope;
-- whether more older results exist;
-- active text filter;
-- loading state.
+Initial page: 200 events, newest first. Both directions are reachable:
 
-Avoid claiming total result count if calculating it would be expensive. Prefer:
+- **Load older** below the list (cursor-based, appends);
+- **Load newer** at the tail line above the list (cursor-based, prepends)
+  whenever newer matching events exist.
 
-> 200 events loaded · more available
+When loading: retain existing rows; localized progress near the control;
+never replace the entire list; prevent duplicate requests.
 
-instead of forcing a full `COUNT(*)`.
+The browser render cap is 1,000 rows. When the cap trims rows from one end,
+the pagination control for that direction remains available so the trimmed
+interval stays reachable; the trim is announced politely. The cap must never
+remove the operator's only path forward.
 
-### 10.8 Pagination
+### 10.10 URL state
 
-Initial page: 200 events.
-
-Primary control:
-
-> Load older
-
-The control uses cursor pagination. It may trigger automatically near the bottom later, but an explicit button remains accessible.
-
-When loading:
-
-- retain existing rows;
-- show localized progress near the button;
-- do not replace the entire list;
-- prevent duplicate requests.
-
-### 10.9 URL state
-
-Complete historical query state belongs in the URL.
-
-Example:
+Complete historical query state belongs in the URL:
 
 ```text
-/logs?mode=history&server=1&app=nextup&service=api&levels=error,fatal&from=...&to=...&q=timeout
+/logs?mode=history&server=1&app=nextup&service=api&levels=error,fatal&from=…&to=…&q=timeout
 ```
 
-URLs must not contain:
-
-- credentials;
-- tokens;
-- raw hidden metadata;
-- CSRF tokens.
-
-Browser back/forward must restore query state.
+URLs never contain credentials, tokens, or CSRF secrets. Back/forward
+restores query state.
 
 ---
 
@@ -618,192 +487,118 @@ Browser back/forward must restore query state.
 
 ### 11.1 Connection states
 
-Visible textual states:
-
-- Connecting;
-- Live;
-- Paused;
-- Reconnecting;
-- Disconnected;
-- Truncated.
-
-Use a small indicator plus text. Do not use a pulsing animation continuously.
+Visible textual states: Connecting; Live; Paused; Reconnecting;
+Disconnected; Truncated. A small static indicator plus text; no continuous
+pulsing.
 
 ### 11.2 Live controls
 
-Required:
+Required: Pause/Resume; Jump to newest; source, level, and stream filters;
+Clear view (browser-only — never labeled "Clear logs"); connection status.
 
-- Pause/Resume;
-- Jump to newest;
-- source filters;
-- level filters;
-- stream filters;
-- clear browser view, which does not delete persisted logs;
-- connection status.
+### 11.3 Auto-scroll and the pending buffer
 
-Label browser-only clear action carefully:
-
-> Clear view
-
-Never label it `Clear logs`.
-
-### 11.3 Auto-scroll
-
-When the viewport is at or near the bottom:
-
-- append events;
-- maintain bottom position.
-
-When the user scrolls upward:
-
-- stop forced scrolling;
-- continue receiving into bounded pending buffer;
-- show floating/new-events control:
+At or near the bottom: append events and maintain bottom position. When the
+user scrolls upward: stop forced scrolling; buffer into the bounded pending
+store; show the floating control:
 
 ```text
 ↓ 143 new events
 ```
 
-Selecting it:
-
-- renders pending events as allowed;
-- jumps to newest;
-- resumes bottom tracking.
+Selecting it renders pending events, jumps to newest, and resumes bottom
+tracking.
 
 ### 11.4 Browser limits
 
-Initial limits:
+1,000 rendered rows; 2,000 pending rows. Exceeding the rendered limit
+removes oldest browser rows with a subtle notice. Exceeding the pending
+limit closes and reconnects the subscription from now:
 
-- 1,000 rendered rows;
-- 2,000 pending rows.
-
-When rendered limit is exceeded:
-
-- remove oldest browser rows;
-- retain persisted server history;
-- show a subtle notice if context was truncated.
-
-When pending limit is exceeded:
-
-- close and reconnect the subscription from “now”;
-- state clearly:
-
-> Live view was truncated while you were scrolled away. Use History to inspect the full interval.
+> Live view was truncated while you were scrolled away. Use History to
+> inspect the full interval.
 
 ### 11.5 Pause semantics
 
-Pause affects browser rendering/subscription behavior according to implementation, not server persistence.
-
-Preferred behavior:
-
-- EventSource may remain connected;
-- bounded pending buffer continues;
-- status says Paused;
-- no implication that ingestion stopped.
-
-Copy:
+Pause affects browser rendering only. Status says Paused; copy:
 
 > Live view paused. Logs are still being stored.
 
 ### 11.6 Reconnection
 
-On disconnect:
-
-- show Reconnecting;
-- do not clear visible rows;
-- use native reconnect behavior;
-- after reconnection, always indicate a possible gap because version one does not replay;
-- direct the user to History using an absolute range covering the gap.
+On disconnect: show Reconnecting; do not clear visible rows; after
+reconnection always indicate a possible gap (version one does not replay)
+and direct the user to History with an absolute range covering the gap.
 
 ---
 
 ## 12. Log event row
 
-### 12.1 Default anatomy
-
-Compact example:
+### 12.1 Anatomy
 
 ```text
-20:41:07.283  ERROR  nextup/api  Database connection failed
+▸ 20:41:07.283  ERR  nextup/api      Database connection failed        stderr
 ```
 
-Recommended columns:
-
-1. expansion control;
-2. timestamp;
-3. normalized level;
-4. source/service summary;
-5. message preview;
-6. optional stream indicator;
-7. actions on focus/hover.
+Columns, in order: expansion control; timestamp; severity code; source
+summary; message preview; stream label. The row is entirely monospace
+(§28.3) with fixed column alignment; timestamps use tabular figures.
 
 ### 12.2 Timestamp
 
-Default row shows local time with milliseconds:
+Rows show local time with milliseconds (`20:41:07.283`); when the range
+spans multiple days, include the date (`27 Jul 20:41:07.283`). Expanded
+detail shows the full event timestamp with timezone, UTC, received
+timestamp, and delivery delay.
 
-```text
-20:41:07.283
-```
+### 12.3 Severity codes
 
-When range spans multiple days, include date:
+Severity renders as a fixed-width three-letter code so every row aligns and
+severity is always textual:
 
-```text
-27 Jul 20:41:07.283
-```
+| Level | Code | Treatment |
+|---|---|---|
+| trace | `TRC` | heavily muted text |
+| debug | `DBG` | muted text |
+| info | `INF` | secondary text |
+| warn | `WRN` | warning color + subtle left edge indicator |
+| error | `ERR` | error color + subtle left edge indicator |
+| fatal | `FTL` | fatal color, weight 700 + left edge indicator |
+| unknown | `UNK` | outlined neutral |
 
-Expanded detail shows:
-
-- full event timestamp with timezone;
-- UTC representation where useful;
-- received timestamp;
-- delivery delay.
-
-### 12.3 Severity treatment
-
-Use visible label and subtle indicator.
-
-- `TRACE`: heavily muted;
-- `DEBUG`: muted;
-- `INFO`: neutral;
-- `WARN`: amber label + subtle left indicator;
-- `ERROR`: red label + subtle left indicator;
-- `FATAL`: stronger red treatment, not flashing;
-- `UNKNOWN`: outlined neutral label.
-
-Do not color the entire row strongly.
+Do not color the entire row. The code list is canonical; templates and the
+live rendering module must share one mapping.
 
 ### 12.4 Message preview
 
-Default:
+One line in Compact density; up to two lines in Comfortable. Preserve
+visible whitespace sensibly; show truncation ellipsis; indicate multiline
+count when useful (`NullPointerException …  +18 lines`).
 
-- one line in Compact density;
-- up to two lines in Comfortable density;
-- preserve visible whitespace sensibly;
-- show truncation ellipsis;
-- indicate multiline count when useful:
+### 12.5 Row selection and actions
 
-```text
-NullPointerException …  +18 lines
-```
+The keyboard-selected row gets a selection outline distinct from hover. No
+checkbox multi-select. Actions on focus/hover or in expanded detail:
+Expand/Collapse; Copy message; Copy raw event; Copy request ID when present.
+Primary action is expansion; avoid per-row action clutter.
 
-### 12.5 Row selection
+### 12.6 The tail line
 
-Keyboard-selected row gets a clear focus/selection outline distinct from hover.
+The tail line is the rendered boundary at the newest edge of every log list
+— the product's signature element.
 
-Selection does not imply checkbox multi-select. Bulk event actions are not required.
+- **Live:** a thin accent rule directly below the newest rendered row,
+  carrying the connection state dot. It marks "now." When paused it renders
+  in the warning color with the Paused label adjacent. It moves with the
+  newest row; it does not animate per event.
+- **History:** the same rule sits above the newest loaded row and hosts the
+  **Load newer** control when newer matching events exist, and a **Go live**
+  link when the range extends to the present. It marks where the tail
+  begins beyond the loaded window.
 
-### 12.6 Row actions
-
-Available on focus/hover or expanded detail:
-
-- Expand/Collapse;
-- Copy message;
-- Copy raw event;
-- Copy request ID when present;
-- Open source filter;
-- Add message text to filter where useful.
-
-Avoid action clutter in every row. Primary action is expansion.
+The tail line is a functional landmark, not decoration: it always answers
+"where does now start?" It must never receive severity colors, glow, or
+continuous animation.
 
 ---
 
@@ -811,98 +606,46 @@ Avoid action clutter in every row. Primary action is expansion.
 
 ### 13.1 Layout
 
-Expand inline below the row.
-
-Sections:
-
-1. Message;
-2. Source;
-3. Timing;
-4. Severity and stream;
-5. Common structured fields;
-6. Remaining attributes;
-7. Raw payload;
-8. Copy actions.
+Expand inline below the row (no side drawer). Sections: Message; Source;
+Timing; Severity and stream; Common structured fields; Remaining attributes;
+Raw payload; Copy actions. The detail panel stays in the monospace family
+for values; labels use the UI face. Expanding a row must not switch the
+list's reading rhythm.
 
 ### 13.2 Source section
 
-Show:
-
-- server;
-- project;
-- environment;
-- application;
-- service;
-- container name;
-- container ID;
-- alias and original name where different.
+Server; project; environment; application; service; container name;
+container ID; alias and original name where different.
 
 ### 13.3 Timing section
 
-Show:
-
-- event time;
-- received time;
-- delivery delay;
-- internal event ID only under advanced/detail information.
+Event time; received time; delivery delay; internal event ID only under
+advanced detail.
 
 ### 13.4 Attributes
 
-Render key/value pairs safely.
-
-Rules:
-
-- stable key ordering for readability;
-- nested objects collapsible;
-- long values truncated with expansion;
-- strings escaped;
-- no clickable auto-linking of arbitrary content by default;
-- request IDs and HTTP paths may have focused copy actions.
+Stable key ordering; nested objects collapsible; long values truncated with
+expansion; strings escaped; no auto-linking of arbitrary content; request
+IDs and HTTP paths may have focused copy actions.
 
 ### 13.5 Raw payload
 
-Display in a scrollable `<pre>` with syntax-neutral or very light safe highlighting.
-
-Do not introduce a heavy syntax-highlighting library.
-
-Large raw payload:
-
-- cap initial browser rendering;
-- provide “Show full payload” if within safe UI limit;
-- provide raw download endpoint if too large;
-- always show size.
+Scrollable `<pre>` with no heavy syntax highlighting. Cap initial rendering;
+provide "Show complete stored content" within safe limits; always show size.
 
 ### 13.6 Inline expansion behavior
 
-- one or multiple rows may remain expanded;
-- expansion state can be browser-only;
-- loading details keeps row context;
-- focus moves predictably;
-- collapse returns focus to row control.
-
-A side drawer is not the default because inline expansion preserves timeline context and is simpler on mobile.
+Multiple rows may remain expanded; expansion state is browser-only; loading
+details keeps row context; collapse returns focus to the row's toggle.
 
 ---
 
 ## 14. Future deployment boundaries
 
-This interaction is reserved for a post-dogfood candidate and must not appear in
-version one. If implemented after an approved product change, show a subtle separator:
-
-```text
-──────── Container changed · 14:32:11 ────────
-api-7f9d → api-a302
-```
-
-Copy must say `Container changed` or `Deployment boundary inferred`, not `Deployment successful`.
-
-Markers:
-
-- do not receive severity color;
-- do not look like log rows;
-- do not appear in export;
-- do not affect event counts;
-- may include tooltip explaining inference.
+Reserved for a post-dogfood candidate; must not appear in version one. If
+implemented after an approved product change, show a subtle separator
+labeled `Container changed` (never `Deployment successful`), without
+severity color, excluded from export and counts.
 
 ---
 
@@ -910,57 +653,38 @@ Markers:
 
 ### 15.1 Purpose
 
-Manage discovered hierarchy and aliases without turning the page into an infrastructure inventory system.
+Manage discovered hierarchy and aliases without becoming an infrastructure
+inventory.
 
 ### 15.2 Source list
 
-Show grouped source tree or table with:
-
-- display name;
-- server;
-- project/environment;
-- service;
-- active/inactive state;
-- first seen;
-- last seen;
-- log count for recent retained interval only if inexpensive;
-- alias indicator.
+Table with display name (plus alias badge), server, project/environment,
+lifecycle state, last seen, and retained data. Pagination uses the shared
+component (§30) with both directions where applicable.
 
 ### 15.3 Source detail
 
-Actions:
-
-- open logs;
-- set/remove alias;
-- inspect container instances;
-- clear logs;
-- remove source.
+Actions: open logs; set/remove alias; inspect container instances; clear
+logs; remove source.
 
 ### 15.4 Alias editing
 
-Inline or small dialog.
+Inline form. Copy:
 
-Copy:
-
-> Alias changes only how this source is displayed. Original metadata remains unchanged.
-
-Validation errors remain inline.
+> Aliases change display names only. Original source metadata remains
+> unchanged.
 
 ### 15.5 Destructive actions
 
-`Clear logs`:
+A visually distinct destructive zone using the danger button treatment
+(§30.2).
 
-> Delete all retained logs for **NextUp API** while keeping the source and alias.
+`Clear logs` — "Delete all retained logs for **NextUp API** while keeping
+the source and alias." Requires typing the display name.
 
-Require typing display name.
-
-`Remove source`:
-
-> Delete retained logs, aliases, container history, and source metadata for **NextUp API**.
-
-Stronger confirmation.
-
-Never promise secure erasure.
+`Remove source` — "Delete retained logs, aliases, container history, and
+source metadata for **NextUp API**." Requires the stronger typed
+confirmation. Never promise secure erasure.
 
 ---
 
@@ -968,85 +692,44 @@ Never promise secure erasure.
 
 ### 16.1 Server list
 
-Show:
-
-- server name;
-- active token status;
-- token last used;
-- source count;
-- last event received;
-- ingestion health.
+Server name; active token status; token last used; source count; last event
+received.
 
 ### 16.2 Create server
 
-Fields:
-
-- display name;
-- optional descriptive hostname;
-- connection mode guidance: public HTTPS or private network.
-
-After creation, prompt token creation.
+Display name; optional descriptive hostname. After creation, prompt token
+creation.
 
 ### 16.3 Token creation
 
-Token display screen:
-
 > Copy this token now. Siftail stores only a hash and cannot show it again.
 
-Provide:
-
-- copy button;
-- masked/unmasked toggle during this one screen;
-- generated Fluent Bit configuration;
-- generated curl test;
-- explicit Done acknowledgement.
-
-Do not redisplay token after leaving.
+Provide copy button; masked/unmasked toggle on this one screen; generated
+Fluent Bit configuration; generated curl test; explicit Done
+acknowledgement. Never redisplay the token.
 
 ### 16.4 Token rotation
 
-Flow:
-
-1. create replacement token;
-2. display once;
-3. instruct update of source;
-4. test new token;
-5. revoke old token.
-
-Do not force immediate old-token revocation unless chosen.
+Create replacement → display once → instruct update → test → revoke old. Do
+not force immediate revocation.
 
 ### 16.5 Revoke token
 
-Ordinary confirmation is sufficient, but show impact:
-
 > This server will stop sending logs with this token immediately.
+
+Revocation confirmation requires typing the token name.
 
 ### 16.6 Generated configuration
 
-The generator asks for or derives:
-
-- Siftail ingestion URL;
-- public/private mode;
-- token;
-- TLS setting;
-- optional source metadata;
-- Siftail self-exclusion.
-
-Present code in copyable block with warnings:
-
-- token appears in the configuration;
-- protect the Coolify configuration;
-- restart/apply relevant resources;
-- verify filesystem-buffer path behavior;
-- exclude Siftail itself.
+Copyable blocks with warnings: token appears in the configuration; protect
+the Coolify configuration; restart relevant resources; exclude Siftail
+itself from its own drain.
 
 ---
 
 ## 17. Guided ingestion test
 
-### 17.1 Test stages
-
-Display progress:
+Five stages with success/failure state and safe detail:
 
 ```text
 1. Request received
@@ -1056,23 +739,10 @@ Display progress:
 5. Source discovered
 ```
 
-Each stage has success/failure state and safe detail.
-
-### 17.2 Failure copy examples
-
-Invalid token:
-
-> The request reached Siftail, but the ingestion token was rejected.
-
-Malformed record:
-
-> The request authenticated, but record 1 was not valid JSON.
-
-Storage unavailable:
-
-> The event was valid, but Siftail could not commit it to the database.
-
-Never display raw authorization data.
+Failure copy examples: "The request reached Siftail, but the ingestion token
+was rejected." / "The request authenticated, but record 1 was not valid
+JSON." / "The event was valid, but Siftail could not commit it to the
+database." Never display raw authorization data.
 
 ---
 
@@ -1084,70 +754,28 @@ A compact appliance-status page, not a metrics dashboard.
 
 ### 18.2 Sections
 
-#### Runtime
+**Runtime:** version; uptime; architecture; UI/ingestion readiness.
 
-- version;
-- uptime;
-- architecture;
-- UI/ingestion readiness.
+**Storage:** database size; WAL size; schema and SQLite version; configured
+limit; oldest/newest event; retention age; last cleanup; last bounded
+database-check result and a `Run safe database check` action that preserves
+the page and never exposes paths or raw SQLite errors.
 
-#### Storage
+**Ingestion:** events accepted today; recent rate; queued events/bytes;
+rejected batches; last successful ingest; last database error.
 
-- database size;
-- WAL size;
-- schema and SQLite version;
-- configured size limit;
-- oldest event;
-- newest event;
-- retention age;
-- last cleanup.
-- last bounded database-check result and time;
-- a `Run safe database check` action that preserves the Status page, reports
-  a concise success/failure notice, and never exposes database paths or raw
-  SQLite errors.
-
-#### Ingestion
-
-- events accepted today by the current process;
-- current recent rate;
-- queued events;
-- queued bytes;
-- rejected batches;
-- last successful ingest;
-- last database error.
-
-#### Live clients
-
-- active SSE connections;
-- slow/truncated client count if meaningful.
-
-#### Backup
-
-- last backup result;
-- last verification;
-- restore guidance.
-
-#### Diagnostics
-
-- latest sanitized operational events.
-- each row shows time, textual severity, component, category, fixed safe
-  summary, optional request ID, and optional recovery time;
-- never accept or render arbitrary process-error text.
+**Diagnostics:** latest sanitized operational events with time, textual
+severity, component, category, fixed safe summary, optional request ID.
 
 ### 18.3 Visualization
 
-Use text, progress bars, and small status blocks. Avoid time-series charts in version one.
-
-Database usage may use a single horizontal capacity bar because it communicates a bounded resource directly.
+Text, definition lists, and a single horizontal capacity bar for database
+usage. No time-series charts.
 
 ### 18.4 Status severity
 
-- Healthy;
-- Attention;
-- Degraded;
-- Unavailable.
-
-Always include text.
+Healthy; Attention; Degraded; Unavailable. Always textual; the header
+health dot (§6.1) reflects the same value.
 
 ---
 
@@ -1155,159 +783,83 @@ Always include text.
 
 ### 19.1 Runtime settings
 
-Editable:
-
-- retention days;
-- maximum database size;
-- audit retention days;
-- selected export limits if exposed.
-
-Read-only process configuration:
-
-- data directory category;
-- UI listener;
-- ingestion listener;
-- public URL;
-- authentication mode;
-- forwarded-header trust networks;
-- log format/level;
-- request and queue limits.
-
-### 19.2 Restart-required values
-
-Read-only values configured through environment variables show:
+Editable: retention days; maximum database size. Read-only process
+configuration shows environment-derived values with:
 
 > Requires container configuration change and restart.
 
-Do not pretend they can be hot-reloaded.
+### 19.2 Validation
 
-### 19.3 Validation
-
-Server-side errors appear next to field and in a summary when needed.
-
-Examples:
+Server-side errors appear next to the field:
 
 > Retention must be a whole number from 1 to 3,650 days.
 
 > Maximum database size must be a whole number from 1 to 1,024 GiB.
 
-Both fields are submitted as one retention-policy change. A field error keeps
-both submitted values visible, focuses the first invalid field, and does not
-change either stored value.
+Both fields submit as one retention-policy change; a field error keeps
+submitted values visible and focuses the first invalid field.
 
-### 19.4 Save behavior
+### 19.3 Save behavior
 
-- localized progress;
-- current page remains visible;
-- success notification:
+Localized progress; success notification "Retention settings saved."; no
+full-page spinner.
 
-> Retention settings saved.
+### 19.5 Interface preferences
 
-- no full-page spinner.
+Theme (System / Dark / Light) and density (Compact / Comfortable) are
+**server-stored preferences** submitted to `POST /preferences` from the
+System menu, persisted in a non-secret cookie, and rendered server-side as
+`data-theme` / `data-density` attributes before first paint.
+
+- With JavaScript, changes apply instantly and persist in the background.
+- Without JavaScript, the preference form submits normally and returns to
+  the current page.
+- There is no first-paint theme flash in any configuration.
 
 ---
 
 ## 20. Audit page
 
-### 20.1 Presentation
-
-Dense chronological list with filters for category and outcome.
-
-Fields:
-
-- time;
-- action;
-- outcome;
-- actor/context;
-- safe summary;
-- request ID when relevant.
-
-### 20.2 Security
-
-Audit details never reveal:
-
-- passwords;
-- hashes;
-- tokens;
-- authorization headers;
-- raw application payloads.
-
-### 20.3 Retention notice
-
-Display:
+Dense chronological table with filters for range, category, outcome, and
+exact action. Fields: time; action code; outcome; actor/context; safe
+summary; request ID. Audit details never reveal passwords, hashes, tokens,
+authorization headers, or raw payloads. Display:
 
 > Security audit events are retained separately from application logs.
 
 ---
 
-## 21. Backup and recovery interface
+## 21. Backup and recovery
 
 ### 21.1 Browser role
 
-The browser may:
+The browser explains commands, shows the last process result, initiates
+full/configuration-only backups, and verifies an accessible server-side
+artifact. Restore remains CLI-only in version one; the page documents:
 
-- explain commands;
-- show last backup result;
-- initiate safe backup if designed;
-- verify an accessible server-side backup path where appropriate.
-
-Restore remains primarily CLI because it requires stopping ingestion and replacing the active database.
+> Restoring replaces the active database and requires the Siftail server to
+> be stopped. Run `siftail restore --confirm RESTORE /path/to/backup.sqlite`
+> on the host. Siftail preserves one verified `siftail.db.rollback` artifact
+> and always requires a fresh sign-in.
 
 ### 21.2 Backup actions
 
-Options:
+Full backup and configuration-only backup, with the typed process states,
+single-operation limit, one-second focused polling, disabled controls while
+running, and safe-basename-only reporting defined by the recovery
+architecture. Explain:
 
-- Full backup;
-- Configuration-only backup.
+> Full backups include retained application logs. Configuration-only backups
+> exclude application logs, diagnostics, and audit history. All backups
+> exclude browser sessions, so restore requires a new sign-in.
 
-Explain:
+While a job polls, focus and caret position in unrelated controls must be
+preserved; the polling region excludes any focused input.
 
-> Full backups include retained application logs. Configuration-only backups exclude
-> application logs, diagnostics, and audit history. All backups exclude browser
-> sessions, so restore requires a new sign-in.
+### 21.3 Artifact download
 
-The Backup workspace starts at most one asynchronous operation and shows typed
-process-local state:
-
-- no backup run;
-- full backup in progress with copied/total SQLite pages;
-- configuration-only backup in progress with copied/total configuration rows;
-- read-only artifact verification in progress;
-- backup verified with safe basename, byte size, and SHA-256;
-- canceled before publication; or
-- failed with destination-capacity/permission guidance and no raw path or
-  SQLite error.
-
-While running, the output input and action are disabled and only the focused
-region polls once per second. Existing page content remains visible. The
-server-side output path is never echoed after submission; only its safe
-basename may appear in the result and security audit.
-
-Configuration-only copy states explicitly that it includes credential hashes,
-Servers, settings, and source presentation configuration; excludes logs,
-container observations, audit/diagnostic history, and sessions; and restores by
-replacement with empty history rather than merging. Verification copy states
-that it is read-only and checks type, compatibility, integrity, exclusions,
-permissions, and checksum without restoring.
-
-### 21.3 Restore warning
-
-Browser documentation/status copy:
-
-> Restoring replaces the active database and requires the Siftail server to be
-> stopped. Run `siftail restore --confirm RESTORE /path/to/backup.sqlite` on the
-> host. Siftail preserves one verified `siftail.db.rollback` artifact and always
-> requires a fresh sign-in.
-
-The browser provides explanation only, not a restore form. It tells the
-operator to copy the managed rollback to another protected path before using
-that copy as a recovery artifact.
-
-### 21.4 Destructive confirmation
-
-Restore requires the exact case-sensitive CLI confirmation `--confirm RESTORE`.
-No browser restore path exists in version one; if one is introduced later, it
-also requires typing `RESTORE` and re-entering the administrator password.
+Browser download of backup artifacts is a recorded follow-up (SFT-080), not
+part of this specification's version.
 
 ---
 
@@ -1315,459 +867,360 @@ also requires typing `RESTORE` and re-entering the administrator password.
 
 ### 22.1 Formats
 
-- Plain text;
-- NDJSON.
-
-Format labels must identify the stable schema:
-
-- `Text (siftail-text-v1)` for a fixed tab-separated, reversibly escaped
-  complete-event schema;
-- `NDJSON (schema 1)` for one complete-event JSON object per physical line.
-
-Both preserve multiline/control/hostile content as escaped data, use UTC
-timestamps, represent optional fields as `null`, include bounded attributes and
-lossless base64 raw payload, and preserve canonical newest-first ordering.
-Neither format is an HTML fragment.
+`Text (siftail-text-v1)` and `NDJSON (schema 1)`, both preserving escaped
+hostile content, UTC timestamps, `null` optional fields, bounded attributes,
+lossless base64 raw payload, and canonical newest-first ordering.
 
 ### 22.2 Export dialog
 
-Show:
+Shows source scope, time range, active filters, format, and the hard
+100,000-event, 256 MiB, and 31-day limits. Copy:
 
-- source scope;
-- time range;
-- active filters;
-- selected format;
-- estimated or maximum event count where available;
-- warning for large export.
+> Exports contain the complete matching result set up to the configured
+> export limit, not only the rows currently loaded.
 
-Copy:
-
-> Exports contain the complete matching result set up to the configured export limit, not only the rows currently loaded.
-
-The dialog must also state the hard 100,000-event, 256 MiB, and 31-day limits.
-Page direction, loaded-row count, and `Load older` cursor do not change export
-scope. Active filter text appears only in the authenticated dialog, never in
-audit metadata or the suggested filename.
+Filter text appears only in the authenticated dialog, never in audit
+metadata or the suggested filename.
 
 ### 22.3 Export confirmation
 
-Require explicit confirmation for every export because the complete matching
-count is deliberately not calculated before generation. This is stronger than
-confirming only known-large results and keeps the egress decision consistent.
-
-During preparation and delivery:
-
-- an accessible status beside the export action states that the complete
-  artifact is being prepared and will download only after auditing succeeds;
-- cancellation is possible through browser download behavior;
-- UI does not freeze.
-
-Generation uses native download navigation rather than replacing the History
-region. Validation and limit failures render the authenticated History view
-again with the exact filters preserved and a localized error. Session expiry
-uses the ordinary sign-in redirect. Closing the dialog restores focus to its
+Every export requires the explicit confirmation checkbox because the
+complete matching count is deliberately not calculated. Generation uses
+native download navigation; failures re-render History with filters
+preserved and a localized error; closing the dialog restores focus to its
 trigger.
 
 ---
 
 ## 23. Loading states
 
-### 23.1 Principle
-
-Preserve existing content and show localized progress.
-
-### 23.2 History filter loading
-
-- existing rows remain visible;
-- result region gets subtle busy treatment;
-- small indicator near result summary;
-- `aria-busy=true` on target region;
-- controls remain usable except conflicting action.
-
-### 23.3 Pagination loading
-
-`Load older` changes to:
-
-> Loading…
-
-Only the pagination control is disabled.
-
-### 23.4 Live connection
-
-Use static status text and subtle indicator. Avoid a full-page spinner.
-
-### 23.5 Button actions
-
-Disable only the active action button. Do not disable unrelated navigation unless consistency requires it.
+- Preserve existing content; show localized progress.
+- History filter loading keeps rows visible, sets `aria-busy="true"` on the
+  updating region for the duration of the request, and shows a small
+  indicator near the result summary.
+- `Load older` / `Load newer` change their own label to "Loading…" and
+  disable only themselves.
+- Live connection uses static status text. No full-page spinners anywhere.
 
 ---
 
 ## 24. Empty states
 
-### 24.1 No sources
+Every empty state names the situation and offers its action as a real
+control, not prose.
 
-> No log sources have been discovered yet.
+### 24.1 No sources (first run)
+
+> **No log sources yet.**
 >
-> Create a server token and connect a Coolify or Fluent Bit log drain.
+> Create a server, generate its ingestion token, and point a Coolify or
+> Fluent Bit log drain at Siftail. Logs appear here the moment the first
+> event commits.
 
-Actions:
-
-- Create server;
-- View setup guide.
+Actions: **Create server** (→ `/servers`); **View setup guide** (→ the
+token flow documentation section on `/servers`).
 
 ### 24.2 No logs in range
 
 > No logs arrived for this source during the selected time range.
 
-Action:
-
-- Last 24 hours;
-- Switch source.
+Actions: **Last 24 hours** (applies the preset); **Switch source**.
 
 ### 24.3 No filter match
 
-> No logs matched these filters.
->
-> Try a longer time range or remove a message filter.
+> No logs matched these filters. Try a longer time range or remove a message
+> filter.
+
+Action: **Clear text filters**.
 
 ### 24.4 Empty live view
 
 > Waiting for new events from this source.
 
-Show connection status and link to History.
+Shows connection status; links to History.
 
 ### 24.5 No audit events
 
 > No security audit events match this range.
 
-No decorative illustration required.
+No decorative illustration anywhere.
 
 ---
 
 ## 25. Error states
 
-### 25.1 Contextual first
-
-Errors belong near the failed component.
-
-Examples:
-
-- filter query failed: within result region;
-- alias validation: next to alias field;
-- token generation: in token panel;
-- backup failure: in backup section;
-- session expiry: global redirect/login notice.
-
-### 25.2 Global notifications
-
-Use restrained notifications for completed actions or nonlocal problems.
-
-Success examples:
-
-- Token created;
-- Alias updated;
-- Backup verified;
-- Settings saved.
-
-Error notifications should include a path to details, not only “Failed.”
-
-### 25.3 Request ID
-
-Unexpected errors show:
-
-> Request ID: `01…`
-
-This assists diagnosis without revealing stack traces.
-
-### 25.4 Database unavailable
-
-History error:
-
-> Logs could not be read because the database is temporarily unavailable. Existing filters were preserved.
-
-### 25.5 Session expired
-
-After redirect to login:
-
-> Your session expired. Sign in again to continue.
-
-Preserve a safe return path to the previous page.
+- Errors render near the failed component (filter errors in the result
+  region; alias validation next to the field; token generation in its
+  panel; backup failure in its section).
+- Unexpected errors are generic and show `Request ID: 01…`.
+- Database unavailable during History: "Logs could not be read because the
+  database is temporarily unavailable. Existing filters were preserved."
+- Session expiry redirects to login with "Your session expired. Sign in
+  again to continue." and a safe return path.
 
 ---
 
 ## 26. Notifications
 
-Use a small notification region.
+One shared notice region rendered by the shell directly below the header.
 
-Rules:
-
-- screen-reader accessible;
-- success auto-dismisses after a reasonable duration;
-- critical error remains until acknowledged or resolved;
-- no stacked flood;
-- newest replaces or groups repeated equivalent messages;
-- no bouncing or celebratory animation.
+- Post-action messages ("Retention settings saved.", "Token revoked.") are
+  delivered as **one-time flash messages** via a short-lived cookie set
+  before the redirect — never as URL query parameters. A reload or shared
+  link never re-shows a stale notice.
+- Screen-reader accessible via a polite live region.
+- Success notices auto-dismiss; critical errors remain until resolved.
+- No stacked floods: newest replaces equivalent messages.
+- No bouncing or celebratory animation.
 
 ---
 
 ## 27. Visual system
 
-### 27.1 CSS architecture
+### 27.1 Architecture
 
-Use semantic custom properties and small component classes.
+Two stylesheets, both embedded and served same-origin:
 
-Suggested token categories:
+- `tokens.css` — font faces, primitive palette, semantic tokens, type
+  scale, spacing, radii, shadows, density variables;
+- `app.css` — everything else, organized in native cascade layers
+  `@layer base, chrome, components, pages`.
+
+Every color used by a component references a semantic token. No literal
+colors in component rules; no arbitrary one-off colors when a token exists.
+
+### 27.2 Theming model
+
+Each semantic color is defined **exactly once** with `light-dark()`:
 
 ```css
+:root { color-scheme: dark light; }
+:root[data-theme="dark"]  { color-scheme: dark; }
+:root[data-theme="light"] { color-scheme: light; }
+
 :root {
-  --surface-base: ...;
-  --surface-raised: ...;
-  --surface-overlay: ...;
-  --surface-hover: ...;
-  --surface-selected: ...;
-
-  --text-primary: ...;
-  --text-secondary: ...;
-  --text-muted: ...;
-  --text-inverse: ...;
-
-  --border-subtle: ...;
-  --border-strong: ...;
-
-  --accent-primary: ...;
-  --accent-secondary: ...;
-
-  --status-info: ...;
-  --status-warning: ...;
-  --status-error: ...;
-  --status-fatal: ...;
-  --status-success: ...;
-
-  --focus-ring: ...;
-
-  --space-1: ...;
-  --space-2: ...;
-  --radius-sm: ...;
-  --shadow-overlay: ...;
+  /* static dark fallbacks first, for browsers without light-dark() */
+  --surface-base: #0f1218;
+  --surface-base: light-dark(#0f1218, #f3f4f8);
 }
 ```
 
-Do not hard-code literal colors across components.
+`data-theme` is rendered server-side from the preference cookie (§19.5);
+absence means System. Browsers below the `light-dark()` support floor
+receive the complete dark theme via the fallback declarations (ADR 0005).
+Duplicated per-theme token blocks are forbidden.
 
-### 27.2 Color direction
+### 27.3 Color tokens
 
-Brand:
+Canonical values (dark, light). Implementation must verify every
+text/background pairing against WCAG 2.2 AA before merge; if a value fails
+in verification it is adjusted toward compliance and this table is updated
+in the same change.
 
-- muted cyan/blue primary;
-- restrained warm amber secondary.
+| Token | Dark | Light |
+|---|---|---|
+| `--surface-base` | `#0F1218` | `#F3F4F8` |
+| `--surface-raised` | `#151A24` | `#FBFCFE` |
+| `--surface-overlay` | `#1B2230` | `#FFFFFF` |
+| `--surface-hover` | `#212A3C` | `#E8EAF2` |
+| `--surface-selected` | `#26304B` | `#E1E5F7` |
+| `--text-primary` | `#E9EDF5` | `#1B202B` |
+| `--text-secondary` | `#B4BDCD` | `#444C5E` |
+| `--text-muted` | `#808B9D` | `#5F6879` |
+| `--text-inverse` | `#0D1017` | `#F5F7FC` |
+| `--border-subtle` | `#262E3E` | `#D6DAE5` |
+| `--border-strong` | `#3E4A61` | `#A7AFC2` |
+| `--accent` | `#8B96EC` | `#4653C8` |
+| `--accent-hover` | `#A2ACF2` | `#3945B0` |
+| `--status-info` | `#85A9D6` | `#33608F` |
+| `--status-warning` | `#E2A93F` | `#8F5B00` |
+| `--status-error` | `#EE7B74` | `#BC3A31` |
+| `--status-fatal` | `#F79A94` | `#8F1D25` |
+| `--status-success` | `#6FC08D` | `#1F7A48` |
+| `--focus-ring` | `#ADB7FF` | `#4653C8` |
 
-Semantics:
+### 27.4 Color rules
 
-- warning uses brighter amber/orange distinct from brand secondary;
-- error/fatal use red family;
-- success uses green;
-- info remains neutral/cyan only where not confused with brand interaction.
+- The periwinkle-indigo accent is the only brand hue. It marks interaction
+  and the current position (active nav, focused controls, the tail line,
+  selection) — never status or severity.
+- Severity and status colors never appear on chrome or interactive
+  affordances unrelated to their meaning.
+- Warning amber, error red, success green, and info blue stay visually
+  distant from the accent.
+- Dark is the design-first theme; light is complete and equally verified,
+  built on subtle neutral surfaces, never large pure-white expanses.
 
-### 27.3 Dark theme
+### 27.5 Spacing, radius, elevation
 
-Dark-first default for new browser unless system preference or explicit product default dictates otherwise.
+```text
+--space-1 .25rem  --space-2 .5rem  --space-3 .75rem  --space-4 1rem
+--space-6 1.5rem  --space-8 2rem
+--radius-sm .3rem  --radius-md .55rem  --radius-lg .8rem
+--shadow-raised   (subtle, for menus and popovers)
+--shadow-overlay  (pronounced, for dialogs)
+```
 
-Use dark neutral surfaces, not pure black everywhere.
-
-Ensure:
-
-- long log reading is comfortable;
-- muted text still meets contrast requirements;
-- warning/error labels remain readable;
-- selected/focused states are distinguishable.
-
-### 27.4 Light theme
-
-Fully supported, not an afterthought.
-
-Avoid excessively bright white expanses; use subtle neutral surfaces and borders.
-
-### 27.5 Theme preference
-
-Options:
-
-- System;
-- Dark;
-- Light.
-
-Store in browser local storage.
-
-No server round trip required.
+Every shadow token used must be defined. Log rows use no radius and no
+shadow; separation comes from hairline borders.
 
 ---
 
 ## 28. Typography
 
-### 28.1 UI stack
+### 28.1 Faces
 
-```css
-font-family:
-  system-ui,
-  -apple-system,
-  BlinkMacSystemFont,
-  "Segoe UI",
-  sans-serif;
+- **UI:** `system-ui, -apple-system, "Segoe UI", sans-serif` — navigation,
+  labels, buttons, forms, notices, prose.
+- **Data:** **JetBrains Mono** (vendored subsetted woff2, weights 400 and
+  700, OFL license vendored alongside), falling back to
+  `ui-monospace, "SFMono-Regular", Consolas, "Liberation Mono", monospace`
+  with metric-compatible sizing. `font-display: swap`; the regular weight is
+  preloaded.
+
+No external font requests of any kind.
+
+### 28.2 Scale
+
+Root: 15px Compact, 16px Comfortable (§29). Tokens:
+
+```text
+--text-2xs .733rem   --text-xs .8rem    --text-sm .867rem
+--text-md  1rem      --text-lg 1.133rem --text-xl 1.333rem
+--text-2xl 1.6rem    --text-log .833rem (log rows)
 ```
 
-### 28.2 Log stack
+Weights: 400, 500, 600, 700 only. No literal font sizes or nonstandard
+weights in component rules.
 
-```css
-font-family:
-  ui-monospace,
-  "SFMono-Regular",
-  Consolas,
-  "Liberation Mono",
-  monospace;
-```
+### 28.3 Monospace usage
 
-### 28.3 Use of monospace
-
-Use monospace for:
-
-- log messages;
-- timestamps;
-- IDs;
-- code/configuration;
-- technical metadata.
-
-Use sans-serif for:
-
-- navigation;
-- labels;
-- descriptions;
-- buttons;
-- forms;
-- notices.
-
-Do not use monospace for every UI element.
-
-### 28.4 Font sizing
-
-Recommended baseline:
-
-- UI body around 14–16px depending on density;
-- compact log rows around 12.5–14px;
-- minimum readable mobile size;
-- no user-controlled arbitrary font-size matrix in version one.
+Monospace for: log messages, timestamps (tabular figures), severity codes,
+IDs, code and configuration, technical metadata, token displays, and the
+values inside expanded event details. Sans for chrome. A log list never
+switches families mid-flow.
 
 ---
 
 ## 29. Density
 
-Two modes:
-
-- Compact, default;
-- Comfortable.
-
-Stored browser-locally.
-
-Compact:
-
-- single-line preview;
-- smaller vertical padding;
-- optimized for desktop investigation.
-
-Comfortable:
-
-- up to two-line preview;
-- larger targets and spacing;
-- useful on smaller screens or for readability.
-
-Density affects presentation only, not query size.
+Two modes, server-stored (§19.5): **Compact** (default; single-line
+preview, 15px root, tighter row padding) and **Comfortable** (two-line
+preview, 16px root, larger targets). Density affects presentation only,
+never query size.
 
 ---
 
-## 30. Native and reusable components
+## 30. Components
 
-Prefer semantic native elements:
+Shared template partials render these primitives; pages must not re-invent
+them. Prefer native elements (`<button>`, `<dialog>`, `<details>`,
+`<fieldset>`, `<table>` for tabular data).
 
-- `<button>`;
-- `<input>`;
-- `<select>`;
-- `<dialog>`;
-- `<details>` where semantics fit;
-- `<table>` only for truly tabular data;
-- `<fieldset>`;
-- `<form>`.
+### 30.1 Component set
 
-Small reusable template components:
+| Component | Notes |
+|---|---|
+| Button | primary (accent fill), default, quiet, danger |
+| Form field | label, control, help, inline error |
+| Severity code | §12.3 mapping, shared with live rendering |
+| Badge | alias, inactive, outcome labels |
+| Notice | info, success, warning, error; used by the flash region |
+| Segmented mode switch | §8.1 |
+| System menu | native `<details>` menu |
+| Dialog | native `<dialog>`, §33.4 focus contract |
+| Command palette | §32.4 |
+| Keyboard help overlay | §32.5 |
+| Pagination | both directions, self-disabling loading label |
+| Empty state | message + real action buttons |
+| Status indicator | dot + text |
+| Code block | `<pre>` + copy action |
+| Log row / tail line / event detail | §12–§13 |
 
-- Button;
-- Icon button;
-- Form field;
-- Select/multiselect pattern;
-- Badge;
-- Severity label;
-- Notice/banner;
-- Tabs;
-- Dialog;
-- Dropdown/menu;
-- Pagination;
-- Empty state;
-- Status indicator;
-- Code block with copy;
-- Log row;
-- Event detail section.
+### 30.2 Button emphasis
 
-Do not import a complete UI framework.
+Primary actions use the accent fill with dark inverse text. Danger buttons
+use a filled error treatment — destructive actions must read as destructive,
+visually heavier than quiet buttons. At most one primary button per view
+region.
 
 ---
 
 ## 31. Icons
 
-Use a very small local set of inline SVG icons.
-
-Requirements:
-
-- decorative icons hidden from assistive technology;
-- icon-only buttons have accessible labels and tooltips;
-- consistent stroke/size;
-- no external icon font;
-- no large dependency solely for icons.
-
-Severity text remains visible even if icons are used.
+A very small local inline-SVG set (approximately: chevron, copy, close,
+external, search, dot indicator), consistent 1.5px stroke on a 16px grid.
+Decorative icons are `aria-hidden`; icon-only buttons carry accessible
+labels. No icon fonts, no external icons, no icon library dependency.
+Severity is never icon-only.
 
 ---
 
 ## 32. Keyboard interaction
 
-### 32.1 Global shortcuts
+### 32.1 Scoping model
 
-Suggested:
+Shortcuts are registered against the workspace scope declared by the page
+(`data-kb-scope` on `<main>`). Three shortcuts are global; everything else
+exists only in the Logs workspace. On pages without a scope, single-letter
+keys do nothing. Shortcuts never fire while focus is in an input, select,
+textarea, or editable content.
+
+### 32.2 Global shortcuts
 
 | Shortcut | Action |
 |---|---|
-| `/` or `Ctrl/Cmd+K` | Open source switcher |
+| `Ctrl/Cmd+K` | Open command palette |
+| `?` | Open keyboard help |
+| `Esc` | Close topmost overlay, else clear row selection |
+
+`Ctrl/Cmd+K` is claimed only when the palette can open; it is never
+prevented and dropped.
+
+### 32.3 Logs workspace shortcuts
+
+| Shortcut | Action |
+|---|---|
 | `F` | Focus message search |
 | `L` | Switch to Live |
 | `H` | Switch to History |
-| `Space` | Pause/resume Live when log workspace owns focus |
-| `J` | Move to next log row |
-| `K` | Move to previous log row |
-| `Enter` | Expand selected row |
-| `Esc` | Close overlay or clear active selection as appropriate |
-| `G` | Jump to newest live event |
-| `?` | Open keyboard help |
+| `J` / `K` | Next / previous log row (roving tabindex, both modes) |
+| `Enter` | Expand/collapse selected row |
+| `Space` | Pause/resume (Live) |
+| `G` | Jump to newest (Live) |
 
-### 32.2 Shortcut safety
+Row navigation works identically in History and Live and never traps focus
+inside the list.
 
-- never fire while typing in input, textarea, select, or editable content;
-- do not override browser conventions casually;
-- every action has a visible clickable equivalent;
-- use `event.key` carefully across keyboard layouts;
-- show shortcuts in help;
-- allow future disabling if accessibility feedback requires it.
+### 32.4 Command palette
 
-### 32.3 Row navigation
+Opened by `Ctrl/Cmd+K` or the header button. A modal dialog with a single
+input and a ranked result list:
 
-Use roving tabindex or a well-defined focus model.
+- **Sources** — switch the active source scope (server, project,
+  environment, application, service, alias all match); selecting one
+  navigates with the new scope in the current mode;
+- **Navigation** — every destination, including System pages;
+- **Page actions** — the current page's server-declared commands (e.g.
+  "Export matching History", "Create server", "Run safe database check" as
+  navigation to the relevant control).
 
-Do not trap keyboard focus inside the log list.
+Matching is client-side fuzzy scoring over server-rendered entries; the
+palette makes no network requests and executes nothing destructive
+directly — destructive actions only navigate to their confirmations.
+Keyboard: `↑/↓` move, `Enter` activates, `Esc` closes and restores focus.
+
+### 32.5 Keyboard help
+
+`?` opens an overlay listing global and currently scoped shortcuts with
+their visible-control equivalents. Every shortcut in this section appears
+there.
+
+### 32.6 Shortcut safety
+
+Never override browser conventions beyond the declared set; every action
+has a visible clickable equivalent; use `event.key` carefully across
+layouts; allow future disabling if accessibility feedback requires it.
 
 ---
 
@@ -1775,76 +1228,42 @@ Do not trap keyboard focus inside the log list.
 
 ### 33.1 Target
 
-WCAG 2.2 AA design target.
+WCAG 2.2 AA.
 
 ### 33.2 Required practices
 
-- semantic landmarks and headings;
-- visible focus rings;
-- sufficient contrast;
-- no color-only meaning;
-- labels for every form control;
-- errors associated with fields;
-- target sizes appropriate for touch where possible;
-- keyboard-operable dialogs and menus;
-- correct focus restoration;
-- skip link to main content;
-- status announcements using appropriate live regions;
-- reduced-motion support;
-- no automatic focus stealing when logs arrive.
+Semantic landmarks and headings; visible focus rings (`--focus-ring`, 2px,
+offset); sufficient contrast in both themes; no color-only meaning; labels
+for every control; errors associated with fields; adequate touch targets;
+keyboard-operable dialogs and menus; correct focus restoration; skip link;
+polite status announcements; reduced-motion support; no focus stealing when
+logs arrive.
 
 ### 33.3 Live-region restraint
 
-Do not announce every incoming log to screen readers. That would be unusable.
-
-Announce only:
-
-- connection state changes;
-- pause/resume;
-- new-event count when user is scrolled away, with throttling;
-- truncation;
-- critical errors;
-- successful administrative actions.
+Announce only: connection state changes; pause/resume; throttled new-event
+counts while scrolled away; truncation; critical errors; successful
+administrative actions. Never announce individual log events.
 
 ### 33.4 Dialogs
 
-Use native `<dialog>` where browser support and behavior are acceptable, with tested focus handling.
+Native `<dialog>`: initial focus on a meaningful control; focus trapped
+while modal; `Esc` closes noncritical dialogs; destructive confirmations
+cannot close accidentally during submission; focus returns to the trigger.
 
-Requirements:
+### 33.5 Progressive enhancement
 
-- initial focus on meaningful control;
-- focus trapped while modal;
-- Escape closes noncritical dialog;
-- destructive confirmation cannot close accidentally during submission;
-- focus returns to trigger.
+Core investigation works without JavaScript: filters (named controls),
+pagination (links/forms), theme and density (form submission), sign-in,
+administration forms. JavaScript layers on live streaming, instant filter
+application, shortcuts, the palette, and copy actions. When a capability is
+genuinely JS-only (Live streaming), its absence is stated, not silent.
 
-### 33.5 Contrast and severity
+### 33.6 Checks
 
-Test both themes for:
-
-- normal text;
-- muted metadata;
-- severity labels;
-- focus rings;
-- selected rows;
-- banners;
-- disabled controls.
-
-### 33.6 Automated and manual checks
-
-Automated:
-
-- axe or equivalent in Playwright smoke tests;
-- HTML validation where practical.
-
-Manual:
-
-- keyboard-only login and investigation;
-- screen-reader smoke test for login, filters, row expansion, dialog;
-- 200% zoom;
-- reduced motion;
-- dark/light high contrast review;
-- mobile touch targets.
+Automated: axe in Playwright across pages, themes, and open overlays.
+Manual: keyboard-only investigation; screen-reader smoke of login, filters,
+row expansion, dialogs; 200% zoom; reduced motion; 390px emergency pass.
 
 ---
 
@@ -1852,269 +1271,143 @@ Manual:
 
 ### 34.1 Desktop first
 
-Desktop is primary for dense investigations.
+Dense investigation is the primary case. Filter bar in one or two rows;
+aligned row columns; multi-column detail metadata.
 
-At wide widths:
+### 34.2 Narrow desktop / tablet
 
-- filter bar can occupy one or two rows;
-- source context visible;
-- timestamp, level, source, and message align consistently;
-- expanded details use multi-column metadata where readable.
+Filters wrap into grouped rows; low-priority dimensions collapse;
+navigation compacts per §6.2; message remains primary.
 
-### 34.2 Tablet/narrow desktop
+### 34.3 Mobile emergency support (390px)
 
-- filters wrap into grouped rows;
-- low-priority source dimensions collapse;
-- navigation compacts;
-- message remains primary;
-- expanded details use one or two columns.
-
-### 34.3 Mobile emergency support
-
-Required:
-
-- sign in;
-- select source;
-- view recent errors;
-- change time preset;
-- search;
-- expand event;
-- copy message/raw event;
-- switch Live/History;
-- pause/resume;
-- see status warning.
-
-Mobile row layout may stack:
+Required: sign in; select source; view recent errors; change time preset;
+search; expand event; copy message/raw; switch modes; pause/resume; see
+status warnings. Rows stack:
 
 ```text
-20:41:07.283  ERROR
+20:41:07.283  ERR
 nextup/api
 Database connection failed
 ```
 
-Horizontal scrolling should be limited to raw code/payload regions, not the whole page.
+Horizontal scrolling only inside raw payload regions, never the page.
 
 ### 34.4 Not required on mobile
 
-- full desktop density;
-- complex multi-column filter layout;
-- separate mobile app;
-- offline behavior;
-- PWA installation.
+Full desktop density; complex filter layouts; a separate app; offline
+behavior; PWA installation.
 
 ---
 
 ## 35. Motion
 
-Use minimal functional transitions:
-
-- short detail expansion;
-- subtle dropdown appearance;
-- smooth jump to newest;
-- brief notification entry;
-- restrained loading indicator.
-
-Avoid animation on every arriving event. High-rate live rows should appear without expensive transitions.
-
-Respect:
-
-```css
-@media (prefers-reduced-motion: reduce) {
-  /* Remove nonessential transitions and smooth scrolling. */
-}
-```
-
-No continuous pulsing for Live state. A stable dot and text are sufficient.
+Minimal functional transitions only: short detail expansion; menu/palette
+appearance; smooth jump-to-newest; brief notice entry. No animation on
+arriving events; no continuous pulsing (the tail line is static). Respect
+`prefers-reduced-motion: reduce` by removing nonessential transitions and
+smooth scrolling.
 
 ---
 
-## 36. Content and microcopy guidelines
+## 36. Content and microcopy
 
 ### 36.1 Terminology
 
-Use:
+Use: event/log event; source; server; application; service; container;
+History; Live; Clear view; Clear logs; Remove source; ingestion token;
+retention; database size. Avoid: "stream" for the source hierarchy;
+"delete" for browser-only clearing; "deploy" for inferred container
+transitions; "secure delete"; "archive".
 
-- event or log event;
-- source;
-- server;
-- application;
-- service;
-- container;
-- History;
-- Live;
-- Clear view;
-- Clear logs;
-- Remove source;
-- ingestion token;
-- retention;
-- database size.
+### 36.2 Copy rules
 
-Avoid ambiguous terms:
-
-- stream when referring to a source hierarchy;
-- delete when action only clears browser view;
-- deploy when only container transition is inferred;
-- secure delete;
-- archive when retention is bounded recent history.
-
-### 36.2 Privacy copy
-
-Good:
-
-> Siftail has no telemetry and does not send logs to an external service.
-
-Good:
-
-> Anything your applications write to logs is stored. Siftail does not redact content in this version.
-
-Avoid:
-
-> Your logs are completely secure.
-
-### 36.3 Performance copy
-
-Use concrete claims backed by architecture:
-
-- one container;
-- local SQLite;
-- bounded retention;
-- no external services.
-
-Avoid unverified superlatives such as “blazing fast” in technical docs.
-
-### 36.4 Destructive copy
-
-State exactly what is deleted and what remains.
-
-### 36.5 Time copy
-
-Use absolute times in details and concise local time in rows. Avoid ambiguous relative-only copy for audit and destructive operations.
+- Controls state exactly what happens ("Save changes", not "Submit"); an
+  action keeps its name through the flow ("Export…" → "Export started").
+- Privacy copy is honest: "Anything your applications write to logs is
+  stored. Siftail does not redact content in this version." Never "Your
+  logs are completely secure."
+- Performance copy uses concrete claims (one container, local SQLite,
+  bounded retention), never superlatives.
+- Destructive copy states exactly what is deleted and what remains.
+- Rows use concise local time; audit and destructive operations use
+  absolute times.
 
 ---
 
-## 37. Browser-local state
+## 37. State ownership
 
-Allowed browser-local preferences:
+Server-stored (cookie or database): theme; density; sessions.
 
-- theme;
-- density;
-- last selected source;
-- last History/Live mode;
-- last query URL or safe filter state;
-- keyboard-help dismissed state;
-- optional recent searches later.
+URL-owned: complete History query; mode; pagination cursors.
 
-Do not store:
+Browser-local (in-page or `localStorage`): scroll position; pending
+counter; row selection; expansion; keyboard-help seen flag; optional recent
+palette entries later.
 
-- ingestion tokens;
-- session tokens outside secure cookie;
-- passwords;
-- raw log payload caches beyond active DOM/session;
-- CSRF secrets in local storage if a safer cookie/DOM strategy exists.
+Never store in the browser: ingestion tokens; session tokens outside the
+secure cookie; passwords; raw log payload caches beyond the active DOM;
+CSRF secrets.
 
 ---
 
 ## 38. HTMX interaction conventions
 
-### 38.1 Fragment boundaries
-
-Good fragment targets:
-
-- log rows region;
-- load-older region;
-- event details;
-- settings section;
-- alias form;
-- status subsection.
-
-Avoid replacing the entire application shell for ordinary actions.
-
-### 38.2 History updates
-
-Selectors update immediately. Text search is debounced. HTMX updates URL state.
-Disable HTMX history snapshot caching. Authenticated pages and fragments use
-`Cache-Control: no-store`, so Back and Forward navigation refetches authorized state.
-
-### 38.3 Error handling
-
-Server returns contextual error fragments for expected validation/query errors.
-
-Unexpected errors use a generic safe fragment with request ID.
-
-### 38.4 Focus
-
-After fragment replacement:
-
-- do not reset focus unnecessarily;
-- preserve search input focus;
-- announce result update concisely;
-- keep scroll position stable unless action explicitly changes it.
+- Good fragment targets: log rows region, pagination regions, event
+  details, settings sections, alias form, status subsections, backup
+  region. Never replace the shell for ordinary actions.
+- Selectors apply immediately; text search debounced; URL state pushed;
+  HTMX history caching disabled; authenticated responses use
+  `Cache-Control: no-store`.
+- Server returns contextual error fragments for expected failures and a
+  generic request-ID fragment for unexpected ones.
+- After fragment replacement: preserve focus and caret in filter inputs;
+  announce updates concisely; keep scroll stable unless the action moves it.
 
 ---
 
-## 39. JavaScript live-module constraints
+## 39. JavaScript module constraints
 
-The live module must:
+Small framework-free modules, one concern each, all embedded and CSP-clean
+(no inline scripts):
 
-- be small and framework-free;
-- own one EventSource lifecycle;
-- disconnect cleanly on navigation;
-- bound arrays and DOM nodes;
-- avoid memory leaks from listeners;
-- escape/render through DOM text APIs or trusted server fragments;
-- never use `innerHTML` with raw event content;
-- pause without implying ingestion stopped;
-- handle reconnect and truncation control events;
-- respect reduced motion;
-- be covered by browser tests.
+- the live module owns one EventSource lifecycle, bounds arrays and DOM,
+  renders through DOM text APIs (never `innerHTML` with event content),
+  handles reconnect/truncation control events, and is browser-tested;
+- the keyboard module owns the scope registry (§32.1) and is the only
+  key-event listener;
+- the palette module reads server-rendered entries from the DOM and makes
+  no network requests;
+- shared enhancements (copy, dialogs, cascading selects, preference
+  submission) stay in the application module.
+
+No JavaScript state system overlapping HTMX; no framework without an
+approved ADR.
 
 ---
 
 ## 40. Page-specific acceptance criteria
 
-### 40.1 Logs
+**Logs:** keyboard-complete; query in URL; source and mode always visible;
+no full-page spinner; deterministic order; escaped content; Live never
+steals scroll; caps enforced with both pagination directions reachable.
 
-- usable with keyboard;
-- query reflected in URL;
-- source and mode always visible;
-- no full-page spinner;
-- deterministic row order;
-- expanded content escaped;
-- Live does not steal scroll;
-- browser caps enforced.
+**Sources:** aliases clearly presentation-only; inactive identifiable;
+destructive actions visually distinct and typed-confirmed.
 
-### 40.2 Sources
+**Servers:** token shown once; configuration copyable; guided test clear;
+revocation impact explained.
 
-- aliases clearly presentation-only;
-- inactive sources identifiable;
-- destructive actions distinct;
-- source hierarchy understandable.
+**Status:** no sensitive values; degraded state obvious; no charts; useful
+recovery direction; header dot consistent with page severity.
 
-### 40.3 Servers
+**Settings:** restart-required values labeled; server-authoritative
+validation; preferences apply without flash and without JavaScript.
 
-- token shown once;
-- generated configuration copyable;
-- test flow clear;
-- token impact explained.
+**Audit:** sanitized; separate retention explained; filterable.
 
-### 40.4 Status
-
-- no sensitive values;
-- storage and degraded state obvious;
-- no decorative dashboard charts;
-- useful recovery direction.
-
-### 40.5 Settings
-
-- restart-required values labeled;
-- validation authoritative on server;
-- secrets never shown.
-
-### 40.6 Audit
-
-- security-relevant but sanitized;
-- separate retention explained;
-- filterable without exposing raw logs.
+**Backup:** typed process states; focus preserved during polling; restore
+guidance exact; no raw paths.
 
 ---
 
@@ -2122,22 +1415,18 @@ The live module must:
 
 Before merging a UI change:
 
-- Does it preserve the operational-console character?
-- Does it add visual noise or unnecessary card layout?
+- Does it preserve the operator-console character without kitsch?
 - Is the current source and mode still clear?
-- Is every action keyboard accessible?
-- Is focus visible and restored?
-- Does it work in dark and light themes?
-- Does it work with reduced motion?
-- Does it rely on color alone?
-- Are log contents escaped?
-- Does it introduce an external asset or font?
-- Does it add a JavaScript state system overlapping HTMX?
-- Does mobile emergency use remain possible?
-- Are loading and failure states defined?
-- Is destructive copy exact?
-- Is privacy copy honest?
+- Is every action keyboard accessible and listed in keyboard help?
+- Is focus visible, restored, and never stolen?
+- Does it work in dark and light, Compact and Comfortable, reduced motion?
+- Does it rely on color alone anywhere?
+- Are log contents escaped; does any JS touch `innerHTML` with event data?
+- Does it introduce an external asset, font request, or inline script?
+- Do empty, loading, and failure states exist with real actions?
+- Is destructive copy exact; is privacy copy honest?
 - Does high-rate live rendering remain stable?
+- Does mobile emergency use remain possible?
 
 ---
 
@@ -2145,7 +1434,9 @@ Before merging a UI change:
 
 ### Product introduction
 
-> Siftail is a fast, private log viewer for self-hosted apps. Sift through recent history and tail live events without sending operational data to an external service.
+> Siftail is a fast, private log viewer for self-hosted apps. Sift through
+> recent history and tail live events without sending operational data to an
+> external service.
 
 ### No telemetry
 
@@ -2161,27 +1452,38 @@ Before merging a UI change:
 
 ### Live truncated
 
-> Live view was truncated while you were away from the newest event. Use History to inspect the complete interval.
+> Live view was truncated while you were away from the newest event. Use
+> History to inspect the complete interval.
 
 ### No matches
 
-> No logs matched these filters. Try a longer time range or remove a message filter.
+> No logs matched these filters. Try a longer time range or remove a message
+> filter.
 
 ### Disk full
 
-> Ingestion is unavailable because the database cannot write to storage. Existing logs remain available.
+> Ingestion is unavailable because the database cannot write to storage.
+> Existing logs remain available.
 
 ### Alias help
 
-> Aliases change display names only. Original source metadata remains unchanged.
+> Aliases change display names only. Original source metadata remains
+> unchanged.
 
 ### Redaction limitation
 
-> Siftail stores what your applications emit. Log-content redaction is not enabled in this version.
+> Siftail stores what your applications emit. Log-content redaction is not
+> enabled in this version.
 
 ### Deletion limitation
 
-> Deleted records may remain in backups, filesystem snapshots, or storage free space. Siftail does not claim forensic erasure.
+> Deleted records may remain in backups, filesystem snapshots, or storage
+> free space. Siftail does not claim forensic erasure.
+
+### First run
+
+> No log sources yet. Create a server, generate its ingestion token, and
+> point a Coolify or Fluent Bit log drain at Siftail.
 
 ---
 
@@ -2189,6 +1491,9 @@ Before merging a UI change:
 
 The Siftail interface should make recent log investigation feel direct:
 
-> Choose a source, bound the time range, filter the noise, expand the evidence, or switch to Live and follow events without losing control of the viewport.
+> Choose a source, bound the time range, filter the noise, expand the
+> evidence, or switch to Live and follow events without losing control of
+> the viewport — hands on the keyboard the whole time.
 
-Every design choice should serve that workflow while preserving privacy, speed, accessibility, and visual restraint.
+Every design choice serves that workflow while preserving privacy, speed,
+accessibility, and visual restraint.

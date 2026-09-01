@@ -581,7 +581,8 @@ Vanilla JavaScript only for focused client concerns.
 - Plain CSS.
 - Semantic custom properties.
 - No Tailwind in version one.
-- No external font.
+- No fonts fetched from external origins; vendored same-origin embedded fonts
+  with vendored licenses are permitted (ADR 0005).
 - No inline styles that weaken CSP.
 - No arbitrary one-off colors when a semantic token exists.
 
@@ -595,7 +596,8 @@ Required principles:
 
 - operational console, not dashboard;
 - dark-first with complete light theme;
-- muted cyan primary accent and restrained amber secondary;
+- one desaturated periwinkle-indigo primary accent on graphite-blue surfaces
+  (ADR 0005); severity colors never share the accent hue;
 - severity text always visible;
 - no color-only meaning;
 - Compact and Comfortable density only;
