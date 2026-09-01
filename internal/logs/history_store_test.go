@@ -421,3 +421,64 @@ func sourceOptionValues(options []SourceOption) []string {
 	}
 	return values
 }
+
+func TestHistoryPrevCursorTraversesNewer(t *testing.T) {
+	fixture := newHistoryFixture(t)
+	query := fixture.query()
+	query.Limit = 1
+
+	first, err := fixture.store.History(context.Background(), query)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := historyIDs(first.Events); !reflect.DeepEqual(got, []int64{3}) ||
+		first.PrevCursor == "" {
+		t.Fatalf("first page = %v, prev=%q", got, first.PrevCursor)
+	}
+
+	query.Cursor = first.NextCursor
+	second, err := fixture.store.History(context.Background(), query)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := historyIDs(second.Events); !reflect.DeepEqual(got, []int64{2}) ||
+		second.PrevCursor == "" {
+		t.Fatalf("second page = %v, prev=%q", got, second.PrevCursor)
+	}
+
+	// The second page's PrevCursor resumes toward newer and returns the row
+	// the traversal paged past, newest-first.
+	newer := fixture.query()
+	newer.Direction = DirectionNewer
+	newer.Limit = 1
+	newer.Cursor = second.PrevCursor
+	recovered, err := fixture.store.History(context.Background(), newer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := historyIDs(recovered.Events); !reflect.DeepEqual(got, []int64{3}) {
+		t.Fatalf("recovered newer page = %v", got)
+	}
+
+	// The newest page's PrevCursor is valid but finds nothing newer. Cursors
+	// are fingerprint-bound to the full canonical query including limit.
+	top := fixture.query()
+	top.Direction = DirectionNewer
+	top.Limit = 1
+	top.Cursor = first.PrevCursor
+	empty, err := fixture.store.History(context.Background(), top)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(empty.Events) != 0 || empty.HasMore {
+		t.Fatalf("nothing-newer page = %v, more=%v",
+			historyIDs(empty.Events), empty.HasMore)
+	}
+
+	// A prev cursor decodes only for newer-direction queries.
+	stale := fixture.query()
+	stale.Cursor = second.PrevCursor
+	if _, err := fixture.store.History(context.Background(), stale); err == nil {
+		t.Fatal("older-direction query accepted a newer-direction cursor")
+	}
+}

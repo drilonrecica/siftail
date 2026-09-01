@@ -62,6 +62,12 @@ func ParseHistoryQuery(values url.Values, now time.Time) (HistoryQuery, error) {
 		if _, ok := historyParameters[key]; !ok {
 			return HistoryQuery{}, fmt.Errorf("unknown history parameter %q", key)
 		}
+		// levels and streams accept repeated entries so plain named checkbox
+		// groups work without JavaScript; the canonical serialization remains
+		// the single CSV value.
+		if key == "levels" || key == "streams" {
+			continue
+		}
 		if len(entries) != 1 {
 			return HistoryQuery{}, fmt.Errorf("history parameter %q must occur once", key)
 		}
@@ -90,11 +96,11 @@ func ParseHistoryQuery(values url.Values, now time.Time) (HistoryQuery, error) {
 			return HistoryQuery{}, fmt.Errorf("%s: %w", name, err)
 		}
 	}
-	query.Levels, err = parseLevels(values.Get("levels"))
+	query.Levels, err = parseLevels(mergeRepeatedCSV(values["levels"]))
 	if err != nil {
 		return HistoryQuery{}, err
 	}
-	query.Streams, err = parseStreams(values.Get("streams"))
+	query.Streams, err = parseStreams(mergeRepeatedCSV(values["streams"]))
 	if err != nil {
 		return HistoryQuery{}, err
 	}
@@ -260,6 +266,18 @@ func parseStreams(value string) ([]Stream, error) {
 	}
 	sort.Slice(streams, func(i, j int) bool { return order[streams[i]] < order[streams[j]] })
 	return streams, nil
+}
+
+// mergeRepeatedCSV joins repeated form entries into the single CSV shape the
+// set parsers accept, ignoring empty entries.
+func mergeRepeatedCSV(entries []string) string {
+	filtered := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if entry != "" {
+			filtered = append(filtered, entry)
+		}
+	}
+	return strings.Join(filtered, ",")
 }
 
 func validateQueryText(value string, max int, controls bool) error {

@@ -51,9 +51,15 @@ type HistoryEvent struct {
 }
 
 type HistoryPage struct {
-	Events     []HistoryEvent
+	Events []HistoryEvent
+	// NextCursor continues the page's own traversal direction; HasMore says
+	// whether that continuation has rows.
 	NextCursor string
 	HasMore    bool
+	// PrevCursor traverses toward newer events from this page's newest row.
+	// It is set whenever the page has rows; whether newer rows exist is not
+	// known without another query, so the interface decides when to offer it.
+	PrevCursor string
 }
 
 type SourceScope struct {
@@ -190,6 +196,18 @@ func (s *Store) History(ctx context.Context, query HistoryQuery) (HistoryPage, e
 		page.NextCursor, err = s.cursorCodec.Encode(query, boundary.EventAtUS, boundary.ID)
 		if err != nil {
 			return HistoryPage{}, fmt.Errorf("encode history cursor: %w", err)
+		}
+	}
+	if len(events) > 0 && s.cursorCodec != nil {
+		// Returned events are newest-first in every direction, so the newer
+		// traversal always resumes from the first row.
+		newerQuery := query
+		newerQuery.Direction = DirectionNewer
+		page.PrevCursor, err = s.cursorCodec.Encode(
+			newerQuery, events[0].EventAtUS, events[0].ID,
+		)
+		if err != nil {
+			return HistoryPage{}, fmt.Errorf("encode history prev cursor: %w", err)
 		}
 	}
 	return page, nil

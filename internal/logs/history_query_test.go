@@ -193,3 +193,53 @@ func FuzzParseHistoryQuery(f *testing.F) {
 		}
 	})
 }
+
+func TestParseHistoryQueryAcceptsRepeatedLevelAndStreamEntries(t *testing.T) {
+	now := time.Date(2026, 7, 28, 12, 0, 0, 0, time.UTC)
+	repeated := url.Values{
+		"preset":  {"1h"},
+		"levels":  {"fatal", "error"},
+		"streams": {"stderr", "stdout"},
+	}
+	query, err := ParseHistoryQuery(repeated, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	csv := url.Values{
+		"preset":  {"1h"},
+		"levels":  {"error,fatal"},
+		"streams": {"stdout,stderr"},
+	}
+	canonical, err := ParseHistoryQuery(csv, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(query.Levels, canonical.Levels) ||
+		!reflect.DeepEqual(query.Streams, canonical.Streams) {
+		t.Fatalf("repeated entries = %v/%v, want %v/%v",
+			query.Levels, query.Streams, canonical.Levels, canonical.Streams)
+	}
+	// The canonical serialization stays the single CSV value so bookmarks and
+	// cursor fingerprints are unchanged by the repeated-entry form.
+	if got, want := query.CanonicalQuery(), canonical.CanonicalQuery(); got != want {
+		t.Fatalf("canonical query = %q, want %q", got, want)
+	}
+	if !strings.Contains(query.CanonicalQuery(), "levels=error%2Cfatal") {
+		t.Fatalf("canonical query lost CSV form: %q", query.CanonicalQuery())
+	}
+
+	mixed, err := ParseHistoryQuery(url.Values{
+		"preset": {"1h"}, "levels": {"error,fatal", "warn"},
+	}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(mixed.Levels) != 3 {
+		t.Fatalf("mixed CSV and repeated levels = %v", mixed.Levels)
+	}
+	if _, err := ParseHistoryQuery(url.Values{
+		"preset": {"1h"}, "levels": {"error", "bogus"},
+	}, now); err == nil {
+		t.Fatal("invalid repeated level was accepted")
+	}
+}
