@@ -115,6 +115,24 @@ func (s *State) Ready(shuttingDown bool) bool {
 		!s.retentionDegraded
 }
 
+// HealthSeverity reports the cheap in-memory severity for header display:
+// "Healthy", "Degraded", or "Unavailable". Capacity-based Attention requires
+// the full operational read and is deliberately not computed here.
+func (s *State) HealthSeverity() string {
+	if s == nil {
+		return ""
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.databaseCategory != "" || s.retentionDegraded || !s.databaseWritable {
+		return "Degraded"
+	}
+	if !s.writerReady {
+		return "Unavailable"
+	}
+	return "Healthy"
+}
+
 func (s *State) DatabaseWritable() bool {
 	if s == nil {
 		return false

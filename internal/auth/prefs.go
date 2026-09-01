@@ -58,6 +58,7 @@ func (b *Browser) shellBase(r *http.Request, mode string) webui.ShellView {
 		Mode:      mode,
 		Path:      path,
 		Prefs:     preferences(r),
+		Health:    b.status.HealthSeverity(),
 	}
 }
 

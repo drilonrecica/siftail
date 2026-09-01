@@ -597,9 +597,24 @@ func TestEmbeddedAssetsTypesIntegrityAndSafety(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	tokens, err := files.ReadFile("assets/tokens.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Theming is token-owned: every semantic color is declared once with
+	// light-dark() plus a static dark fallback, and explicit theme choices
+	// switch color-scheme (DESIGN.md §27.2).
 	for _, want := range []string{
 		`:root[data-theme="light"]`,
-		`prefers-color-scheme: light`,
+		`:root[data-theme="dark"]`,
+		`light-dark(`,
+		`@font-face`,
+	} {
+		if !strings.Contains(string(tokens), want) {
+			t.Errorf("tokens.css missing %q", want)
+		}
+	}
+	for _, want := range []string{
 		`prefers-reduced-motion: reduce`,
 		`@media (max-width: 32rem)`,
 		`:focus-visible`,

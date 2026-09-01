@@ -61,52 +61,52 @@
 
   /* Surfaces */
   --surface-base: #0f1218;
-  --surface-base: light-dark(#0f1218, #f3f4f8);
+  --surface-base: light-dark(#f3f4f8, #0f1218);
   --surface-raised: #151a24;
-  --surface-raised: light-dark(#151a24, #fbfcfe);
+  --surface-raised: light-dark(#fbfcfe, #151a24);
   --surface-overlay: #1b2230;
-  --surface-overlay: light-dark(#1b2230, #ffffff);
+  --surface-overlay: light-dark(#ffffff, #1b2230);
   --surface-hover: #212a3c;
-  --surface-hover: light-dark(#212a3c, #e8eaf2);
+  --surface-hover: light-dark(#e8eaf2, #212a3c);
   --surface-selected: #26304b;
-  --surface-selected: light-dark(#26304b, #e1e5f7);
+  --surface-selected: light-dark(#e1e5f7, #26304b);
 
   /* Text */
   --text-primary: #e9edf5;
-  --text-primary: light-dark(#e9edf5, #1b202b);
+  --text-primary: light-dark(#1b202b, #e9edf5);
   --text-secondary: #b4bdcd;
-  --text-secondary: light-dark(#b4bdcd, #444c5e);
+  --text-secondary: light-dark(#444c5e, #b4bdcd);
   --text-muted: #808b9d;
-  --text-muted: light-dark(#808b9d, #5f6879);
+  --text-muted: light-dark(#5f6879, #808b9d);
   --text-inverse: #0d1017;
-  --text-inverse: light-dark(#0d1017, #f5f7fc);
+  --text-inverse: light-dark(#f5f7fc, #0d1017);
 
   /* Borders */
   --border-subtle: #262e3e;
-  --border-subtle: light-dark(#262e3e, #d6dae5);
+  --border-subtle: light-dark(#d6dae5, #262e3e);
   --border-strong: #3e4a61;
-  --border-strong: light-dark(#3e4a61, #a7afc2);
+  --border-strong: light-dark(#a7afc2, #3e4a61);
 
   /* Accent — the only brand hue; never used for status or severity */
   --accent: #8b96ec;
-  --accent: light-dark(#8b96ec, #4653c8);
+  --accent: light-dark(#4653c8, #8b96ec);
   --accent-hover: #a2acf2;
-  --accent-hover: light-dark(#a2acf2, #3945b0);
+  --accent-hover: light-dark(#3945b0, #a2acf2);
 
   /* Status and severity */
   --status-info: #85a9d6;
-  --status-info: light-dark(#85a9d6, #33608f);
+  --status-info: light-dark(#33608f, #85a9d6);
   --status-warning: #e2a93f;
-  --status-warning: light-dark(#e2a93f, #8f5b00);
+  --status-warning: light-dark(#8f5b00, #e2a93f);
   --status-error: #ee7b74;
-  --status-error: light-dark(#ee7b74, #bc3a31);
+  --status-error: light-dark(#bc3a31, #ee7b74);
   --status-fatal: #f79a94;
-  --status-fatal: light-dark(#f79a94, #8f1d25);
+  --status-fatal: light-dark(#8f1d25, #f79a94);
   --status-success: #6fc08d;
-  --status-success: light-dark(#6fc08d, #1f7a48);
+  --status-success: light-dark(#1f7a48, #6fc08d);
 
   --focus-ring: #adb7ff;
-  --focus-ring: light-dark(#adb7ff, #4653c8);
+  --focus-ring: light-dark(#4653c8, #adb7ff);
 
   font-size: 15px;
 }

@@ -6,7 +6,10 @@ import { expect, test, type Page } from "@playwright/test";
 import {
   administratorPassword,
   administratorUsername,
+  navigateSystem,
+  openSystemMenu,
   readState,
+  setTheme,
   siftailEnvironment,
 } from "./support";
 
@@ -141,6 +144,7 @@ test("login, canonical History default, security headers, and logout", async ({ 
   expect(url.searchParams.get("from")).toMatch(/Z$/);
   expect(url.searchParams.get("to")).toMatch(/Z$/);
   expect(url.searchParams.get("limit")).toBe("200");
+  await openSystemMenu(page);
   await page.getByRole("button", { name: "Sign out" }).click();
   await expect(page).toHaveURL(/\/login$/);
   await page.goto("/logs");
@@ -195,7 +199,7 @@ test("confirmed History export preserves filters, focus, themes, mobile, and exp
   await dialog.getByRole("button", { name: "Cancel" }).click();
   await expect(open).toBeFocused();
 
-  await page.locator("[data-theme-select]").selectOption("dark");
+  await setTheme(page, "dark");
   await open.click();
   await dialog.locator("select[name='format']").selectOption("ndjson");
   await dialog.getByRole("checkbox").check();
@@ -211,7 +215,7 @@ test("confirmed History export preserves filters, focus, themes, mobile, and exp
   );
 
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.locator("[data-theme-select]").selectOption("light");
+  await setTheme(page, "light");
   await open.click();
   expect(await page.evaluate(
     () => document.documentElement.scrollWidth > window.innerWidth,
@@ -389,7 +393,7 @@ test("Live keyboard, themes, reduced motion, mobile, axe, and online invalidatio
   await page.keyboard.press("Space");
   await expect(page.locator("[data-live-status]")).toHaveText("Live");
 
-  await page.locator("[data-theme-select]").selectOption("dark");
+  await setTheme(page, "dark");
   let results = await new AxeBuilder({ page })
     .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"])
     .analyze();
@@ -398,7 +402,7 @@ test("Live keyboard, themes, reduced motion, mobile, axe, and online invalidatio
     path: ".playwright-artifacts/live-desktop-dark.png",
     fullPage: true,
   });
-  await page.locator("[data-theme-select]").selectOption("light");
+  await setTheme(page, "light");
   await page.emulateMedia({ reducedMotion: "reduce" });
   const behavior = await page.locator("[data-live-scroll]").evaluate(
     (element) => getComputedStyle(element).scrollBehavior,
@@ -451,7 +455,7 @@ test("source catalog preserves hierarchy, observations, responsive layout, and l
   )).toBeVisible();
   await expect(page.getByRole("row").filter({ hasText: "api-1" })).toContainText("Active");
 
-  await page.locator("[data-theme-select]").selectOption("dark");
+  await setTheme(page, "dark");
   let results = await new AxeBuilder({ page })
     .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"])
     .analyze();
@@ -460,7 +464,7 @@ test("source catalog preserves hierarchy, observations, responsive layout, and l
     path: ".playwright-artifacts/sources-desktop-dark.png",
     fullPage: true,
   });
-  await page.locator("[data-theme-select]").selectOption("light");
+  await setTheme(page, "light");
   await page.setViewportSize({ width: 390, height: 844 });
   expect(await page.evaluate(
     () => document.documentElement.scrollWidth > window.innerWidth,
@@ -603,13 +607,13 @@ test("Server token creation, one-time copy, rotation, navigation loss, and revoc
     .toHaveCount(5);
   await expect(page.getByText("siftail-test / setup / guided-ingestion / probe"))
     .toBeVisible();
-  await page.locator("[data-theme-select]").selectOption("dark");
+  await setTheme(page, "dark");
   let guideA11y = await new AxeBuilder({ page })
     .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"])
     .analyze();
   expect(guideA11y.violations.map((violation) => violation.id)).toEqual([]);
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.locator("[data-theme-select]").selectOption("light");
+  await setTheme(page, "light");
   expect(await page.evaluate(
     () => document.documentElement.scrollWidth > window.innerWidth,
   )).toBe(false);
@@ -653,13 +657,13 @@ test("Server token creation, one-time copy, rotation, navigation loss, and revoc
   expect(await ingestWithToken(primary, "managed-primary-revoked")).toBe(401);
   expect(await ingestWithToken(replacement, "managed-replacement-active")).toBe(204);
 
-  await page.locator("[data-theme-select]").selectOption("dark");
+  await setTheme(page, "dark");
   let results = await new AxeBuilder({ page })
     .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"])
     .analyze();
   expect(results.violations.map((violation) => violation.id)).toEqual([]);
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.locator("[data-theme-select]").selectOption("light");
+  await setTheme(page, "light");
   expect(await page.evaluate(
     () => document.documentElement.scrollWidth > window.innerWidth,
   )).toBe(false);
@@ -677,7 +681,7 @@ test("retention settings validate, persist, remain responsive, and expire safely
   page,
 }) => {
   await login(page);
-  await page.getByRole("link", { name: "Settings", exact: true }).click();
+  await navigateSystem(page, "Settings");
   await expect(page).toHaveURL(/\/settings$/);
   await expect(page.getByRole("heading", { name: "Retention limits" })).toBeVisible();
   const retentionDays = page.locator("#retention-days");
@@ -701,13 +705,13 @@ test("retention settings validate, persist, remain responsive, and expire safely
   await expect(retentionDays).toHaveValue("30");
   await expect(maximumDatabaseGiB).toHaveValue("8");
 
-  await page.locator("[data-theme-select]").selectOption("dark");
+  await setTheme(page, "dark");
   let results = await new AxeBuilder({ page })
     .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"])
     .analyze();
   expect(results.violations.map((violation) => violation.id)).toEqual([]);
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.locator("[data-theme-select]").selectOption("light");
+  await setTheme(page, "light");
   expect(await page.evaluate(
     () => document.documentElement.scrollWidth > window.innerWidth,
   )).toBe(false);
@@ -737,7 +741,7 @@ test("status is authenticated, refreshable, sanitized, responsive, and accessibl
     (response) => response.url().endsWith("/status") &&
       response.request().method() === "GET",
   );
-  await page.getByRole("link", { name: "Status", exact: true }).click();
+  await navigateSystem(page, "Status");
   const response = await responsePromise;
   expect(response.status()).toBe(200);
   expect(response.headers()["cache-control"]).toBe("no-store");
@@ -770,13 +774,13 @@ test("status is authenticated, refreshable, sanitized, responsive, and accessibl
   await page.reload();
   await expect(page.getByText(/events\/min \(last 60 seconds\)/)).toBeVisible();
 
-  await page.locator("[data-theme-select]").selectOption("dark");
+  await setTheme(page, "dark");
   let results = await new AxeBuilder({ page })
     .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"])
     .analyze();
   expect(results.violations.map((violation) => violation.id)).toEqual([]);
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.locator("[data-theme-select]").selectOption("light");
+  await setTheme(page, "light");
   expect(await page.evaluate(
     () => document.documentElement.scrollWidth > window.innerWidth,
   )).toBe(false);
@@ -797,7 +801,7 @@ test("full and configuration backups are typed, verified, and accessible", async
   await login(page);
   const state = readState();
   const output = path.join(state.runDirectory, "browser-full.sqlite");
-  await page.getByRole("link", { name: "Backup", exact: true }).click();
+  await navigateSystem(page, "Backup");
   await expect(page.getByRole("heading", { name: "Backup", exact: true })).toBeVisible();
   await expect(page.locator("#backup-output-path")).toBeFocused();
   await expect(page.getByText("Browser sessions are always excluded")).toBeVisible();
@@ -843,13 +847,13 @@ test("full and configuration backups are typed, verified, and accessible", async
   await expect(page.getByText("configuration", { exact: true })).toBeVisible();
   expect(await page.content()).not.toContain(state.runDirectory);
 
-  await page.locator("[data-theme-select]").selectOption("dark");
+  await setTheme(page, "dark");
   let results = await new AxeBuilder({ page })
     .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"])
     .analyze();
   expect(results.violations.map((violation) => violation.id)).toEqual([]);
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.locator("[data-theme-select]").selectOption("light");
+  await setTheme(page, "light");
   expect(await page.evaluate(
     () => document.documentElement.scrollWidth > window.innerWidth,
   )).toBe(false);
@@ -933,13 +937,13 @@ test("audit filters, pagination, escaping, keyboard, themes, and mobile remain b
 
   await page.locator(".audit-table-scroll").focus();
   await expect(page.locator(".audit-table-scroll")).toBeFocused();
-  await page.locator("[data-theme-select]").selectOption("dark");
+  await setTheme(page, "dark");
   let results = await new AxeBuilder({ page })
     .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"])
     .analyze();
   expect(results.violations.map((violation) => violation.id)).toEqual([]);
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.locator("[data-theme-select]").selectOption("light");
+  await setTheme(page, "light");
   expect(await page.evaluate(
     () => document.documentElement.scrollWidth > window.innerWidth,
   )).toBe(false);
@@ -955,7 +959,7 @@ test("audit filters, pagination, escaping, keyboard, themes, and mobile remain b
 
 test("keyboard, themes, reduced motion, mobile inspection, and axe smoke", async ({ page }) => {
   await login(page);
-  await page.locator("[data-theme-select]").selectOption("dark");
+  await setTheme(page, "dark");
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
   // The preference persists server-side and is rendered before first paint,
   // so a full reload keeps the theme with no flash and no client storage.
@@ -973,7 +977,7 @@ test("keyboard, themes, reduced motion, mobile inspection, and axe smoke", async
   await page.keyboard.press("f");
   await expect(page.locator("#contains-filter")).toBeFocused();
   await page.locator("#contains-filter").fill("");
-  await page.locator("[data-theme-select]").selectOption("light");
+  await setTheme(page, "light");
   await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
   await page.emulateMedia({ reducedMotion: "reduce" });
   const transitionDuration = await page.locator(".log-row").first().evaluate(

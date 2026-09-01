@@ -36,6 +36,25 @@
     });
   }
 
+  // The System menu is a native <details>; close it when focus or pointer
+  // interaction leaves it so it behaves like a menu without ARIA takeover.
+  const systemMenu = document.querySelector("[data-system-menu]");
+  if (systemMenu) {
+    document.addEventListener("click", (event) => {
+      if (systemMenu.open && event.target instanceof Node &&
+        !systemMenu.contains(event.target)) {
+        systemMenu.open = false;
+      }
+    });
+    systemMenu.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && systemMenu.open) {
+        systemMenu.open = false;
+        const summary = systemMenu.querySelector("summary");
+        if (summary) summary.focus();
+      }
+    });
+  }
+
   if (window.htmx) {
     window.htmx.config.historyCacheSize = 0;
   }

@@ -59,6 +59,15 @@ func (s *Store) SetAdmission(admission *ingest.Admission) {
 	s.admission = admission
 }
 
+// HealthSeverity exposes the in-memory header severity without touching the
+// database; it returns "" when state is unavailable.
+func (s *Store) HealthSeverity() string {
+	if s == nil || s.state == nil {
+		return ""
+	}
+	return s.state.HealthSeverity()
+}
+
 func (s *Store) RecordDiagnostic(input DiagnosticInput) error {
 	if s == nil || s.state == nil {
 		return errors.New("status storage is unavailable")

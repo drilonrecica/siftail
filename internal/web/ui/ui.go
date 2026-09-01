@@ -39,6 +39,7 @@ type ShellView struct {
 	Mode      string
 	Path      string
 	Prefs     PrefsView
+	Health    string
 	History   HistoryView
 	Live      LiveView
 	Sources   SourcesView
