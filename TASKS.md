@@ -45,10 +45,10 @@ task does not tag, publish, or otherwise release a version.
 | `0.3.0` | SFT-025–SFT-037 | Implementation gate complete | Unreleased | [`docs/tasks/0.3.0.md`](docs/tasks/0.3.0.md) |
 | `0.4.0` | SFT-038–SFT-049 | Implementation gate complete | Unreleased | [`docs/tasks/0.4.0.md`](docs/tasks/0.4.0.md) |
 | `0.5.0` | SFT-050–SFT-058 | In progress; SFT-052 is Ready; SFT-056 scope delivered by `0.6.0` | Unreleased | [`docs/tasks/0.5.0.md`](docs/tasks/0.5.0.md) |
-| `0.6.0` | SFT-064–SFT-081 | In progress; operator-console redesign (ADR 0005) | Unreleased | [`docs/tasks/0.6.0.md`](docs/tasks/0.6.0.md) |
+| `0.6.0` | SFT-064–SFT-081 | Redesign complete (SFT-064–079 Done); SFT-080/081 Planned follow-ups | Unreleased | [`docs/tasks/0.6.0.md`](docs/tasks/0.6.0.md) |
 | `1.0.0` | SFT-059–SFT-063 | Planned evidence gates | Unreleased | [`docs/tasks/1.0.0.md`](docs/tasks/1.0.0.md) |
 
-**Next implementable task:** SFT-065 — Refactor the shell to per-page metadata and shared partials (with SFT-066/067 parallel-safe); SFT-052 remains Ready in `0.5.0`.
+**Next implementable task:** SFT-052 — Publish and validate the manual Coolify deployment guide; the 0.6.0 redesign gate (SFT-079) is closed with two residual human checks recorded.
 
 The completed requirement matrices and browser/security evidence are in
 [`docs/release/0.2.0-gate.md`](docs/release/0.2.0-gate.md),
