@@ -106,6 +106,18 @@
     return allowed.has(value) ? value : "unknown";
   };
 
+  // Mirrors severityCodes in internal/web/ui/ui.go (DESIGN.md §12.3); a Go
+  // test asserts the two maps stay identical.
+  const severityCodes = {
+    trace: "TRC",
+    debug: "DBG",
+    info: "INF",
+    warn: "WRN",
+    error: "ERR",
+    fatal: "FTL",
+    unknown: "UNK",
+  };
+
   const makeLiveRow = (event) => {
     const id = Number(event.id);
     if (!Number.isSafeInteger(id) || id <= 0) return null;
@@ -146,7 +158,7 @@
 
     const severity = document.createElement("span");
     severity.className = `severity severity-${level}`;
-    severity.textContent = level;
+    severity.textContent = severityCodes[level] || "UNK";
     const source = document.createElement("span");
     source.className = "row-source";
     source.textContent = sourceLabel(event);

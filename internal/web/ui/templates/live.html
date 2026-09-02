@@ -45,10 +45,6 @@
     </form>
   </details>
   <div class="live-toolbar">
-    <div class="live-status" role="status" aria-live="polite">
-      <span class="live-status-dot" aria-hidden="true"></span>
-      <span data-live-status>Connecting</span>
-    </div>
     <button class="button button-quiet" type="button" data-live-pause>Pause</button>
     <button class="button button-quiet" type="button" data-live-newest>Jump to newest</button>
     <button class="button button-quiet" type="button" data-live-clear>Clear view</button>
@@ -62,6 +58,14 @@
         <p>Live events will appear here after they are committed.</p>
       </div>
     </div>
+  </div>
+  <div class="tail-line live-tail">
+    <span class="tail-line-rule" aria-hidden="true"></span>
+    <span class="live-status" role="status" aria-live="polite">
+      <span class="live-status-dot" aria-hidden="true"></span>
+      <span data-live-status>Connecting</span>
+    </span>
+    <span class="tail-line-rule" aria-hidden="true"></span>
   </div>
   <button class="button live-new-events" type="button" data-live-pending hidden>↓ 0 new events</button>
   <p class="visually-hidden" role="status" aria-live="polite" data-live-announcement></p>

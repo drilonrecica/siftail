@@ -695,3 +695,20 @@ func TestSharedComponentPartials(t *testing.T) {
 		t.Fatalf("pagination partial = %q", pagination.String())
 	}
 }
+
+func TestLiveSeverityCodesMirrorGoMap(t *testing.T) {
+	liveAsset, err := files.ReadFile("assets/live.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(liveAsset)
+	for level, code := range severityCodes {
+		pair := level + `: "` + code + `"`
+		if !strings.Contains(script, pair) {
+			t.Errorf("live.js severity map missing %q", pair)
+		}
+	}
+	if !strings.Contains(script, "severityCodes[level]") {
+		t.Error("live.js does not render severity through the shared code map")
+	}
+}
