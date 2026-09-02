@@ -1,10 +1,8 @@
 package auth
 
 import (
-	"errors"
 	"fmt"
 	"net/http"
-	"net/url"
 	"runtime"
 	"strconv"
 	"time"
@@ -18,8 +16,7 @@ import (
 
 func (b *Browser) statusPage(w http.ResponseWriter, r *http.Request) {
 	session, _ := BrowserSessionFromContext(r.Context())
-	notice, err := statusNotice(r.URL.Query())
-	if err != nil {
+	if len(r.URL.Query()) != 0 {
 		b.renderStatus(w, r, session.CSRFToken, http.StatusBadRequest, webui.StatusView{
 			Severity: "Unavailable", Error: "Check the Status page parameters.",
 		})
@@ -43,8 +40,6 @@ func (b *Browser) statusPage(w http.ResponseWriter, r *http.Request) {
 	}
 	view := statusView(snapshot, b.now())
 	view.CSRFToken = session.CSRFToken
-	view.CheckNotice = notice
-	view.CheckFailed = r.URL.Query().Get("notice") == "database-check-failed"
 	if result, ok := b.databaseChecker.Last(); ok {
 		view.DatabaseCheckAt = formatStatusTime(result.At)
 		if result.ErrorCategory != "" {
@@ -83,13 +78,13 @@ func (b *Browser) databaseCheck(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		input.Category = "database_check_failed"
 		_ = b.status.RecordDiagnostic(input)
-		http.Redirect(w, r, "/status?notice=database-check-failed",
-			http.StatusSeeOther)
+		b.setFlash(w, "database-check-failed")
+		http.Redirect(w, r, "/status", http.StatusSeeOther)
 		return
 	}
 	_ = b.status.RecordDiagnostic(input)
-	http.Redirect(w, r, "/status?notice=database-check-complete",
-		http.StatusSeeOther)
+	b.setFlash(w, "database-check-complete")
+	http.Redirect(w, r, "/status", http.StatusSeeOther)
 }
 
 func (b *Browser) renderStatus(
@@ -99,7 +94,7 @@ func (b *Browser) renderStatus(
 	httpStatus int,
 	view webui.StatusView,
 ) {
-	shell := b.shellBase(r, "status")
+	shell := b.shellBase(w, r, "status")
 	shell.Status = view
 	if err := b.ui.Shell(w, httpStatus, shell); err != nil {
 		http.Error(w, "Status is temporarily unavailable.", http.StatusInternalServerError)
@@ -192,23 +187,6 @@ func statusView(snapshot statusstate.OperationalSnapshot, now time.Time) webui.S
 		}
 	}
 	return view
-}
-
-func statusNotice(values url.Values) (string, error) {
-	if len(values) == 0 {
-		return "", nil
-	}
-	if len(values) != 1 || len(values["notice"]) != 1 {
-		return "", errors.New("invalid Status notice")
-	}
-	switch values.Get("notice") {
-	case "database-check-complete":
-		return "Database check completed.", nil
-	case "database-check-failed":
-		return "Database check did not complete successfully.", nil
-	default:
-		return "", errors.New("invalid Status notice")
-	}
 }
 
 func readinessLabel(state statusstate.Snapshot) string {

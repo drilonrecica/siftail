@@ -35,7 +35,7 @@ func (b *Browser) sourcesPage(w http.ResponseWriter, r *http.Request) {
 			web.RequestIDFromContext(r.Context()))
 		return
 	}
-	shell := b.shellBase(r, "sources")
+	shell := b.shellBase(w, r, "sources")
 	shell.Sources = buildSourcesView(query, page, notice)
 	if err := b.ui.Shell(w, http.StatusOK, shell); err != nil {
 		http.Error(w, "Sources are temporarily unavailable.", http.StatusInternalServerError)
@@ -45,13 +45,12 @@ func (b *Browser) sourcesPage(w http.ResponseWriter, r *http.Request) {
 func (b *Browser) sourceDetailPage(w http.ResponseWriter, r *http.Request) {
 	session, _ := BrowserSessionFromContext(r.Context())
 	id, idErr := sourcePathID(r)
-	notice, noticeErr := sourceDetailNotice(r.URL.Query())
-	if idErr != nil || noticeErr != nil {
+	if idErr != nil || len(r.URL.Query()) != 0 {
 		b.renderSourcesError(w, r, session.CSRFToken, http.StatusBadRequest,
 			"Check the source identifier.", "")
 		return
 	}
-	b.renderSourceDetail(w, r, session.CSRFToken, id, notice,
+	b.renderSourceDetail(w, r, session.CSRFToken, id, "",
 		http.StatusOK, "", "", "")
 }
 
@@ -84,8 +83,8 @@ func (b *Browser) sourceAlias(w http.ResponseWriter, r *http.Request) {
 	if strings.TrimSpace(alias) == "" {
 		notice = "alias-removed"
 	}
-	http.Redirect(w, r, fmt.Sprintf("/sources/%d?notice=%s", id, notice),
-		http.StatusSeeOther)
+	b.setFlash(w, notice)
+	http.Redirect(w, r, fmt.Sprintf("/sources/%d", id), http.StatusSeeOther)
 }
 
 func (b *Browser) sourceClearLogs(w http.ResponseWriter, r *http.Request) {
@@ -117,8 +116,8 @@ func (b *Browser) sourceClearLogs(w http.ResponseWriter, r *http.Request) {
 			Type: logs.LiveControlSourcePurged, SourceID: id,
 		})
 	}
-	http.Redirect(w, r, fmt.Sprintf("/sources/%d?notice=logs-cleared", id),
-		http.StatusSeeOther)
+	b.setFlash(w, "logs-cleared")
+	http.Redirect(w, r, fmt.Sprintf("/sources/%d", id), http.StatusSeeOther)
 }
 
 func (b *Browser) sourceRemove(w http.ResponseWriter, r *http.Request) {
@@ -154,11 +153,12 @@ func (b *Browser) sourceRemove(w http.ResponseWriter, r *http.Request) {
 		b.live.TryPublishControl(logs.LiveControl{Type: controlType, SourceID: id})
 	}
 	if result.Removed {
-		http.Redirect(w, r, "/sources?notice=source-removed", http.StatusSeeOther)
+		b.setFlash(w, "source-removed")
+		http.Redirect(w, r, "/sources", http.StatusSeeOther)
 		return
 	}
-	http.Redirect(w, r, fmt.Sprintf("/sources/%d?notice=new-events-remain", id),
-		http.StatusSeeOther)
+	b.setFlash(w, "new-events-remain")
+	http.Redirect(w, r, fmt.Sprintf("/sources/%d", id), http.StatusSeeOther)
 }
 
 func (b *Browser) readSourceForMutation(
@@ -228,7 +228,7 @@ func (b *Browser) renderSourceDetailView(
 	view.AliasError = aliasError
 	view.ClearError = clearError
 	view.RemoveError = removeError
-	shell := b.shellBase(r, "source-detail")
+	shell := b.shellBase(w, r, "source-detail")
 	shell.Source = view
 	if err := b.ui.Shell(w, status, shell); err != nil {
 		http.Error(w, "Sources are temporarily unavailable.", http.StatusInternalServerError)
@@ -260,7 +260,7 @@ func sourcePathID(r *http.Request) (int64, error) {
 
 func parseSourceCatalogQuery(values url.Values) (sources.CatalogQuery, string, error) {
 	for key := range values {
-		if key != "after" && key != "limit" && key != "notice" {
+		if key != "after" && key != "limit" {
 			return sources.CatalogQuery{}, "", fmt.Errorf("unknown source parameter %q", key)
 		}
 	}
@@ -283,37 +283,7 @@ func parseSourceCatalogQuery(values url.Values) (sources.CatalogQuery, string, e
 		}
 		query.Limit = limit
 	}
-	notice := ""
-	if entries := values["notice"]; len(entries) > 1 {
-		return sources.CatalogQuery{}, "", errors.New("notice must occur once")
-	} else if len(entries) == 1 {
-		if entries[0] != "source-removed" {
-			return sources.CatalogQuery{}, "", errors.New("invalid source notice")
-		}
-		notice = "Source removed. An active sender may discover it again."
-	}
-	return query, notice, nil
-}
-
-func sourceDetailNotice(values url.Values) (string, error) {
-	if len(values) == 0 {
-		return "", nil
-	}
-	if len(values) != 1 || len(values["notice"]) != 1 {
-		return "", errors.New("invalid source notice")
-	}
-	switch values.Get("notice") {
-	case "alias-updated":
-		return "Source alias updated. Stable identity and stored events were unchanged.", nil
-	case "alias-removed":
-		return "Source alias removed. Stable identity and stored events were unchanged.", nil
-	case "logs-cleared":
-		return "Retained logs were cleared. The source, alias, and container observations remain.", nil
-	case "new-events-remain":
-		return "Events committed after removal started remain. The alias and unreferenced container observations were removed.", nil
-	default:
-		return "", errors.New("invalid source notice")
-	}
+	return query, "", nil
 }
 
 func buildSourcesView(
@@ -433,7 +403,7 @@ func (b *Browser) renderSourcesError(
 	status int,
 	message, requestID string,
 ) {
-	shell := b.shellBase(r, "sources")
+	shell := b.shellBase(w, r, "sources")
 	shell.Sources = webui.SourcesView{Error: message, ErrorRequestID: requestID}
 	if err := b.ui.Shell(w, status, shell); err != nil {
 		http.Error(w, "Sources are temporarily unavailable.", http.StatusInternalServerError)

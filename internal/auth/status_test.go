@@ -102,16 +102,18 @@ func TestBrowserRunsAuthenticatedCorrelatedSafeDatabaseCheck(t *testing.T) {
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusSeeOther ||
-		response.Header().Get("Location") !=
-			"/status?notice=database-check-complete" {
+		response.Header().Get("Location") != "/status" {
 		t.Fatalf("database check response = %d %q %q",
 			response.Code, response.Header().Get("Location"), response.Body.String())
 	}
 
-	pageRequest := httptest.NewRequest(
-		http.MethodGet, "/status?notice=database-check-complete", nil,
-	)
+	pageRequest := httptest.NewRequest(http.MethodGet, "/status", nil)
 	pageRequest.AddCookie(cookie)
+	for _, flash := range response.Result().Cookies() {
+		if flash.Name == "siftail_flash" {
+			pageRequest.AddCookie(flash)
+		}
+	}
 	page := httptest.NewRecorder()
 	handler.ServeHTTP(page, pageRequest)
 	body := page.Body.String()

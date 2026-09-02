@@ -71,7 +71,7 @@ func TestBrowserRetentionSettingsLifecycle(t *testing.T) {
 		url.Values{"retention_days": {"30"}, "maximum_database_gib": {"8"}}, true,
 	))
 	if saved.Code != http.StatusSeeOther ||
-		saved.Header().Get("Location") != "/settings?notice=retention-saved" ||
+		saved.Header().Get("Location") != "/settings" ||
 		saved.Header().Get("Cache-Control") != "no-store" {
 		t.Fatalf("save Settings = %d %#v", saved.Code, saved.Header())
 	}
@@ -80,10 +80,13 @@ func TestBrowserRetentionSettingsLifecycle(t *testing.T) {
 		t.Fatalf("saved Settings = %#v, err=%v", settings, err)
 	}
 
-	noticeRequest := httptest.NewRequest(
-		http.MethodGet, "/settings?notice=retention-saved", nil,
-	)
+	noticeRequest := httptest.NewRequest(http.MethodGet, "/settings", nil)
 	noticeRequest.AddCookie(cookie)
+	for _, flash := range saved.Result().Cookies() {
+		if flash.Name == "siftail_flash" {
+			noticeRequest.AddCookie(flash)
+		}
+	}
 	notice := httptest.NewRecorder()
 	fixture.handler().ServeHTTP(notice, noticeRequest)
 	if notice.Code != http.StatusOK ||

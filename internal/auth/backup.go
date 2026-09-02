@@ -16,7 +16,7 @@ import (
 func (b *Browser) backupPage(w http.ResponseWriter, r *http.Request) {
 	session, _ := BrowserSessionFromContext(r.Context())
 	view := b.backupView(session.CSRFToken)
-	shell := b.shellBase(r, "backup")
+	shell := b.shellBase(w, r, "backup")
 	shell.Backup = view
 	if err := b.ui.Shell(w, http.StatusOK, shell); err != nil {
 		http.Error(w, "Backup is temporarily unavailable.",
@@ -115,7 +115,7 @@ func (b *Browser) renderBackupError(
 ) {
 	view := b.backupView(csrfToken)
 	view.Error = message
-	shell := b.shellBase(r, "backup")
+	shell := b.shellBase(w, r, "backup")
 	shell.Backup = view
 	if err := b.ui.Shell(w, status, shell); err != nil {
 		http.Error(w, "Backup is temporarily unavailable.",

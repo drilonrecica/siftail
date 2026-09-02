@@ -36,6 +36,14 @@
     });
   }
 
+  // Success flashes auto-dismiss (DESIGN.md §26); warnings and errors stay
+  // until the operator moves on.
+  document.querySelectorAll("[data-flash-dismiss]").forEach((flash) => {
+    window.setTimeout(() => {
+      flash.closest(".flash-region")?.remove();
+    }, 6000);
+  });
+
   // The System menu is a native <details>; close it when focus or pointer
   // interaction leaves it so it behaves like a menu without ARIA takeover.
   const systemMenu = document.querySelector("[data-system-menu]");

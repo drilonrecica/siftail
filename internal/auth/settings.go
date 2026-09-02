@@ -3,7 +3,6 @@ package auth
 import (
 	"errors"
 	"net/http"
-	"net/url"
 	"strconv"
 
 	"github.com/drilonrecica/siftail/internal/retention"
@@ -13,8 +12,7 @@ import (
 
 func (b *Browser) settingsPage(w http.ResponseWriter, r *http.Request) {
 	session, _ := BrowserSessionFromContext(r.Context())
-	notice, err := settingsNotice(r.URL.Query())
-	if err != nil {
+	if len(r.URL.Query()) != 0 {
 		b.renderSettings(w, r, session.CSRFToken, http.StatusBadRequest, webui.SettingsView{
 			Error: "Check the Settings page parameters.",
 		})
@@ -28,7 +26,6 @@ func (b *Browser) settingsPage(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	view.Notice = notice
 	b.renderSettings(w, r, session.CSRFToken, http.StatusOK, view)
 }
 
@@ -89,7 +86,8 @@ func (b *Browser) retentionSettingsSave(w http.ResponseWriter, r *http.Request) 
 		b.renderSettings(w, r, session.CSRFToken, http.StatusServiceUnavailable, view)
 		return
 	}
-	http.Redirect(w, r, "/settings?notice=retention-saved", http.StatusSeeOther)
+	b.setFlash(w, "retention-saved")
+	http.Redirect(w, r, "/settings", http.StatusSeeOther)
 }
 
 func (b *Browser) loadSettingsView(
@@ -118,23 +116,12 @@ func (b *Browser) renderSettings(
 	view webui.SettingsView,
 ) {
 	view.CSRFToken = csrfToken
-	shell := b.shellBase(r, "settings")
+	shell := b.shellBase(w, r, "settings")
 	shell.Settings = view
 	if err := b.ui.Shell(w, status, shell); err != nil {
 		http.Error(w, "Retention settings are temporarily unavailable.",
 			http.StatusInternalServerError)
 	}
-}
-
-func settingsNotice(values url.Values) (string, error) {
-	if len(values) == 0 {
-		return "", nil
-	}
-	if len(values) != 1 || len(values["notice"]) != 1 ||
-		values.Get("notice") != "retention-saved" {
-		return "", errors.New("invalid Settings notice")
-	}
-	return "Retention settings saved.", nil
 }
 
 func parseBoundedWholeNumber(value string, minimum, maximum int) (int, error) {

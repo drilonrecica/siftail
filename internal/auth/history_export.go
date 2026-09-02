@@ -248,7 +248,7 @@ func (b *Browser) renderHistoryExportError(
 		view, err := b.historyView(r, query, false)
 		if err == nil {
 			view.ExportError = message
-			shell := b.shellBase(r, "history")
+			shell := b.shellBase(w, r, "history")
 			shell.History = view
 			if err := b.ui.Shell(w, status, shell); err == nil {
 				return

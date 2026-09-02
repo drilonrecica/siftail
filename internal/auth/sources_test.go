@@ -146,7 +146,7 @@ func TestSourceMutationsRequireProtectionConfirmationAndPublishControls(t *testi
 	aliasResponse := httptest.NewRecorder()
 	fixture.handler().ServeHTTP(aliasResponse, alias)
 	if aliasResponse.Code != http.StatusSeeOther ||
-		aliasResponse.Header().Get("Location") != "/sources/1?notice=alias-updated" {
+		aliasResponse.Header().Get("Location") != "/sources/1" {
 		t.Fatalf("alias response = %d %#v", aliasResponse.Code, aliasResponse.Header())
 	}
 	var sourceAlias string
@@ -171,7 +171,7 @@ func TestSourceMutationsRequireProtectionConfirmationAndPublishControls(t *testi
 	clearResponse := httptest.NewRecorder()
 	fixture.handler().ServeHTTP(clearResponse, clear)
 	if clearResponse.Code != http.StatusSeeOther ||
-		clearResponse.Header().Get("Location") != "/sources/1?notice=logs-cleared" {
+		clearResponse.Header().Get("Location") != "/sources/1" {
 		t.Fatalf("clear response = %d %#v", clearResponse.Code, clearResponse.Header())
 	}
 	clearControl := nextAuthLive(t, sourceOne)
@@ -197,7 +197,7 @@ func TestSourceMutationsRequireProtectionConfirmationAndPublishControls(t *testi
 	removeResponse := httptest.NewRecorder()
 	fixture.handler().ServeHTTP(removeResponse, remove)
 	if removeResponse.Code != http.StatusSeeOther ||
-		removeResponse.Header().Get("Location") != "/sources?notice=source-removed" {
+		removeResponse.Header().Get("Location") != "/sources" {
 		t.Fatalf("remove response = %d %#v", removeResponse.Code, removeResponse.Header())
 	}
 	removeControl := nextAuthLive(t, sourceTwo)

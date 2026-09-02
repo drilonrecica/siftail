@@ -161,7 +161,7 @@ func TestBrowserServerAndOneTimeTokenLifecycle(t *testing.T) {
 		url.Values{"confirmation": {"primary"}}, true,
 	))
 	if revoke.Code != http.StatusSeeOther ||
-		revoke.Header().Get("Location") != "/servers/1?notice=token-revoked" {
+		revoke.Header().Get("Location") != "/servers/1" {
 		t.Fatalf("revoke = %d %#v", revoke.Code, revoke.Header())
 	}
 	if _, err := fixture.browser.sources.VerifyToken(

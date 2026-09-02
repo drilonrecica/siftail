@@ -44,13 +44,12 @@ func (b *Browser) serversPage(w http.ResponseWriter, r *http.Request) {
 func (b *Browser) serverDetailPage(w http.ResponseWriter, r *http.Request) {
 	session, _ := BrowserSessionFromContext(r.Context())
 	id, err := serverPathID(r)
-	notice, noticeErr := serverDetailNotice(r.URL.Query())
-	if err != nil || noticeErr != nil {
+	if err != nil || len(r.URL.Query()) != 0 {
 		b.renderServersError(w, r, session.CSRFToken, http.StatusBadRequest,
 			"Check the Server identifier.", "")
 		return
 	}
-	b.renderServerDetail(w, r, session.CSRFToken, id, notice,
+	b.renderServerDetail(w, r, session.CSRFToken, id, "",
 		http.StatusOK, "", "", "")
 }
 
@@ -165,7 +164,7 @@ func (b *Browser) tokenCreate(w http.ResponseWriter, r *http.Request) {
 	if !tokenView.GuideAvailable {
 		tokenView.GuideError = "Set SIFTAIL_INGEST_PUBLIC_URL to the complete /api/v1/ingest URL and restart Siftail to generate and test configuration."
 	}
-	shell := b.shellBase(r, "token-created")
+	shell := b.shellBase(w, r, "token-created")
 	shell.Token = tokenView
 	if err := b.ui.Shell(w, http.StatusCreated, shell); err != nil {
 		http.Error(w, "The token display page is unavailable. Create a replacement token.",
@@ -241,7 +240,8 @@ func (b *Browser) tokenRevoke(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if token.RevokedAtUS != nil {
-		http.Redirect(w, r, fmt.Sprintf("/servers/%d?notice=token-revoked", token.ServerID),
+		b.setFlash(w, "token-revoked")
+		http.Redirect(w, r, fmt.Sprintf("/servers/%d", token.ServerID),
 			http.StatusSeeOther)
 		return
 	}
@@ -253,7 +253,8 @@ func (b *Browser) tokenRevoke(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := b.sources.RevokeToken(r.Context(), tokenID); err != nil {
 		if errors.Is(err, sources.ErrTokenNotFound) {
-			http.Redirect(w, r, fmt.Sprintf("/servers/%d?notice=token-revoked", token.ServerID),
+			b.setFlash(w, "token-revoked")
+			http.Redirect(w, r, fmt.Sprintf("/servers/%d", token.ServerID),
 				http.StatusSeeOther)
 			return
 		}
@@ -262,7 +263,8 @@ func (b *Browser) tokenRevoke(w http.ResponseWriter, r *http.Request) {
 			web.RequestIDFromContext(r.Context()))
 		return
 	}
-	http.Redirect(w, r, fmt.Sprintf("/servers/%d?notice=token-revoked", token.ServerID),
+	b.setFlash(w, "token-revoked")
+	http.Redirect(w, r, fmt.Sprintf("/servers/%d", token.ServerID),
 		http.StatusSeeOther)
 }
 
@@ -296,7 +298,7 @@ func (b *Browser) renderServerDetail(
 	view.TokenError = tokenError
 	view.TokenName = tokenName
 	view.RevokeError = revokeError
-	shell := b.shellBase(r, "server-detail")
+	shell := b.shellBase(w, r, "server-detail")
 	shell.Server = view
 	if err := b.ui.Shell(w, status, shell); err != nil {
 		http.Error(w, "Servers are temporarily unavailable.", http.StatusInternalServerError)
@@ -305,7 +307,7 @@ func (b *Browser) renderServerDetail(
 
 func parseServerPageQuery(values url.Values) (sources.ServerPageQuery, string, error) {
 	for key := range values {
-		if key != "after" && key != "limit" && key != "notice" {
+		if key != "after" && key != "limit" {
 			return sources.ServerPageQuery{}, "", errors.New("unknown Server parameter")
 		}
 	}
@@ -328,27 +330,7 @@ func parseServerPageQuery(values url.Values) (sources.ServerPageQuery, string, e
 		}
 		query.Limit = limit
 	}
-	notice := ""
-	if entries := values["notice"]; len(entries) > 1 {
-		return sources.ServerPageQuery{}, "", errors.New("notice must occur once")
-	} else if len(entries) == 1 {
-		if entries[0] != "server-created" {
-			return sources.ServerPageQuery{}, "", errors.New("invalid Server notice")
-		}
-		notice = "Server created. Create an ingestion token before configuring a sender."
-	}
-	return query, notice, nil
-}
-
-func serverDetailNotice(values url.Values) (string, error) {
-	if len(values) == 0 {
-		return "", nil
-	}
-	if len(values) != 1 || len(values["notice"]) != 1 ||
-		values.Get("notice") != "token-revoked" {
-		return "", errors.New("invalid Server notice")
-	}
-	return "Token revoked. New ingestion requests using it fail immediately.", nil
+	return query, "", nil
 }
 
 func exactManagementForm(r *http.Request, fields ...string) (url.Values, error) {
@@ -454,7 +436,7 @@ func (b *Browser) renderServersView(
 	status int,
 	view webui.ServersView,
 ) {
-	shell := b.shellBase(r, "servers")
+	shell := b.shellBase(w, r, "servers")
 	shell.Servers = view
 	if err := b.ui.Shell(w, status, shell); err != nil {
 		http.Error(w, "Servers are temporarily unavailable.", http.StatusInternalServerError)

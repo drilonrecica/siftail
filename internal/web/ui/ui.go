@@ -34,12 +34,20 @@ type LoginView struct {
 	Prefs                PrefsView
 }
 
+// FlashView is the one-time post-action notice the shell renders below the
+// header (DESIGN.md §26).
+type FlashView struct {
+	Kind string
+	Text string
+}
+
 type ShellView struct {
 	CSRFToken string
 	Mode      string
 	Path      string
 	Prefs     PrefsView
 	Health    string
+	Flash     FlashView
 	History   HistoryView
 	Live      LiveView
 	Sources   SourcesView

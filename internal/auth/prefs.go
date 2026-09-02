@@ -44,8 +44,9 @@ func preferences(r *http.Request) webui.PrefsView {
 }
 
 // shellBase fills the shell fields shared by every authenticated page render:
-// CSRF token, mode, current request path, and interface preferences.
-func (b *Browser) shellBase(r *http.Request, mode string) webui.ShellView {
+// CSRF token, mode, current request path, interface preferences, header
+// health, and the pending one-time flash message (which it consumes).
+func (b *Browser) shellBase(w http.ResponseWriter, r *http.Request, mode string) webui.ShellView {
 	session, _ := BrowserSessionFromContext(r.Context())
 	// Only the path is reflected into the page; query strings stay out of
 	// rendered HTML so unexpected parameters can never leak through it.
@@ -59,6 +60,7 @@ func (b *Browser) shellBase(r *http.Request, mode string) webui.ShellView {
 		Path:      path,
 		Prefs:     preferences(r),
 		Health:    b.status.HealthSeverity(),
+		Flash:     b.takeFlash(w, r),
 	}
 }
 

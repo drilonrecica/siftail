@@ -238,6 +238,16 @@ button,
   border-left: 0.25rem solid var(--status-info);
 }
 
+.notice-success {
+  border-left: 0.25rem solid var(--status-success);
+}
+
+.flash-region {
+  width: min(100%, 112rem);
+  margin: var(--space-3) auto 0;
+  padding: 0 var(--space-6);
+}
+
 .form-error {
   border-left: 0.25rem solid var(--status-error);
   color: var(--text-primary);

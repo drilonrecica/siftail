@@ -37,7 +37,7 @@ func (b *Browser) historyPage(w http.ResponseWriter, r *http.Request) {
 		b.renderHistoryShellError(w, r, status, message, requestID)
 		return
 	}
-	shell := b.shellBase(r, "history")
+	shell := b.shellBase(w, r, "history")
 	shell.History = view
 	if err := b.ui.Shell(w, http.StatusOK, shell); err != nil {
 		http.Error(w, "Logs are temporarily unavailable.", http.StatusInternalServerError)
@@ -318,7 +318,7 @@ func (b *Browser) renderHistoryShellError(
 		Error:          message,
 		ErrorRequestID: requestID,
 	}
-	shell := b.shellBase(r, "history")
+	shell := b.shellBase(w, r, "history")
 	shell.History = view
 	if err := b.ui.Shell(w, status, shell); err != nil {
 		http.Error(w, "Logs are temporarily unavailable.", http.StatusInternalServerError)

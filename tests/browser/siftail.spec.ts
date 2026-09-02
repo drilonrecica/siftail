@@ -659,7 +659,7 @@ test("source aliases, clear logs, removal, confirmation focus, and expired sessi
   await expect(page.getByText("Type the complete removal phrase exactly.")).toBeVisible();
   await page.locator("#remove-confirmation").fill("remove mutation-worker/jobs");
   await page.getByRole("button", { name: "Remove source" }).click();
-  await expect(page).toHaveURL(/\/sources\?notice=source-removed/);
+  await expect(page).toHaveURL(/\/sources$/);
   await expect(page.getByText(
     "Source removed. An active sender may discover it again.",
   )).toBeVisible();
@@ -800,7 +800,7 @@ test("retention settings validate, persist, remain responsive, and expire safely
   await retentionDays.fill("30");
   await maximumDatabaseGiB.fill("8");
   await page.getByRole("button", { name: "Save retention settings" }).press("Enter");
-  await expect(page).toHaveURL(/\/settings\?notice=retention-saved$/);
+  await expect(page).toHaveURL(/\/settings$/);
   await expect(page.getByText("Retention settings saved.")).toBeVisible();
   await page.reload();
   await expect(retentionDays).toHaveValue("30");
@@ -859,7 +859,7 @@ test("status is authenticated, refreshable, sanitized, responsive, and accessibl
   );
   await page.getByRole("button", { name: "Run safe database check" }).click();
   expect((await checkResponse).status()).toBe(303);
-  await expect(page).toHaveURL(/\/status\?notice=database-check-complete$/);
+  await expect(page).toHaveURL(/\/status$/);
   await expect(page.getByText("Database check completed.")).toBeVisible();
   await expect(page.getByText(
     /Healthy · schema 4\/4 · SQLite .* · ok · checkpoint completed/,

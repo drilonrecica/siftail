@@ -52,7 +52,7 @@ func (b *Browser) renderAudit(
 	status int,
 	view webui.AuditView,
 ) {
-	shell := b.shellBase(r, "audit")
+	shell := b.shellBase(w, r, "audit")
 	shell.Audit = view
 	if err := b.ui.Shell(w, status, shell); err != nil {
 		http.Error(w, "Security audit history is temporarily unavailable.",
