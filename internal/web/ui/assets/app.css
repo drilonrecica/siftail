@@ -1105,6 +1105,8 @@ code {
   display: none;
 }
 
+/* Labels and headings speak the UI face; every value stays monospace so
+   expanding a row never switches the list's reading rhythm (DESIGN.md §13.1). */
 .event-detail {
   display: grid;
   gap: var(--space-4);
@@ -1114,7 +1116,8 @@ code {
   border-radius: var(--radius-md);
   background: var(--surface-raised);
   color: var(--text-primary);
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
 }
 
 .event-detail-header,
@@ -1133,11 +1136,11 @@ code {
 }
 
 .event-detail h2 {
-  font-size: 1.1rem;
+  font-size: var(--text-lg);
 }
 
 .event-detail h3 {
-  font-size: 0.9rem;
+  font-size: var(--text-sm);
 }
 
 .detail-section {
@@ -1159,6 +1162,8 @@ code {
   border-radius: var(--radius-sm);
   background: var(--surface-base);
   color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: var(--text-log);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -1189,6 +1194,8 @@ code {
   min-width: 0;
   margin: 0;
   overflow-wrap: anywhere;
+  font-family: var(--font-mono);
+  font-size: var(--text-log);
 }
 
 .event-detail-error {

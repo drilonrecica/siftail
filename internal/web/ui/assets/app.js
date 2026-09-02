@@ -133,8 +133,15 @@
     const copy = event.target.closest("[data-copy-target]");
     if (copy) {
       const source = document.getElementById(copy.dataset.copyTarget);
-      if (!source || !navigator.clipboard) return;
+      if (!source) return;
       const original = copy.textContent;
+      if (!navigator.clipboard) {
+        copy.textContent = "Copy unavailable";
+        window.setTimeout(() => {
+          copy.textContent = original;
+        }, 1500);
+        return;
+      }
       navigator.clipboard.writeText(source.textContent).then(() => {
         copy.textContent = "Copied";
         window.setTimeout(() => {
