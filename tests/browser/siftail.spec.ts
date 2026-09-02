@@ -461,6 +461,43 @@ test("Live keyboard, themes, reduced motion, mobile, axe, and online invalidatio
   await expect(page).toHaveURL(/\/login\?return=.*expired=1/, { timeout: 10_000 });
 });
 
+test("shortcuts are scoped to Logs, discoverable, and inert on form pages", async ({ page }) => {
+  await login(page);
+
+  // Row navigation works in History: J selects, Enter expands, Esc clears.
+  await page.keyboard.press("j");
+  await expect(page.locator(".log-row").first()).toBeFocused();
+  await page.keyboard.press("j");
+  await expect(page.locator(".log-row").nth(1)).toBeFocused();
+  await page.keyboard.press("k");
+  await expect(page.locator(".log-row").first()).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(page.locator(".event-detail").first()).toBeVisible();
+  await page.locator(".log-row").first().focus();
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".log-row").first()).not.toBeFocused();
+
+  // The ? overlay lists the shortcuts and closes with Escape.
+  await page.keyboard.press("?");
+  const help = page.getByRole("dialog", { name: "Keyboard shortcuts" });
+  await expect(help).toBeVisible();
+  await expect(help.getByText("Pause or resume Live")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(help).toBeHidden();
+
+  // On a form page, single letters are inert: L must not navigate away and
+  // discard input.
+  await navigateSystem(page, "Settings");
+  await expect(page).toHaveURL(/\/settings$/);
+  await page.keyboard.press("l");
+  await page.keyboard.press("f");
+  await expect(page).toHaveURL(/\/settings$/);
+  await page.keyboard.press("?");
+  await expect(page.getByRole("dialog", { name: "Keyboard shortcuts" })).toBeVisible();
+  await expect(page.getByText("active only in the Logs workspace")).toBeVisible();
+  await page.keyboard.press("Escape");
+});
+
 test("source catalog preserves hierarchy, observations, responsive layout, and log navigation", async ({
   page,
 }) => {

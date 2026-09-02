@@ -354,32 +354,4 @@
     }
   });
 
-  document.addEventListener("keydown", (event) => {
-    const target = event.target;
-    if (
-      target instanceof HTMLInputElement ||
-      target instanceof HTMLTextAreaElement ||
-      target instanceof HTMLSelectElement ||
-      target?.isContentEditable
-    ) {
-      return;
-    }
-    if (event.key.toLowerCase() === "f" && !event.ctrlKey && !event.metaKey) {
-      event.preventDefault();
-      document.querySelector('input[name="contains"]')?.focus();
-      return;
-    }
-    if (event.key.toLowerCase() === "l" && !event.ctrlKey && !event.metaKey) {
-      event.preventDefault();
-      window.location.assign("/logs?mode=live");
-      return;
-    }
-    if (
-      event.key === "/" ||
-      ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k")
-    ) {
-      event.preventDefault();
-      document.querySelector('select[name="server"]')?.focus();
-    }
-  });
 })();

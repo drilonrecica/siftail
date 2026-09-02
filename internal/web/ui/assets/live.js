@@ -434,43 +434,12 @@
     connect();
   });
 
-  const keyboard = (event) => {
-    const target = event.target;
-    if (
-      target instanceof HTMLInputElement ||
-      target instanceof HTMLTextAreaElement ||
-      target instanceof HTMLSelectElement ||
-      target?.isContentEditable
-    ) return;
-    const key = event.key.toLowerCase();
-    if (key === "h") {
-      event.preventDefault();
-      window.location.assign("/logs");
-    } else if (event.code === "Space") {
-      event.preventDefault();
-      togglePause();
-    } else if (key === "g") {
-      event.preventDefault();
-      jumpToNewest();
-    } else if (key === "j" || key === "k") {
-      const available = Array.from(rows.querySelectorAll(".log-row"));
-      if (available.length === 0) return;
-      event.preventDefault();
-      const current = available.indexOf(document.activeElement);
-      const index = key === "j"
-        ? Math.min(current + 1, available.length - 1)
-        : Math.max(current < 0 ? available.length - 1 : current - 1, 0);
-      available[index].focus({ preventScroll: true });
-    } else if (event.key === "Enter" && document.activeElement?.matches?.(".log-row")) {
-      document.activeElement.querySelector(".event-toggle")?.click();
-    }
-  };
-  document.addEventListener("keydown", keyboard);
+  // Keyboard shortcuts live in keyboard.js, which drives the visible
+  // controls (pause, jump to newest, row focus) through their elements.
   window.addEventListener("pagehide", () => {
     destroyed = true;
     window.clearTimeout(textFilterTimer);
     closeSource();
-    document.removeEventListener("keydown", keyboard);
   }, { once: true });
 
   connect();

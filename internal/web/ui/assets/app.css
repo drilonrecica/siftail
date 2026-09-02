@@ -1391,6 +1391,65 @@ button.tail-action {
   font-size: var(--text-xs);
 }
 
+.keyboard-help {
+  width: min(92vw, 30rem);
+  padding: var(--space-6);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  background: var(--surface-overlay);
+  color: var(--text-primary);
+  box-shadow: var(--shadow-overlay);
+}
+
+.keyboard-help::backdrop {
+  background: rgb(0 0 0 / 0.5);
+}
+
+.keyboard-help-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.keyboard-help h2 {
+  margin: 0;
+  font-size: var(--text-lg);
+}
+
+.keyboard-help h3 {
+  margin: var(--space-4) 0 var(--space-2);
+  font-size: var(--text-sm);
+}
+
+.shortcut-list {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+}
+
+.shortcut-list > div {
+  display: grid;
+  grid-template-columns: 7rem 1fr;
+  align-items: baseline;
+  gap: var(--space-3);
+}
+
+.shortcut-list dd {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+
+kbd {
+  padding: 0.05rem var(--space-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-base);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
 .empty-state {
   max-width: 36rem;
   margin: clamp(3rem, 12vh, 8rem) auto;

@@ -6,7 +6,7 @@
 <body hx-history="false">
   <a class="skip-link" href="#main-content">Skip to main content</a>
   {{template "topbar.html" .}}
-  <main id="main-content" class="workspace">
+  <main id="main-content" class="workspace"{{if $p.KbScope}} data-kb-scope="{{$p.KbScope}}"{{end}}>
     <header class="workspace-heading">
       <div>
         <p class="eyebrow">{{$p.Eyebrow}}</p>
@@ -26,5 +26,6 @@
     {{else if eq .Mode "backup"}}{{template "backup.html" .Backup}}
     {{else}}{{template "sources.html" .Sources}}{{end}}
   </main>
+  {{template "help-overlay.html" $p}}
 </body>
 </html>{{end}}

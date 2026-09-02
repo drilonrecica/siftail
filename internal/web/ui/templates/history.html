@@ -189,7 +189,7 @@
 {{end}}
 
 {{define "history-row"}}
-<article class="log-row level-{{.Level}}" data-event-id="{{.ID}}">
+<article class="log-row level-{{.Level}}" data-event-id="{{.ID}}" tabindex="-1">
   <button class="event-toggle" type="button" aria-label="Show details for event {{.ID}}"
           aria-expanded="false" aria-controls="{{.DetailID}}"
           hx-get="{{.DetailURL}}" hx-target="#{{.DetailID}}" hx-swap="innerHTML"

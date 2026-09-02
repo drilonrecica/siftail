@@ -61,16 +61,23 @@ type PageMeta struct {
 	Heading    string
 	Context    string
 	NavSection string
+	// KbScope names the keyboard shortcut scope the page declares on <main>;
+	// only "logs" carries single-letter shortcuts (DESIGN.md §32.1).
+	KbScope string
 }
 
 func pageMeta(title, eyebrow, heading, context, navSection string) PageMeta {
-	return PageMeta{
+	meta := PageMeta{
 		Title:      title,
 		Eyebrow:    eyebrow,
 		Heading:    heading,
 		Context:    context,
 		NavSection: navSection,
 	}
+	if navSection == "logs" {
+		meta.KbScope = "logs"
+	}
+	return meta
 }
 
 // PageMeta derives the shell chrome for the active Mode. It is the single
@@ -564,6 +571,7 @@ func (r *Renderer) Asset(w http.ResponseWriter, request *http.Request) {
 		"app.css":                        "text/css; charset=utf-8",
 		"tokens.css":                     "text/css; charset=utf-8",
 		"app.js":                         "text/javascript; charset=utf-8",
+		"keyboard.js":                    "text/javascript; charset=utf-8",
 		"live.js":                        "text/javascript; charset=utf-8",
 		"tokens.js":                      "text/javascript; charset=utf-8",
 		"favicon.svg":                    "image/svg+xml",

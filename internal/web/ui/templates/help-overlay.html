@@ -1,0 +1,32 @@
+{{define "help-overlay.html"}}
+<dialog class="keyboard-help" data-keyboard-help aria-labelledby="keyboard-help-title">
+  <div class="keyboard-help-header">
+    <h2 id="keyboard-help-title">Keyboard shortcuts</h2>
+    <form method="dialog"><button class="button button-quiet" type="submit">Close</button></form>
+  </div>
+  <section aria-label="Global shortcuts">
+    <h3>Everywhere</h3>
+    <dl class="shortcut-list">
+      <div><dt><kbd>?</kbd></dt><dd>Open this help</dd></div>
+      <div><dt><kbd>Esc</kbd></dt><dd>Close the open overlay, or clear the selected row</dd></div>
+    </dl>
+  </section>
+  {{if eq .KbScope "logs"}}
+  <section aria-label="Logs shortcuts">
+    <h3>Logs workspace</h3>
+    <dl class="shortcut-list">
+      <div><dt><kbd>F</kbd></dt><dd>Focus message search</dd></div>
+      <div><dt><kbd>H</kbd></dt><dd>Switch to History</dd></div>
+      <div><dt><kbd>L</kbd></dt><dd>Switch to Live</dd></div>
+      <div><dt><kbd>J</kbd> / <kbd>K</kbd></dt><dd>Next / previous log row</dd></div>
+      <div><dt><kbd>Enter</kbd></dt><dd>Expand or collapse the selected row</dd></div>
+      <div><dt><kbd>Space</kbd></dt><dd>Pause or resume Live</dd></div>
+      <div><dt><kbd>G</kbd></dt><dd>Jump to the newest live event</dd></div>
+    </dl>
+  </section>
+  {{else}}
+  <p class="field-help">Single-letter shortcuts are active only in the Logs workspace, so they can never interrupt form input here.</p>
+  {{end}}
+  <p class="field-help">Every shortcut has a visible control that does the same thing.</p>
+</dialog>
+{{end}}
