@@ -572,6 +572,7 @@ func (r *Renderer) Asset(w http.ResponseWriter, request *http.Request) {
 		"tokens.css":                     "text/css; charset=utf-8",
 		"app.js":                         "text/javascript; charset=utf-8",
 		"keyboard.js":                    "text/javascript; charset=utf-8",
+		"palette.js":                     "text/javascript; charset=utf-8",
 		"live.js":                        "text/javascript; charset=utf-8",
 		"tokens.js":                      "text/javascript; charset=utf-8",
 		"favicon.svg":                    "image/svg+xml",

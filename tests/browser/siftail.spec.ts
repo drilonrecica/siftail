@@ -498,6 +498,40 @@ test("shortcuts are scoped to Logs, discoverable, and inert on form pages", asyn
   await page.keyboard.press("Escape");
 });
 
+test("command palette navigates, filters sources, and restores focus", async ({ page }) => {
+  await login(page);
+
+  // Open with the keyboard, navigate keyboard-only, and land on Status.
+  await page.keyboard.press("Control+k");
+  const palette = page.getByRole("dialog", { name: "Command palette" });
+  await expect(palette).toBeVisible();
+  await expect(page.locator("[data-palette-input]")).toBeFocused();
+  await page.locator("[data-palette-input]").fill("status");
+  await page.keyboard.press("Enter");
+  await expect(page).toHaveURL(/\/status$/);
+
+  // Axe stays clean with the dialog open.
+  await page.keyboard.press("Control+k");
+  await expect(palette).toBeVisible();
+  const openResults = await new AxeBuilder({ page })
+    .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"])
+    .analyze();
+  expect(openResults.violations.map((violation) => violation.id)).toEqual([]);
+
+  // Escape closes and restores focus to the page.
+  await page.keyboard.press("Escape");
+  await expect(palette).toBeHidden();
+
+  // The header button opens it too, and a source command applies a filter.
+  await page.goto("/logs");
+  await page.locator("[data-palette-open]").click();
+  await expect(palette).toBeVisible();
+  await page.locator("[data-palette-input]").fill("browser-project");
+  await page.keyboard.press("Enter");
+  await expect(page).toHaveURL(/project=browser-project/);
+  await expect(page.locator("[data-palette-open]")).toBeFocused();
+});
+
 test("source catalog preserves hierarchy, observations, responsive layout, and log navigation", async ({
   page,
 }) => {
