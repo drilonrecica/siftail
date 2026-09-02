@@ -259,7 +259,7 @@ func TestLiveShellRendersExplicitEscapedBoundedWorkspace(t *testing.T) {
 	body := response.Body.String()
 	for _, want := range []string{
 		`data-live-workspace`, `data-stream-url=`,
-		`aria-selected="true" href=`, `data-live-pause`, `data-live-newest`,
+		`aria-current="page">Live<`, `data-live-pause`, `data-live-newest`,
 		`data-live-clear`, `>Clear view<`, `data-live-reconnect`,
 		`data-live-pending hidden`, `aria-label="Live log events"`,
 		`API &lt;unsafe&gt;`, `&lt;script&gt;alert(1)&lt;/script&gt;`,
@@ -429,7 +429,7 @@ func TestHistoryFragmentsRenderFocusedEscapedState(t *testing.T) {
 		`id="history-region"`,
 		`hx-target="#history-region"`,
 		`delay:400ms`,
-		`data-list-filter="levels" checked`,
+		`name="levels" value="error" checked`,
 		`API &lt;unsafe&gt;`,
 		`&lt;img src=x onerror=alert(1)&gt;`,
 		`id="load-older"`,

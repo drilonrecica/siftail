@@ -245,6 +245,36 @@ test("cursor pagination appends without replacing existing rows", async ({ page 
   await expect(page.locator(".log-row")).toHaveCount(220);
   await expect(page.locator(".log-row").first()).toHaveAttribute("data-event-id", firstID ?? "");
   await expect(page.locator(".pagination-end")).toContainText("End of matching events");
+
+  // The tail line marks the newest edge; Load newer polls beyond the top
+  // row and reports honestly when nothing newer has arrived.
+  await expect(page.locator("#history-tail")).toBeVisible();
+  await page.getByRole("button", { name: "Load newer" }).click();
+  await expect(page.locator("#history-update-status")).toContainText(
+    "No newer events yet.",
+  );
+  await expect(page.locator(".log-row")).toHaveCount(220);
+  await expect(page.getByRole("button", { name: "Load newer" })).toBeVisible();
+});
+
+test("History filtering and pagination work without JavaScript", async ({ browser }) => {
+  const context = await browser.newContext({ javaScriptEnabled: false });
+  const page = await context.newPage();
+  await page.goto("/login");
+  await page.locator("#username").fill(administratorUsername);
+  await page.locator("#password").fill(administratorPassword);
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await expect(page).toHaveURL(/\/logs\?.*mode=history/);
+  await expect(page.locator(".log-row")).toHaveCount(200);
+
+  // Named checkbox groups submit as repeated parameters the server accepts.
+  await page.locator("#level-info").uncheck();
+  await page.locator("#stream-stdout").uncheck();
+  await page.locator("#contains-filter").fill("needle-hostile");
+  await page.getByRole("button", { name: "Apply filters" }).click();
+  await expect(page.locator(".log-row")).toHaveCount(1);
+  await expect(page.locator(".row-message")).toContainText("needle-hostile");
+  await context.close();
 });
 
 test("inline details remain hostile text and preserve focus and clipboard content", async ({
@@ -281,7 +311,7 @@ test("Live pause, pending, clear-view, filters, reconnect, focus, and safe rende
 }) => {
   await trackEventSources(page);
   await login(page);
-  await page.getByRole("tab", { name: "Live" }).click();
+  await page.locator(".mode-switch").getByRole("link", { name: "Live" }).click();
   await expect(page).toHaveURL(/mode=live/);
   await expect(page.locator("[data-live-status]")).toHaveText("Live");
   await expect(page.locator("[data-live-empty]")).toBeVisible();
@@ -317,9 +347,9 @@ test("Live pause, pending, clear-view, filters, reconnect, focus, and safe rende
   await page.getByRole("button", { name: "Clear view" }).click();
   await expect(page.locator("#live-rows .log-row")).toHaveCount(0);
   await expect(page.getByText(/Persisted logs were not deleted/)).toBeAttached();
-  await page.getByRole("tab", { name: "History" }).click();
+  await page.locator(".mode-switch").getByRole("link", { name: "History" }).click();
   await expect(page.locator(".log-row").filter({ hasText: "paused-three" })).toHaveCount(1);
-  await page.getByRole("tab", { name: "Live" }).click();
+  await page.locator(".mode-switch").getByRole("link", { name: "Live" }).click();
   await expect(page.locator("[data-live-status]")).toHaveText("Live");
 
   await page.locator("#live-contains-filter").fill("filter-match");
@@ -339,7 +369,7 @@ test("Live pause, pending, clear-view, filters, reconnect, focus, and safe rende
 test("Live enforces rendered and pending caps and does not steal scroll", async ({ page }) => {
   test.setTimeout(90_000);
   await login(page);
-  await page.getByRole("tab", { name: "Live" }).click();
+  await page.locator(".mode-switch").getByRole("link", { name: "Live" }).click();
   await expect(page.locator("[data-live-status]")).toHaveText("Live");
 
   let delivered = 0;

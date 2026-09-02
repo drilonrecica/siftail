@@ -182,6 +182,15 @@ type EventErrorView struct {
 	RequestID string
 }
 
+// ModeSwitchView renders the shared History|Live segmented control. Because
+// switching modes navigates, it uses links with aria-current, never tab
+// roles (DESIGN.md §8.1).
+type ModeSwitchView struct {
+	HistoryURL string
+	LiveURL    string
+	Active     string
+}
+
 type HistoryView struct {
 	CanonicalURL   string
 	ExportURL      string
@@ -214,11 +223,19 @@ type HistoryView struct {
 	LoadedLabel    string
 	HasMore        bool
 	NextURL        string
+	PrevURL        string
+	GoLiveURL      string
 	Error          string
 	ErrorRequestID string
 	Announcement   string
 	ExportFilters  []DetailField
 	ExportError    string
+}
+
+func (v HistoryView) ModeSwitch() ModeSwitchView {
+	return ModeSwitchView{
+		HistoryURL: v.CanonicalURL, LiveURL: "/logs?mode=live", Active: "history",
+	}
 }
 
 type LiveView struct {
@@ -232,6 +249,12 @@ type LiveView struct {
 	LevelsValue   string
 	StreamsValue  string
 	Contains      string
+}
+
+func (v LiveView) ModeSwitch() ModeSwitchView {
+	return ModeSwitchView{
+		HistoryURL: v.HistoryURL, LiveURL: v.CanonicalURL, Active: "live",
+	}
 }
 
 type SourcesView struct {
@@ -501,6 +524,10 @@ func (r *Renderer) HistoryRegion(w http.ResponseWriter, status int, view History
 
 func (r *Renderer) HistoryAppend(w http.ResponseWriter, status int, view HistoryView) error {
 	return r.render(w, status, "history-append.html", view)
+}
+
+func (r *Renderer) HistoryPrepend(w http.ResponseWriter, status int, view HistoryView) error {
+	return r.render(w, status, "history-prepend.html", view)
 }
 
 func (r *Renderer) HistoryError(w http.ResponseWriter, status int, view HistoryView) error {

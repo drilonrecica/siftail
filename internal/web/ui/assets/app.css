@@ -711,7 +711,35 @@ code {
   border-bottom: 1px solid var(--border-subtle);
 }
 
+/* The filter disclosure is collapsible at every width; its summary line
+   names the active scope so a collapsed bar never hides state. */
 .history-filter-disclosure > summary {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  cursor: pointer;
+  user-select: none;
+}
+
+.history-filter-disclosure > summary:hover {
+  background: var(--surface-hover);
+}
+
+.filter-summary-title {
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+.filter-summary-scope {
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.history-filter-disclosure[open] .filter-summary-scope {
   display: none;
 }
 
@@ -1038,13 +1066,14 @@ code {
 
 .log-row {
   display: grid;
-  grid-template-columns: 2rem 8.5rem 5.25rem minmax(8rem, 0.8fr) minmax(12rem, 3fr) 4.5rem;
+  grid-template-columns: 2rem 8.5rem 3.5rem minmax(8rem, 0.8fr) minmax(12rem, 3fr) 4.5rem;
   align-items: baseline;
   gap: var(--space-3);
   padding: var(--space-2) var(--space-3);
   border-bottom: 1px solid var(--border-subtle);
-  font-family: ui-monospace, "SFMono-Regular", Consolas, "Liberation Mono", monospace;
-  font-size: 0.86rem;
+  font-family: var(--font-mono);
+  font-size: var(--text-log);
+  font-variant-numeric: tabular-nums;
 }
 
 .event-toggle {
@@ -1272,29 +1301,72 @@ code {
   white-space: nowrap;
 }
 
-.mode-tabs {
+.mode-switch {
   display: flex;
   gap: var(--space-1);
   padding: var(--space-2);
   border-bottom: 1px solid var(--border-subtle);
 }
 
-.mode-tabs a,
-.mode-tabs span {
+.mode-switch a {
   padding: var(--space-2) var(--space-4);
   border-radius: var(--radius-sm);
   color: var(--text-secondary);
+  font-size: var(--text-sm);
+  font-weight: 500;
   text-decoration: none;
 }
 
-.mode-tabs [aria-selected="true"] {
-  background: var(--surface-selected);
+.mode-switch a:hover {
+  background: var(--surface-hover);
   color: var(--text-primary);
-  font-weight: 700;
 }
 
-.mode-tabs [aria-disabled="true"] {
-  color: var(--text-muted);
+.mode-switch a[aria-current="page"] {
+  background: var(--surface-selected);
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+/* The tail line marks the newest edge of a log list (DESIGN.md §12.6). It
+   is a functional landmark: quiet accent rules with the newest-direction
+   actions, never animated. */
+.tail-line {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 2.5rem;
+  padding: 0 var(--space-3);
+}
+
+.tail-line-rule {
+  flex: 1;
+  height: 1px;
+  background: color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+.tail-line:focus {
+  outline: none;
+}
+
+.tail-action {
+  min-height: 1.9rem;
+  padding: var(--space-1) var(--space-3);
+  border: 0;
+  border-radius: var(--radius-sm);
+  color: var(--accent);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+button.tail-action {
+  background: transparent;
+}
+
+.tail-action:hover {
+  background: var(--surface-hover);
+  color: var(--accent-hover);
 }
 
 .empty-state {
@@ -1695,7 +1767,7 @@ code {
   }
 
   .log-row {
-    grid-template-columns: 2rem 7.5rem 4.75rem 1fr;
+    grid-template-columns: 2rem 7.5rem 3.5rem 1fr;
   }
 
   .row-source {
@@ -1737,13 +1809,6 @@ code {
 
   .audit-filters {
     grid-template-columns: minmax(0, 1fr);
-  }
-
-  .history-filter-disclosure > summary {
-    display: list-item;
-    margin: var(--space-3);
-    cursor: pointer;
-    font-weight: 700;
   }
 
   .history-form,

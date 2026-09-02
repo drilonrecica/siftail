@@ -169,14 +169,19 @@
     const requested = button.dataset.values === "*"
       ? null
       : new Set(button.dataset.values.split(","));
-    const checkboxes = form.querySelectorAll(`[data-list-filter="${name}"]`);
+    // History uses plain named checkboxes; Live still serializes through a
+    // hidden CSV input until its rebuild.
+    const checkboxes = form.querySelectorAll(
+      `[data-list-filter="${name}"], input[type="checkbox"][name="${name}"]`,
+    );
     checkboxes.forEach((checkbox) => {
       checkbox.checked = requested === null || requested.has(checkbox.value);
     });
     const hidden = form.querySelector(`[data-list-value="${name}"]`);
-    if (!hidden) return;
-    hidden.value = requested === null ? "" : Array.from(requested).join(",");
-    hidden.dispatchEvent(new Event("change", { bubbles: true }));
+    if (hidden) {
+      hidden.value = requested === null ? "" : Array.from(requested).join(",");
+    }
+    form.dispatchEvent(new Event("change", { bubbles: true }));
   });
 
   document.addEventListener("submit", (event) => {
@@ -238,14 +243,27 @@
     if (count) count.textContent = String(rows.length);
     const label = document.querySelector("[data-loaded-label]");
     if (label) label.textContent = rows.length === 1 ? "event" : "events";
-    if (rows.length >= 1000) {
-      document.querySelector("#history-pagination")?.remove();
-      document.querySelector("[data-more-summary]")?.remove();
+    if (trimmed) {
+      // The cap removed the newest loaded rows from the top of the list. The
+      // tail line becomes the recovery path back to the newest page of this
+      // query; pagination in the older direction stays available.
+      const tail = document.querySelector("#history-tail");
+      if (tail && !tail.querySelector("[data-trim-recovery]")) {
+        const canonical = tail.dataset.canonicalUrl || "/logs";
+        const recover = document.createElement("a");
+        recover.className = "tail-action";
+        recover.href = canonical;
+        recover.textContent = "Return to newest events";
+        recover.setAttribute("data-trim-recovery", "");
+        tail.querySelectorAll(".tail-action, #load-newer").forEach(
+          (action) => action.remove(),
+        );
+        tail.insertBefore(recover, tail.lastElementChild);
+      }
       const status = document.querySelector("#history-update-status");
       if (status) {
-        status.textContent = trimmed
-          ? "Browser row limit reached; earlier loaded rows were removed. Refine the filters to inspect another interval."
-          : "Browser row limit reached. Refine the filters to inspect another interval.";
+        status.textContent =
+          "Browser row limit reached; the newest loaded rows were removed. Use the tail line to return to the newest events.";
       }
     }
   };
@@ -257,11 +275,57 @@
     });
   };
 
+  // Native datetime-local pickers for the UTC range fields. The named UTC
+  // text input stays authoritative (and is the no-JS form); the picker is a
+  // synchronized convenience view in the browser's local timezone.
+  const enhanceRangeInputs = (root) => {
+    root.querySelectorAll("input[data-utc-range]").forEach((utcInput) => {
+      if (utcInput.dataset.rangeEnhanced) return;
+      utcInput.dataset.rangeEnhanced = "true";
+      const parsed = new Date(utcInput.value);
+      if (Number.isNaN(parsed.getTime())) return;
+      const picker = document.createElement("input");
+      picker.type = "datetime-local";
+      picker.step = "1";
+      picker.setAttribute("aria-label", "Local time picker");
+      const toLocalValue = (date) => {
+        const shifted = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
+        return shifted.toISOString().slice(0, 19);
+      };
+      picker.value = toLocalValue(parsed);
+      picker.addEventListener("change", () => {
+        const local = new Date(picker.value);
+        if (Number.isNaN(local.getTime())) return;
+        utcInput.value = local.toISOString();
+        utcInput.dispatchEvent(new Event("change", { bubbles: true }));
+      });
+      utcInput.hidden = true;
+      utcInput.insertAdjacentElement("afterend", picker);
+      utcInput.addEventListener("change", () => {
+        const value = new Date(utcInput.value);
+        if (!Number.isNaN(value.getTime())) picker.value = toLocalValue(value);
+      });
+    });
+  };
+
+  // Reflect real request state on the History region (DESIGN.md §23.2).
+  document.addEventListener("htmx:beforeRequest", (event) => {
+    const region = document.querySelector("#history-region");
+    if (region && region.contains(event.detail.elt)) {
+      region.setAttribute("aria-busy", "true");
+    }
+  });
+  document.addEventListener("htmx:afterRequest", () => {
+    document.querySelector("#history-region")?.setAttribute("aria-busy", "false");
+  });
+
   localizeTimes(document);
   prepareResponsiveHistory(document);
+  enhanceRangeInputs(document);
   document.addEventListener("htmx:afterSwap", (event) => {
     localizeTimes(event.target);
     prepareResponsiveHistory(event.target);
+    enhanceRangeInputs(event.target);
     updateHistoryCount();
     if (event.target.matches?.(".event-detail-slot")) {
       const row = event.target.closest(".log-row");
@@ -272,11 +336,14 @@
       }
       event.target.querySelector(".event-detail")?.focus({ preventScroll: true });
     }
-    if (
-      event.detail.requestConfig?.elt?.id === "load-older" &&
-      !document.querySelector("#load-older")
-    ) {
+    const requester = event.detail.requestConfig?.elt?.id;
+    if (requester === "load-older" && !document.querySelector("#load-older")) {
       document.querySelector(".result-summary")?.focus({ preventScroll: true });
+    }
+    if (requester === "load-newer") {
+      const replacement = document.querySelector("#load-newer") ||
+        document.querySelector("#history-tail");
+      replacement?.focus({ preventScroll: true });
     }
   });
 

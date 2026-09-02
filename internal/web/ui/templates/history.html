@@ -1,9 +1,6 @@
 {{define "history-region.html"}}
-<section id="history-region" class="workspace-panel history-region" aria-labelledby="history-tab" aria-busy="false">
-  <div class="mode-tabs" role="tablist" aria-label="Log mode">
-    <a id="history-tab" role="tab" aria-selected="true" href="{{.CanonicalURL}}">History</a>
-    <a id="live-tab" role="tab" aria-selected="false" href="/logs?mode=live">Live</a>
-  </div>
+<section id="history-region" class="workspace-panel history-region" aria-label="History" aria-busy="false">
+  {{template "mode-switch.html" .ModeSwitch}}
   {{if .Error}}
   <div class="history-error" role="alert">
     <h2>Logs could not be loaded</h2>
@@ -12,7 +9,10 @@
   </div>
   {{else}}
   <details class="history-filter-disclosure" open>
-  <summary>Filters</summary>
+  <summary>
+    <span class="filter-summary-title">Filters</span>
+    <span class="filter-summary-scope">{{.SourceSummary}} · {{.RangeSummary}}</span>
+  </summary>
   <form id="history-filter-form" class="history-form" method="get" action="/logs"
         hx-get="/logs/rows" hx-target="#history-region" hx-swap="outerHTML show:none"
         hx-trigger="change, input changed delay:400ms from:input[data-text-filter], submit"
@@ -20,8 +20,6 @@
     <input type="hidden" name="mode" value="history">
     <input type="hidden" name="direction" value="older">
     <input type="hidden" name="limit" value="200">
-    <input type="hidden" name="levels" value="{{.LevelsValue}}" data-list-value="levels">
-    <input type="hidden" name="streams" value="{{.StreamsValue}}" data-list-value="streams">
     <fieldset class="filter-group source-filters">
       <legend>Source</legend>
       <label>Server
@@ -62,10 +60,10 @@
         <button type="button" data-focus-range>Custom</button>
       </div>
       <label>From (UTC)
-        <input id="from-filter" name="from" value="{{.From}}" inputmode="text" required aria-describedby="range-help">
+        <input id="from-filter" name="from" value="{{.From}}" inputmode="text" required aria-describedby="range-help" data-utc-range>
       </label>
       <label>To (UTC)
-        <input id="to-filter" name="to" value="{{.To}}" inputmode="text" required aria-describedby="range-help">
+        <input id="to-filter" name="to" value="{{.To}}" inputmode="text" required aria-describedby="range-help" data-utc-range>
       </label>
       <p id="range-help" class="field-help">Absolute UTC range, inclusive From and exclusive To; maximum 31 days.</p>
     </fieldset>
@@ -77,13 +75,13 @@
         <button type="button" data-choice-preset="levels" data-values="*">All</button>
       </div>
       <div class="choice-list">
-        {{range .Levels}}<label for="{{.ID}}"><input id="{{.ID}}" type="checkbox" value="{{.Value}}" data-list-filter="levels"{{if .Checked}} checked{{end}}> <span class="severity severity-{{.Value}}">{{.Label}}</span></label>{{end}}
+        {{range .Levels}}<label for="{{.ID}}"><input id="{{.ID}}" type="checkbox" name="levels" value="{{.Value}}"{{if .Checked}} checked{{end}}> <span class="severity severity-{{.Value}}">{{.Label}}</span></label>{{end}}
       </div>
     </fieldset>
     <fieldset class="filter-group choice-filters">
       <legend>Streams</legend>
       <div class="choice-list">
-        {{range .Streams}}<label for="{{.ID}}"><input id="{{.ID}}" type="checkbox" value="{{.Value}}" data-list-filter="streams"{{if .Checked}} checked{{end}}> {{.Label}}</label>{{end}}
+        {{range .Streams}}<label for="{{.ID}}"><input id="{{.ID}}" type="checkbox" name="streams" value="{{.Value}}"{{if .Checked}} checked{{end}}> {{.Label}}</label>{{end}}
       </div>
     </fieldset>
     <fieldset class="filter-group text-filters">
@@ -137,7 +135,7 @@
     <form method="post" action="{{.ExportURL}}" data-export-form>
       <h2 id="export-dialog-title">Export matching History</h2>
       <p>This deliberate download includes every matching event in canonical History order, not only the rows currently loaded.</p>
-      <dl class="export-scope">
+      <dl class="export-scope" tabindex="0" aria-label="Export scope">
         <div><dt>Source scope</dt><dd>{{.SourceSummary}}</dd></div>
         <div><dt>Absolute range</dt><dd><time datetime="{{.From}}">{{.From}}</time> to <time datetime="{{.To}}">{{.To}}</time></dd></div>
         {{range .ExportFilters}}<div><dt>{{.Label}}</dt><dd>{{.Value}}</dd></div>{{end}}
@@ -160,6 +158,7 @@
       </div>
     </form>
   </dialog>
+  {{template "history-tail" .}}
   <div id="history-rows" class="log-list" tabindex="-1">
     {{if .Rows}}
       {{range .Rows}}{{template "history-row" .}}{{end}}
@@ -176,6 +175,19 @@
 </section>
 {{end}}
 
+{{define "history-tail"}}
+<div id="history-tail" class="tail-line" tabindex="-1" data-canonical-url="{{.CanonicalURL}}">
+  <span class="tail-line-rule" aria-hidden="true"></span>
+  {{if .PrevURL}}<button id="load-newer" class="button button-quiet tail-action" type="button"
+          hx-get="{{.PrevURL}}" hx-target="#history-tail"
+          hx-swap="outerHTML" hx-disabled-elt="this">
+    Load newer<span class="htmx-indicator" role="status"> Loading…</span>
+  </button>{{end}}
+  {{if .GoLiveURL}}<a class="tail-action tail-go-live" href="{{.GoLiveURL}}">Go live</a>{{end}}
+  <span class="tail-line-rule" aria-hidden="true"></span>
+</div>
+{{end}}
+
 {{define "history-row"}}
 <article class="log-row level-{{.Level}}" data-event-id="{{.ID}}">
   <button class="event-toggle" type="button" aria-label="Show details for event {{.ID}}"
@@ -183,7 +195,7 @@
           hx-get="{{.DetailURL}}" hx-target="#{{.DetailID}}" hx-swap="innerHTML"
           hx-disabled-elt="this">›</button>
   <time datetime="{{.TimestampUTC}}" data-local-time{{if .ShowDate}} data-show-date{{end}}>{{.Timestamp}}</time>
-  <span class="severity severity-{{.Level}}">{{.Level}}</span>
+  {{template "severity.html" .Level}}
   <span class="row-source">{{.Source}}</span>
   <span class="row-message">{{.Message}}</span>
   <span class="row-stream">{{.Stream}}</span>
@@ -192,7 +204,7 @@
 {{end}}
 
 {{define "history-pagination"}}
-<div id="history-pagination" class="history-pagination">
+<div id="history-pagination" class="pagination history-pagination">
   {{if .HasMore}}
   <button id="load-older" class="button button-quiet" type="button"
           hx-get="{{.NextURL}}" hx-target="#history-pagination"
@@ -209,6 +221,12 @@
 {{define "history-append.html"}}
 <div hx-swap-oob="beforeend:#history-rows">{{range .Rows}}{{template "history-row" .}}{{end}}</div>
 {{template "history-pagination" .}}
+<p id="history-update-status" hx-swap-oob="outerHTML" class="visually-hidden" role="status" aria-live="polite">{{.Announcement}}</p>
+{{end}}
+
+{{define "history-prepend.html"}}
+{{template "history-tail" .}}
+{{if .Rows}}<div hx-swap-oob="afterbegin:#history-rows">{{range .Rows}}{{template "history-row" .}}{{end}}</div>{{end}}
 <p id="history-update-status" hx-swap-oob="outerHTML" class="visually-hidden" role="status" aria-live="polite">{{.Announcement}}</p>
 {{end}}
 

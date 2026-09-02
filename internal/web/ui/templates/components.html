@@ -3,6 +3,11 @@
 
 {{define "severity.html"}}<span class="severity severity-{{.}}">{{severityCode .}}</span>{{end}}
 
+{{define "mode-switch.html"}}<div class="mode-switch" aria-label="Log mode">
+  <a href="{{.HistoryURL}}"{{if eq .Active "history"}} aria-current="page"{{end}}>History</a>
+  <a href="{{.LiveURL}}"{{if eq .Active "live"}} aria-current="page"{{end}}>Live</a>
+</div>{{end}}
+
 {{define "empty-state.html"}}<div class="empty-state">
   <h2>{{.Title}}</h2>
   <p>{{.Message}}</p>

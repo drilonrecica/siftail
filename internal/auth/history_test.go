@@ -123,8 +123,8 @@ func TestHistoryRowsMapsAllFiltersAndEscapesHostileEvents(t *testing.T) {
 	for _, want := range []string{
 		`data-event-id="1"`,
 		`value="1" selected`,
-		`value="error" data-list-filter="levels" checked`,
-		`value="stderr" data-list-filter="streams" checked`,
+		`name="levels" value="error" checked`,
+		`name="streams" value="stderr" checked`,
 		`value="request-1"`,
 		`API &lt;prod&gt;/Web`,
 		`&lt;script&gt;alert(1)&lt;/script&gt; Error 100%_\ Café`,

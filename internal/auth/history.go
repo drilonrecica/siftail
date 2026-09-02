@@ -54,10 +54,21 @@ func (b *Browser) historyRows(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	prependValues, hasPrepend := values["prepend"]
+	if hasPrepend && (len(prependValues) != 1 || prependValues[0] != "1" || hasAppend) {
+		historyErrorHeaders(w)
+		_ = b.ui.HistoryError(w, http.StatusBadRequest, webui.HistoryView{
+			Error: "Check the time range and filters.",
+		})
+		return
+	}
 	appendPage := hasAppend
+	prependPage := hasPrepend
 	values.Del("append")
+	values.Del("prepend")
 	query, err := logs.ParseHistoryQuery(values, b.now())
-	if err != nil || (appendPage && query.Cursor == "") {
+	if err != nil || (appendPage && query.Cursor == "") ||
+		(prependPage && (query.Cursor == "" || query.Direction != logs.DirectionNewer)) {
 		view := webui.HistoryView{
 			CanonicalURL: "/logs",
 			Error:        "Check the time range and filters.",
@@ -66,7 +77,7 @@ func (b *Browser) historyRows(w http.ResponseWriter, r *http.Request) {
 		_ = b.ui.HistoryError(w, http.StatusBadRequest, view)
 		return
 	}
-	view, err := b.historyView(r, query, appendPage)
+	view, err := b.historyView(r, query, appendPage || prependPage)
 	if err != nil {
 		status, message, requestID := historyHTTPError(r, err)
 		view = webui.HistoryView{
@@ -76,6 +87,12 @@ func (b *Browser) historyRows(w http.ResponseWriter, r *http.Request) {
 		}
 		historyErrorHeaders(w)
 		_ = b.ui.HistoryError(w, status, view)
+		return
+	}
+	if prependPage {
+		if err := b.ui.HistoryPrepend(w, http.StatusOK, view); err != nil {
+			http.Error(w, "Logs are temporarily unavailable.", http.StatusInternalServerError)
+		}
 		return
 	}
 	if appendPage {
@@ -115,13 +132,21 @@ func (b *Browser) historyView(
 	if err != nil {
 		return webui.HistoryView{}, err
 	}
-	view := buildHistoryView(query, page, catalog)
+	view := buildHistoryView(query, page, catalog, b.now())
 	if appendPage {
 		noun := "events"
 		if len(view.Rows) == 1 {
 			noun = "event"
 		}
-		view.Announcement = fmt.Sprintf("%d additional %s loaded.", len(view.Rows), noun)
+		if query.Direction == logs.DirectionNewer {
+			if len(view.Rows) == 0 {
+				view.Announcement = "No newer events yet."
+			} else {
+				view.Announcement = fmt.Sprintf("%d newer %s loaded.", len(view.Rows), noun)
+			}
+		} else {
+			view.Announcement = fmt.Sprintf("%d additional %s loaded.", len(view.Rows), noun)
+		}
 	}
 	return view, nil
 }
@@ -130,6 +155,7 @@ func buildHistoryView(
 	query logs.HistoryQuery,
 	page logs.HistoryPage,
 	catalog logs.SourceCatalog,
+	now time.Time,
 ) webui.HistoryView {
 	from := time.UnixMicro(query.FromUS).UTC()
 	to := time.UnixMicro(query.ToUS).UTC()
@@ -206,12 +232,36 @@ func buildHistoryView(
 			Message:      message,
 		}
 	}
-	if page.HasMore {
+	if page.HasMore && query.Direction == logs.DirectionOlder {
 		next := query
 		next.Cursor = page.NextCursor
 		values := next.CanonicalValues(true)
 		values.Set("append", "1")
 		view.NextURL = "/logs/rows?" + values.Encode()
+	}
+	// The tail line's Load newer control (DESIGN.md §12.6). A newer-direction
+	// page continues its own traversal while more rows exist, then keeps
+	// polling from its newest row; an older-direction page polls from its
+	// newest row. An empty poll reuses the same cursor.
+	newerCursor := page.PrevCursor
+	if query.Direction == logs.DirectionNewer {
+		if page.HasMore {
+			newerCursor = page.NextCursor
+		} else if newerCursor == "" {
+			newerCursor = query.Cursor
+		}
+	}
+	if newerCursor != "" {
+		newer := query
+		newer.Direction = logs.DirectionNewer
+		newer.Cursor = newerCursor
+		values := newer.CanonicalValues(true)
+		values.Set("prepend", "1")
+		view.PrevURL = "/logs/rows?" + values.Encode()
+	}
+	// Offer the Go live jump when the queried range reaches the present.
+	if time.UnixMicro(query.ToUS).After(now.Add(-5 * time.Minute)) {
+		view.GoLiveURL = "/logs?mode=live"
 	}
 	return view
 }
