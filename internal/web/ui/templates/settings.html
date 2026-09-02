@@ -1,10 +1,6 @@
 {{define "settings.html"}}
 <section class="workspace-panel settings-workspace" aria-labelledby="retention-settings-heading">
-  {{if .Notice}}<div class="notice notice-info" role="status" tabindex="-1" data-settings-notice>
-    <h2>Saved</h2>
-    <p>{{.Notice}}</p>
-  </div>{{end}}
-  {{if .Error}}<div class="form-error" role="alert">
+    {{if .Error}}<div class="form-error" role="alert">
     <p>{{.Error}}</p>
     {{if .ErrorRequestID}}<p>Request ID: <code>{{.ErrorRequestID}}</code></p>{{end}}
   </div>{{end}}

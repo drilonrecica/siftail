@@ -1,8 +1,5 @@
 {{define "status.html"}}
 <section class="workspace-panel status-workspace" aria-label="Siftail status">
-  {{if .CheckNotice}}<div class="notice {{if .CheckFailed}}notice-warning{{else}}notice-info{{end}}" role="status">
-    <p>{{.CheckNotice}}</p>
-  </div>{{end}}
   {{if .StorageWarning}}<div class="notice notice-warning" role="alert">
     <p>{{.StorageWarning}}</p>
   </div>{{end}}

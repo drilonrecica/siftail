@@ -3,7 +3,6 @@
   <header class="catalog-heading">
     <div><h2 id="servers-title">Servers</h2><p>A token binds every accepted event to exactly one trusted Server.</p></div>
   </header>
-  {{if .Notice}}<div class="notice notice-info source-notice" role="status"><p>{{.Notice}}</p></div>{{end}}
   {{if .Error}}<div class="history-error" role="alert"><strong>{{.Error}}</strong>{{if .ErrorRequestID}}<span>Request ID: <code>{{.ErrorRequestID}}</code></span>{{end}}</div>{{end}}
   <div class="server-management-grid">
     <section>
@@ -37,7 +36,6 @@
   <header class="catalog-heading">
     <div><a href="/servers">← All Servers</a><h2 id="server-title">{{.Name}}</h2>{{if .Hostname}}<p>{{.Hostname}}</p>{{end}}</div>
   </header>
-  {{if .Notice}}<div class="notice notice-info source-notice" role="status"><p>{{.Notice}}</p></div>{{end}}
   <div class="server-management-grid">
     <section>
       <h3>Ingestion tokens</h3>

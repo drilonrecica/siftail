@@ -10,7 +10,7 @@
       <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
       <label for="backup-output-path">Output path</label>
       <input id="backup-output-path" name="output_path" type="text" maxlength="4096"
-        placeholder="/backups/siftail-full.sqlite" required autocomplete="off" autofocus
+        placeholder="/backups/siftail-full.sqlite" required autocomplete="off"{{if ne .State "running"}} autofocus{{end}}
         {{if eq .State "running"}}disabled{{end}}>
       <button class="button button-primary" type="submit" {{if eq .State "running"}}disabled{{end}}>Create verified full backup</button>
     </form>

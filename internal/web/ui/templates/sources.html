@@ -7,7 +7,6 @@
     </div>
     {{if .Rows}}<p>{{.LoadedCount}} sources on this page</p>{{end}}
   </header>
-  {{if .Notice}}<div class="notice notice-info source-notice" role="status"><p>{{.Notice}}</p></div>{{end}}
   {{if .Error}}
   <div class="history-error" role="alert">
     <strong>{{.Error}}</strong>
@@ -63,7 +62,6 @@
       <a class="button" href="{{.LogsURL}}">Open logs</a>
     </div>
   </header>
-  {{if .Notice}}<div class="notice notice-info source-notice" role="status"><p>{{.Notice}}</p></div>{{end}}
   {{if .CleanupEligible}}<div class="notice notice-info">
     <p>This source has been inactive for at least 90 days. Retained logs or administrative metadata may still protect it from cleanup.</p>
   </div>{{end}}
