@@ -54,7 +54,8 @@ func TestHistoryPageRedirectsToAbsoluteCanonicalDefault(t *testing.T) {
 		pageResponse.Header().Get("Cache-Control") != "no-store" ||
 		!strings.Contains(body, `id="history-filter-form"`) ||
 		!strings.Contains(body, `hx-history="false"`) ||
-		!strings.Contains(body, `No log sources have been discovered yet`) {
+		!strings.Contains(body, `No log sources yet`) ||
+		!strings.Contains(body, `href="/servers"`) {
 		t.Fatalf("History page = %d %#v %q", pageResponse.Code, pageResponse.Header(), body)
 	}
 }

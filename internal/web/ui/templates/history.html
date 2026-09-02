@@ -163,10 +163,7 @@
     {{if .Rows}}
       {{range .Rows}}{{template "history-row" .}}{{end}}
     {{else}}
-      <div class="empty-state">
-        <h2>{{.EmptyTitle}}</h2>
-        <p>{{.EmptyMessage}}</p>
-      </div>
+      {{template "empty-state.html" .EmptyState}}
     {{end}}
   </div>
   {{template "history-pagination" .}}

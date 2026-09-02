@@ -45,10 +45,7 @@
     {{else}}<span class="pagination-end">End of source catalog</span>{{end}}
   </nav>
   {{else}}
-  <div class="empty-state">
-    <h2>No sources discovered</h2>
-    <p>Sources appear after an authenticated ingestion request commits its first event.</p>
-  </div>
+  {{template "empty-state.html" .EmptyState}}
   {{end}}
 </section>
 {{end}}

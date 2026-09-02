@@ -917,21 +917,23 @@ control, not prose.
 > Fluent Bit log drain at Siftail. Logs appear here the moment the first
 > event commits.
 
-Actions: **Create server** (→ `/servers`); **View setup guide** (→ the
-token flow documentation section on `/servers`).
+Action: **Create server** (→ `/servers`, which carries the token and
+setup-guide flow).
 
 ### 24.2 No logs in range
 
-> No logs arrived for this source during the selected time range.
+> No logs arrived during this time range.
 
-Actions: **Last 24 hours** (applies the preset); **Switch source**.
+Action: **Last 24 hours** (applies the preset). Source switching stays in
+the filters and command palette.
 
 ### 24.3 No filter match
 
 > No logs matched these filters. Try a longer time range or remove a message
 > filter.
 
-Action: **Clear text filters**.
+Actions: **Clear text filters** (when text filters are active);
+**Last 24 hours**.
 
 ### 24.4 Empty live view
 

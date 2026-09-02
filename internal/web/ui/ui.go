@@ -234,6 +234,7 @@ type HistoryView struct {
 	Rows           []HistoryRowView
 	EmptyTitle     string
 	EmptyMessage   string
+	EmptyActions   []ActionLink
 	LoadedCount    int
 	LoadedLabel    string
 	HasMore        bool
@@ -250,6 +251,12 @@ type HistoryView struct {
 func (v HistoryView) ModeSwitch() ModeSwitchView {
 	return ModeSwitchView{
 		HistoryURL: v.CanonicalURL, LiveURL: "/logs?mode=live", Active: "history",
+	}
+}
+
+func (v HistoryView) EmptyState() EmptyStateView {
+	return EmptyStateView{
+		Title: v.EmptyTitle, Message: v.EmptyMessage, Actions: v.EmptyActions,
 	}
 }
 
@@ -279,6 +286,16 @@ type SourcesView struct {
 	Notice         string
 	Error          string
 	ErrorRequestID string
+}
+
+func (v SourcesView) EmptyState() EmptyStateView {
+	return EmptyStateView{
+		Title: "No log sources yet",
+		Message: "Create a server, generate its ingestion token, and point a " +
+			"Coolify or Fluent Bit log drain at Siftail. Sources appear here " +
+			"the moment the first event commits.",
+		Actions: []ActionLink{{Label: "Create server", URL: "/servers"}},
+	}
 }
 
 type SourceRowView struct {

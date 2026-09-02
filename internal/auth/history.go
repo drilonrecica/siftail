@@ -195,16 +195,46 @@ func buildHistoryView(
 	view.Containers = containerOptions(catalog.Containers, query.ContainerID)
 	view.Levels = levelChoices(query.Levels)
 	view.Streams = streamChoices(query.Streams)
+	// Every empty state offers its next step as a real control
+	// (DESIGN.md §24), so first sign-in leads straight to the setup flow.
 	switch {
 	case len(catalog.Servers) == 0:
-		view.EmptyTitle = "No log sources have been discovered yet"
-		view.EmptyMessage = "Create a server token and connect a Coolify or Fluent Bit log drain."
+		view.EmptyTitle = "No log sources yet"
+		view.EmptyMessage = "Create a server, generate its ingestion token, and " +
+			"point a Coolify or Fluent Bit log drain at Siftail. Logs appear " +
+			"here the moment the first event commits."
+		view.EmptyActions = []webui.ActionLink{
+			{Label: "Create server", URL: "/servers"},
+		}
 	case historyHasFilters(query):
 		view.EmptyTitle = "No logs matched these filters"
 		view.EmptyMessage = "Try a longer time range or remove a message filter."
+		if query.Contains != "" || query.Excludes != "" {
+			cleared := query
+			cleared.Contains = ""
+			cleared.Excludes = ""
+			cleared.Cursor = ""
+			view.EmptyActions = append(view.EmptyActions, webui.ActionLink{
+				Label: "Clear text filters", URL: historyURL(cleared),
+			})
+		}
+		for _, preset := range view.Presets {
+			if preset.Label == "24h" && !preset.Active {
+				view.EmptyActions = append(view.EmptyActions, webui.ActionLink{
+					Label: "Last 24 hours", URL: preset.URL,
+				})
+			}
+		}
 	default:
 		view.EmptyTitle = "No logs arrived during this time range"
-		view.EmptyMessage = "Try the last 24 hours or select another source."
+		view.EmptyMessage = "Try a longer range or select another source."
+		for _, preset := range view.Presets {
+			if preset.Label == "24h" && !preset.Active {
+				view.EmptyActions = append(view.EmptyActions, webui.ActionLink{
+					Label: "Last 24 hours", URL: preset.URL,
+				})
+			}
+		}
 	}
 
 	showDate := to.Sub(from) > 24*time.Hour
