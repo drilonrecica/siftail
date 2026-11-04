@@ -48,8 +48,15 @@ The Dockerfile pins these multi-architecture image indexes:
 
 | Input | Index digest |
 |---|---|
-| `golang:1.25.12-bookworm` | `sha256:ea341baa9bd5ba6784f6d7161ace70544349a6242d54d34a0fbfd2c4d51c9d58` |
+| `golang:1.27.3-bookworm` | `sha256:d9b6a1beb9474adc2a1ce842573639b44b2a0dd49b6669f51d3821baf9ec37c9` |
 | `distroless/cc-debian12:nonroot` | `sha256:fccdbb0a547c14e23fcf4ce8ad62ca5d43b4faae8d22cd292f490fef9946c96e` |
+
+The builder Go release matches `go.mod` (`go 1.27.0`, `toolchain go1.27.3`) and
+CI. It stays on the Debian 12 (bookworm) variant on purpose. The runtime is
+`cc-debian12`, so the binary must not depend on glibc symbols newer than
+Debian 12's glibc 2.36. A trixie builder would break that. The SFT-083 binaries
+require at most `GLIBC_2.34` on both architectures. When Go moves to a new
+release line, the builder moves with it.
 
 The amd64 builder installs no additional packages for an amd64 target. An
 arm64 cross-build uses only the builder-stage
@@ -111,6 +118,23 @@ because this host had no binfmt registration. It became ready in 824 ms and
 the combined emulator/process RSS was 44,420 KiB at readiness and 44,432 KiB
 after ten seconds (31.17 MB cgroup measurement). Those values validate the
 image but are not representative native-arm64 performance measurements.
+
+### SFT-083 toolchain refresh (2026-11-05)
+
+Go 1.27.3, the refreshed modules, and htmx 2.0.11 were rebuilt with Podman
+5.8.7 on the same Fedora x86-64 host. The commands were the ones above, with
+`COMMIT=sft083` and `BUILD_DATE=2026-11-05T00:00:00Z`. The runtime digest was
+not changed.
+
+| Platform | Image store | Binary | Binary SHA-256 |
+|---|---:|---:|---|
+| `linux/amd64` | 38,304,089 B | 13,233,792 B | `9bdd0b8ce76fc515e56fce89b407efcf3e51cfcb4e583ca83a4d746416621775` |
+| `linux/arm64` | 47,812,968 B | 12,226,528 B | `bd61f30942ef9a20e845692a25a28daf7dbdff24fc4103cb698a603d90f09bad` |
+
+`scripts/container-smoke.sh` passed for the amd64 image. The arm64 image was
+built and inspected (an aarch64 ELF that requires at most `GLIBC_2.34`). It was
+not executed because this host had no QEMU emulator. The SFT-050 table above is
+for a different source tree, so it is not a like-for-like size comparison.
 
 ## Runtime dependencies, licensing, and security maintenance
 

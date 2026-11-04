@@ -70,9 +70,12 @@ The name is explained subtly in selected copy: users can **sift through historic
 
 ## Development
 
-The supported Go toolchain is declared by [`go.mod`](go.mod), which is also the
-version source used by CI. CI enables CGO and installs the C compiler required
-by the selected SQLite driver when that driver is introduced in SFT-005.
+The supported Go toolchain is declared by [`go.mod`](go.mod): language version
+`go 1.27.0` and `toolchain go1.27.3`. With the default `GOTOOLCHAIN=auto`, an
+older local Go 1.27 downloads go1.27.3 through the Go module proxy. CI reads the
+same file through `go-version-file`, and the Dockerfile builder is the
+digest-pinned `golang:1.27.3-bookworm` image. Builds need CGO and a C compiler
+for the SQLite driver.
 
 Common local checks:
 
@@ -701,7 +704,7 @@ See [`docs/operations/restores.md`](docs/operations/restores.md).
 
 ### Current dependency rationale
 
-- `github.com/mattn/go-sqlite3` v1.14.48 is the accepted SQLite driver. It
+- `github.com/mattn/go-sqlite3` v1.14.52 is the accepted SQLite driver. It
   bundles SQLite, is MIT licensed, requires CGO and a C toolchain, and adds no
   runtime service. Production images must therefore build explicitly for
   `linux/amd64` and `linux/arm64`. On linux/amd64 with Go 1.25, the initial
@@ -716,11 +719,11 @@ See [`docs/operations/restores.md`](docs/operations/restores.md).
   group/cancellation implementation is linked; binary-size impact has not yet
   been measured. It is maintained by the Go project under the BSD 3-Clause
   license.
-- `golang.org/x/crypto` v0.54.0 provides the reviewed Argon2id implementation;
-  the standard library has no Argon2 password hash. `golang.org/x/term` v0.45.0
+- `golang.org/x/crypto` v0.58.0 provides the reviewed Argon2id implementation;
+  the standard library has no Argon2 password hash. `golang.org/x/term` v0.47.0
   provides no-echo terminal password input. Both are maintained by the Go
   project under BSD 3-Clause licenses. `x/term` brings `golang.org/x/sys`
-  v0.47.0 as its only module dependency; these packages add no runtime service,
+  v0.49.0 as its only module dependency; these packages add no runtime service,
   outbound call, or public network API. On this linux/amd64 Go 1.26.5
   development build, linking the administrator implementation increased the
   unstripped binary from 14,523,440 to 14,757,904 bytes (+234,464 bytes,
@@ -730,8 +733,10 @@ See [`docs/operations/restores.md`](docs/operations/restores.md).
   Password hashing is request-driven and adds no persistent idle allocation.
   Security updates to these modules require ordinary dependency and release
   review.
-- HTMX 2.0.10 is vendored as its exact 51,238-byte minified distribution under
-  the Zero-Clause BSD license. It has no transitive package dependencies and
+- HTMX 2.0.11 is vendored as its exact 52,182-byte minified distribution
+  (`dist/htmx.min.js`, identical in the GitHub release and the npm
+  `htmx.org@2.0.11` package; SHA-384 pinned by `internal/web/ui/ui_test.go`)
+  under the Zero-Clause BSD license. It has no transitive package dependencies and
   is served only as an embedded same-origin asset; the standard library does
   not provide its server-driven fragment interaction model. HTMX adds no Go
   API, production Node runtime, runtime service, outbound request, or idle

@@ -78,7 +78,7 @@ func TestShellTemplateUsesLocalCSPCompatibleAssets(t *testing.T) {
 	body := response.Body.String()
 	for _, want := range []string{
 		`href="/assets/app.css"`,
-		`src="/assets/htmx-2.0.10.min.js"`,
+		`src="/assets/htmx-2.0.11.min.js"`,
 		`src="/assets/app.js"`,
 		`src="/assets/live.js"`,
 		`src="/assets/tokens.js"`,
@@ -499,7 +499,7 @@ func TestEmbeddedAssetsTypesIntegrityAndSafety(t *testing.T) {
 		"live.js":                        "text/javascript; charset=utf-8",
 		"tokens.js":                      "text/javascript; charset=utf-8",
 		"favicon.svg":                    "image/svg+xml",
-		"htmx-2.0.10.min.js":             "text/javascript; charset=utf-8",
+		"htmx-2.0.11.min.js":             "text/javascript; charset=utf-8",
 		"jetbrains-mono-latin.woff2":     "font/woff2",
 		"jetbrains-mono-latin-ext.woff2": "font/woff2",
 	}
@@ -512,7 +512,7 @@ func TestEmbeddedAssetsTypesIntegrityAndSafety(t *testing.T) {
 				response.Header().Get("Content-Type") != contentType {
 				t.Fatalf("asset response = %d %#v", response.Code, response.Header())
 			}
-			immutable := name == "htmx-2.0.10.min.js" ||
+			immutable := name == "htmx-2.0.11.min.js" ||
 				strings.HasSuffix(name, ".woff2")
 			cache := response.Header().Get("Cache-Control")
 			if immutable && !strings.Contains(cache, "immutable") {
@@ -527,12 +527,12 @@ func TestEmbeddedAssetsTypesIntegrityAndSafety(t *testing.T) {
 		})
 	}
 
-	htmx, err := files.ReadFile("assets/htmx-2.0.10.min.js")
+	htmx, err := files.ReadFile("assets/htmx-2.0.11.min.js")
 	if err != nil {
 		t.Fatal(err)
 	}
 	sum := sha512.Sum384(htmx)
-	const wantSHA384 = "1f94ab71fca01e602e4c366984c1ea0492dcdc586cb0a8c6ef0fc2782a4545e49fc015834caa64ccf3fc73e70bb0af95"
+	const wantSHA384 = "d8e6adcd0cb51fe65dfc822b8ebd5372e0c6a8b5de1e16e8a00c8963529d40c2a7af82d9db6937d4604b7582879958e0"
 	if got := hex.EncodeToString(sum[:]); got != wantSHA384 {
 		t.Fatalf("HTMX sha384 = %s", got)
 	}
