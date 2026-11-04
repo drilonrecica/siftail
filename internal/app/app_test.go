@@ -47,6 +47,13 @@ func testConfig(t *testing.T) config.Config {
 	}
 }
 
+// noKeepAliveClient never pools connections. http.DefaultClient can leave a
+// dialed-but-unused connection behind, which net/http treats as active for
+// five seconds and which therefore stalls Server.Shutdown at random.
+var noKeepAliveClient = &http.Client{
+	Transport: &http.Transport{DisableKeepAlives: true},
+}
+
 func freePort(t *testing.T) string {
 	t.Helper()
 	l, err := net.Listen("tcp", "127.0.0.1:0")
@@ -81,7 +88,7 @@ func TestAppStartsListeners(t *testing.T) {
 	waitForServer(t, "http://"+cfg.UIAddr+"/health/live")
 	waitForServer(t, "http://"+cfg.IngestAddr+"/health/live")
 
-	ingestReady, err := http.Get("http://" + cfg.IngestAddr + "/health/ready")
+	ingestReady, err := noKeepAliveClient.Get("http://" + cfg.IngestAddr + "/health/ready")
 	if err != nil {
 		t.Fatalf("ingest readiness request: %v", err)
 	}
@@ -90,7 +97,7 @@ func TestAppStartsListeners(t *testing.T) {
 		t.Fatalf("ingestion router unexpectedly exposes UI readiness: %d", ingestReady.StatusCode)
 	}
 
-	resp, err := http.Get("http://" + cfg.UIAddr + "/health/live")
+	resp, err := noKeepAliveClient.Get("http://" + cfg.UIAddr + "/health/live")
 	if err != nil {
 		t.Fatalf("ui health request: %v", err)
 	}
@@ -576,7 +583,7 @@ func TestAppShutdownTimeout(t *testing.T) {
 	requestDone := make(chan struct{})
 	go func() {
 		defer close(requestDone)
-		_, _ = http.Get("http://" + addr)
+		_, _ = noKeepAliveClient.Get("http://" + addr)
 	}()
 	select {
 	case <-requestStarted:
@@ -627,7 +634,7 @@ func waitForServer(t *testing.T, url string) {
 	t.Helper()
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
-		resp, err := http.Get(url)
+		resp, err := noKeepAliveClient.Get(url)
 		if err == nil {
 			resp.Body.Close()
 			return

@@ -10,7 +10,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -116,9 +119,8 @@ func TestAdministrativeCLIUsesLiveControlSocket(t *testing.T) {
 	}
 	application := app.New(cfg, logger)
 	ctx, cancel := context.WithCancel(context.Background())
-	errCh := make(chan error, 1)
-	go func() { errCh <- application.Run(ctx) }()
-	waitForHTTP(t, "http://"+cfg.UIAddr+"/health/live", nil, &bytes.Buffer{})
+	errCh, appExited := startApplication(ctx, application)
+	waitApplicationReady(t, cancel, cfg.UIAddr, cfg.IngestAddr, dataDir, appExited)
 
 	var stdout, stderr bytes.Buffer
 	if code := run([]string{"server", "create", "--name", "Online"}, &stdout, &stderr); code != 0 {
@@ -184,31 +186,19 @@ func TestRunConfigValidateDoesNotOpenDatabase(t *testing.T) {
 
 func TestServeHandlesSIGTERMAndRemovesControlSocket(t *testing.T) {
 	dataDir := t.TempDir()
-	uiAddr := freeTCPAddr(t)
-	ingestAddr := freeTCPAddr(t)
-
-	cmd := exec.Command(os.Args[0], "-test.run=TestServeProcessHelper")
-	cmd.Env = withoutSiftailEnv(os.Environ())
-	cmd.Env = append(cmd.Env,
-		"GO_WANT_SIFTAIL_SERVE_HELPER=1",
-		"SIFTAIL_DATA_DIR="+dataDir,
-		"SIFTAIL_UI_ADDR="+uiAddr,
-		"SIFTAIL_INGEST_ADDR="+ingestAddr,
-		"SIFTAIL_LOG_LEVEL=error",
-	)
-	var output bytes.Buffer
-	cmd.Stdout = &output
-	cmd.Stderr = &output
-	if err := cmd.Start(); err != nil {
-		t.Fatalf("start serve helper: %v", err)
-	}
-
-	waitForHTTP(t, "http://"+uiAddr+"/health/live", cmd, &output)
-	if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
-		t.Fatalf("send SIGTERM: %v", err)
-	}
-	if err := cmd.Wait(); err != nil {
-		t.Fatalf("serve helper failed: %v\n%s", err, output.String())
+	proc, _, _ := launchServe(t, dataDir, func(uiAddr, ingestAddr string) *exec.Cmd {
+		cmd := exec.Command(os.Args[0], "-test.run=TestServeProcessHelper")
+		cmd.Env = append(withoutSiftailEnv(os.Environ()),
+			"GO_WANT_SIFTAIL_SERVE_HELPER=1",
+			"SIFTAIL_DATA_DIR="+dataDir,
+			"SIFTAIL_UI_ADDR="+uiAddr,
+			"SIFTAIL_INGEST_ADDR="+ingestAddr,
+			"SIFTAIL_LOG_LEVEL=error",
+		)
+		return cmd
+	})
+	if err := proc.terminate(); err != nil {
+		t.Fatalf("serve helper failed: %v\n%s", err, proc.output.String())
 	}
 	if _, err := os.Stat(filepath.Join(dataDir, "siftail-control.sock")); !os.IsNotExist(err) {
 		t.Fatalf("control socket remains after SIGTERM: %v", err)
@@ -235,32 +225,19 @@ func TestDurableIngestionSubprocessSmoke(t *testing.T) {
 	if err := os.Mkdir(dataDir, 0750); err != nil {
 		t.Fatal(err)
 	}
-	uiAddr := freeTCPAddr(t)
-	ingestAddr := freeTCPAddr(t)
-	environment := append(withoutSiftailEnv(os.Environ()),
-		"SIFTAIL_DATA_DIR="+dataDir,
-		"SIFTAIL_UI_ADDR="+uiAddr,
-		"SIFTAIL_INGEST_ADDR="+ingestAddr,
-		"SIFTAIL_INGEST_PUBLIC_URL=http://"+ingestAddr+"/api/v1/ingest",
-		"SIFTAIL_LOG_LEVEL=error",
-	)
-	serve := exec.Command(binary, "serve")
-	serve.Env = environment
-	var processOutput bytes.Buffer
-	serve.Stdout = &processOutput
-	serve.Stderr = &processOutput
-	if err := serve.Start(); err != nil {
-		t.Fatal(err)
-	}
-	waited := false
-	defer func() {
-		if waited {
-			return
-		}
-		_ = serve.Process.Kill()
-		_ = serve.Wait()
-	}()
-	waitForHTTP(t, "http://"+uiAddr+"/health/live", serve, &processOutput)
+	var environment []string
+	serve, uiAddr, ingestAddr := launchServe(t, dataDir, func(uiAddr, ingestAddr string) *exec.Cmd {
+		environment = append(withoutSiftailEnv(os.Environ()),
+			"SIFTAIL_DATA_DIR="+dataDir,
+			"SIFTAIL_UI_ADDR="+uiAddr,
+			"SIFTAIL_INGEST_ADDR="+ingestAddr,
+			"SIFTAIL_INGEST_PUBLIC_URL=http://"+ingestAddr+"/api/v1/ingest",
+			"SIFTAIL_LOG_LEVEL=error",
+		)
+		command := exec.Command(binary, "serve")
+		command.Env = environment
+		return command
+	})
 
 	const administratorPassword = "subprocess-admin-password"
 	adminCommand := exec.Command(binary, "admin", "create", "--username", "SmokeAdmin")
@@ -319,16 +296,22 @@ func TestDurableIngestionSubprocessSmoke(t *testing.T) {
 		t.Fatalf("generated subprocess output: %v %q", err, generatedOutput)
 	}
 
+	// The fixture files carry fixed dates. Shift them so the newest event is
+	// one hour old, which keeps every event inside the default retention
+	// window on any date (DAT-10).
+	shift := fixtureShift(time.Now())
 	plain, err := os.ReadFile(filepath.Join(root, "cmd/siftail/testdata/ingest/canonical.ndjson"))
 	if err != nil {
 		t.Fatal(err)
 	}
+	plain = shiftFixtureTimestamps(t, plain, shift)
 	postSmokeFixture(t, ingestAddr, token, "application/x-ndjson", "", plain)
 
 	fluent, err := os.ReadFile(filepath.Join(root, "cmd/siftail/testdata/ingest/fluent-bit.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
+	fluent = shiftFixtureTimestamps(t, fluent, shift)
 	var compressed bytes.Buffer
 	gzipWriter := gzip.NewWriter(&compressed)
 	if _, err := gzipWriter.Write(fluent); err != nil {
@@ -345,6 +328,7 @@ func TestDurableIngestionSubprocessSmoke(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	coolify = shiftFixtureTimestamps(t, coolify, shift)
 	compressed.Reset()
 	gzipWriter = gzip.NewWriter(&compressed)
 	if _, err := gzipWriter.Write(coolify); err != nil {
@@ -363,32 +347,26 @@ func TestDurableIngestionSubprocessSmoke(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	generic = shiftFixtureTimestamps(t, generic, shift)
 	postSmokeFixture(t, ingestAddr, token, "application/json", "", generic)
 	postSmokeFixture(t, ingestAddr, token, "application/json", "", generic)
 
-	if err := serve.Process.Signal(syscall.SIGTERM); err != nil {
-		t.Fatal(err)
+	if err := serve.terminate(); err != nil {
+		t.Fatalf("smoke server shutdown: %v\n%s", err, serve.output.String())
 	}
-	if err := serve.Wait(); err != nil {
-		t.Fatalf("smoke server shutdown: %v\n%s", err, processOutput.String())
+	restartCommand := exec.Command(binary, "serve")
+	restartCommand.Env = environment
+	serve = startProcess(t, restartCommand)
+	if err := serve.waitReady(readyTargets{
+		ui: uiAddr, ingest: ingestAddr, socket: filepath.Join(dataDir, "siftail-control.sock"),
+	}); err != nil {
+		t.Fatalf("restarted smoke server: %v\n%s", err, serve.output.String())
 	}
-	serve = exec.Command(binary, "serve")
-	serve.Env = environment
-	serve.Stdout = &processOutput
-	serve.Stderr = &processOutput
-	if err := serve.Start(); err != nil {
-		t.Fatal(err)
-	}
-	waitForHTTP(t, "http://"+uiAddr+"/health/live", serve, &processOutput)
 	postSmokeFixture(t, ingestAddr, token, "application/json", "", generic)
 	postSmokeFixture(t, ingestAddr, token, "application/x-ndjson", "", coolify)
-	if err := serve.Process.Signal(syscall.SIGTERM); err != nil {
-		t.Fatal(err)
+	if err := serve.terminate(); err != nil {
+		t.Fatalf("restarted smoke server shutdown: %v\n%s", err, serve.output.String())
 	}
-	if err := serve.Wait(); err != nil {
-		t.Fatalf("restarted smoke server shutdown: %v\n%s", err, processOutput.String())
-	}
-	waited = true
 	if _, err := os.Stat(filepath.Join(dataDir, "siftail-control.sock")); !os.IsNotExist(err) {
 		t.Fatalf("smoke control socket remains: %v", err)
 	}
@@ -467,36 +445,244 @@ func TestServeProcessHelper(t *testing.T) {
 	os.Exit(0)
 }
 
+// reservedAddrs makes freeTCPAddr hand out each address at most once per test
+// binary, so two calls can never return the same port even after the probe
+// listener is closed.
+var (
+	reservedAddrsMu sync.Mutex
+	reservedAddrs   = map[string]bool{}
+)
+
+// freeTCPAddr returns a loopback address that was free a moment ago. A port
+// cannot be reserved across a process boundary without handing over the
+// listener, so a foreign process may still take it before the server binds;
+// launchServe retries with a fresh address when the server reports that.
 func freeTCPAddr(t *testing.T) string {
 	t.Helper()
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("allocate address: %v", err)
+	for attempt := 0; attempt < 50; attempt++ {
+		listener, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatalf("allocate address: %v", err)
+		}
+		addr := listener.Addr().String()
+		_ = listener.Close()
+		reservedAddrsMu.Lock()
+		taken := reservedAddrs[addr]
+		reservedAddrs[addr] = true
+		reservedAddrsMu.Unlock()
+		if !taken {
+			return addr
+		}
 	}
-	defer listener.Close()
-	return listener.Addr().String()
+	t.Fatal("could not allocate an unused address")
+	return ""
 }
 
-func waitForHTTP(t *testing.T, url string, cmd *exec.Cmd, output *bytes.Buffer) {
+// syncBuffer is an output sink that is safe to read while the child process
+// is still writing to it.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+// serveProcess is a running child process. A goroutine owns cmd.Wait, so exit
+// is observable through done without polling cmd.ProcessState.
+type serveProcess struct {
+	cmd     *exec.Cmd
+	output  *syncBuffer
+	done    chan struct{}
+	waitErr error // valid after done is closed
+}
+
+func startProcess(t *testing.T, cmd *exec.Cmd) *serveProcess {
 	t.Helper()
-	client := &http.Client{Timeout: 200 * time.Millisecond}
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		response, err := client.Get(url)
-		if err == nil {
-			response.Body.Close()
-			return
+	p := &serveProcess{cmd: cmd, output: &syncBuffer{}, done: make(chan struct{})}
+	cmd.Stdout = p.output
+	cmd.Stderr = p.output
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start process: %v", err)
+	}
+	go func() {
+		p.waitErr = cmd.Wait()
+		close(p.done)
+	}()
+	t.Cleanup(func() {
+		select {
+		case <-p.done:
+		default:
+			_ = cmd.Process.Kill()
+			<-p.done
 		}
-		if cmd != nil && cmd.ProcessState != nil {
-			t.Fatalf("serve helper exited early\n%s", output.String())
+	})
+	return p
+}
+
+// terminate sends SIGTERM and waits for a clean exit.
+func (p *serveProcess) terminate() error {
+	if err := p.cmd.Process.Signal(syscall.SIGTERM); err != nil {
+		return err
+	}
+	select {
+	case <-p.done:
+		return p.waitErr
+	case <-time.After(15 * time.Second):
+		_ = p.cmd.Process.Kill()
+		<-p.done
+		return fmt.Errorf("process ignored SIGTERM for 15s")
+	}
+}
+
+// startApplication runs an in-process application. The result is delivered on
+// the buffered done channel; exited is closed after it was sent.
+func startApplication(ctx context.Context, application *app.App) (chan error, <-chan struct{}) {
+	done := make(chan error, 1)
+	exited := make(chan struct{})
+	go func() {
+		done <- application.Run(ctx)
+		close(exited)
+	}()
+	return done, exited
+}
+
+// waitApplicationReady waits for both listeners and the control socket of an
+// in-process application, cancelling it when readiness fails.
+func waitApplicationReady(
+	t *testing.T, cancel context.CancelFunc,
+	uiAddr, ingestAddr, dataDir string, exited <-chan struct{},
+) {
+	t.Helper()
+	err := waitReady(readyTargets{
+		ui: uiAddr, ingest: ingestAddr,
+		socket: filepath.Join(dataDir, "siftail-control.sock"),
+	}, exited)
+	if err != nil {
+		cancel()
+		t.Fatalf("application did not become ready: %v", err)
+	}
+}
+
+type readyTargets struct {
+	ui, ingest, socket string
+}
+
+func (p *serveProcess) waitReady(targets readyTargets) error {
+	return waitReady(targets, p.done)
+}
+
+// waitReady returns once the UI listener answers HTTP, the ingestion listener
+// accepts connections and the control socket accepts connections. It fails
+// early when exited is closed.
+func waitReady(targets readyTargets, exited <-chan struct{}) error {
+	client := &http.Client{Timeout: 200 * time.Millisecond}
+	dialer := net.Dialer{Timeout: 200 * time.Millisecond}
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		select {
+		case <-exited:
+			return errProcessExited
+		default:
+		}
+		if listenersReady(client, dialer, targets) {
+			return nil
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	if cmd != nil {
-		_ = cmd.Process.Kill()
-		_ = cmd.Wait()
+	return fmt.Errorf("not ready within 10s (ui %s, ingest %s, socket %s)",
+		targets.ui, targets.ingest, targets.socket)
+}
+
+var errProcessExited = fmt.Errorf("process exited before becoming ready")
+
+func listenersReady(client *http.Client, dialer net.Dialer, targets readyTargets) bool {
+	response, err := client.Get("http://" + targets.ui + "/health/live")
+	if err != nil {
+		return false
 	}
-	t.Fatalf("serve helper did not become ready\n%s", output.String())
+	response.Body.Close()
+	for _, target := range [][2]string{{"tcp", targets.ingest}, {"unix", targets.socket}} {
+		conn, err := dialer.Dial(target[0], target[1])
+		if err != nil {
+			return false
+		}
+		_ = conn.Close()
+	}
+	return true
+}
+
+// launchServe starts a server on freshly allocated addresses and waits until
+// it is ready. If the child dies because another process took one of the
+// addresses first, it retries with new ones.
+func launchServe(
+	t *testing.T, dataDir string, build func(uiAddr, ingestAddr string) *exec.Cmd,
+) (*serveProcess, string, string) {
+	t.Helper()
+	var lastOutput string
+	for attempt := 0; attempt < 3; attempt++ {
+		uiAddr, ingestAddr := freeTCPAddr(t), freeTCPAddr(t)
+		proc := startProcess(t, build(uiAddr, ingestAddr))
+		err := proc.waitReady(readyTargets{
+			ui: uiAddr, ingest: ingestAddr,
+			socket: filepath.Join(dataDir, "siftail-control.sock"),
+		})
+		if err == nil {
+			return proc, uiAddr, ingestAddr
+		}
+		lastOutput = proc.output.String()
+		if err == errProcessExited && strings.Contains(lastOutput, "address already in use") {
+			continue
+		}
+		t.Fatalf("serve process: %v\n%s", err, lastOutput)
+	}
+	t.Fatalf("serve process could not bind free addresses\n%s", lastOutput)
+	return nil, "", ""
+}
+
+var (
+	fixtureRFC3339 = regexp.MustCompile(`\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z`)
+	fixtureEpoch   = regexp.MustCompile(`("date"\s*:\s*)(\d+(?:\.\d+)?)`)
+)
+
+// fixtureAnchor is the newest event time in the checked-in ingestion fixtures.
+var fixtureAnchor = time.Date(2026, 7, 28, 10, 5, 1, 0, time.UTC)
+
+// fixtureShift is the whole-second offset that moves fixtureAnchor to one hour
+// before now.
+func fixtureShift(now time.Time) time.Duration {
+	return now.Add(-time.Hour).Sub(fixtureAnchor).Truncate(time.Second)
+}
+
+// shiftFixtureTimestamps moves every RFC 3339 timestamp and numeric "date"
+// epoch in an ingestion fixture by shift, preserving order and spacing.
+func shiftFixtureTimestamps(t *testing.T, body []byte, shift time.Duration) []byte {
+	t.Helper()
+	body = fixtureRFC3339.ReplaceAllFunc(body, func(match []byte) []byte {
+		parsed, err := time.Parse(time.RFC3339Nano, string(match))
+		if err != nil {
+			t.Fatalf("fixture timestamp %q: %v", match, err)
+		}
+		return []byte(parsed.Add(shift).UTC().Format("2006-01-02T15:04:05.000000Z"))
+	})
+	return fixtureEpoch.ReplaceAllFunc(body, func(match []byte) []byte {
+		parts := fixtureEpoch.FindSubmatch(match)
+		epoch, err := strconv.ParseFloat(string(parts[2]), 64)
+		if err != nil {
+			t.Fatalf("fixture epoch %q: %v", parts[2], err)
+		}
+		shifted := epoch + shift.Seconds()
+		return append(append([]byte{}, parts[1]...), strconv.FormatFloat(shifted, 'f', 3, 64)...)
+	})
 }
 
 func withoutSiftailEnv(environment []string) []string {

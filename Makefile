@@ -1,6 +1,8 @@
 .PHONY: fmt fmt-check vet test race-test build compose-check check frontend-check playwright clean
 
 GO       := go
+# Upper bound for one package's test binary; a hung test fails instead of stalling igris.
+TEST_TIMEOUT ?= 10m
 BINARY   := siftail
 
 VERSION    ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
@@ -26,10 +28,10 @@ vet:
 	$(GO) vet ./...
 
 test:
-	$(GO) test ./...
+	$(GO) test -timeout $(TEST_TIMEOUT) ./...
 
 race-test:
-	$(GO) test -race ./...
+	$(GO) test -race -timeout $(TEST_TIMEOUT) ./...
 
 build:
 	$(GO) build -ldflags "$(LDFLAGS)" -o $(BINARY) ./cmd/siftail

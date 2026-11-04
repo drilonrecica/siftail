@@ -38,9 +38,8 @@ func TestBackupCLIUsesActiveControlSocketAndReportsVerifiedArtifact(t *testing.T
 	}
 	application := app.New(cfg, logger)
 	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan error, 1)
-	go func() { done <- application.Run(ctx) }()
-	waitForHTTP(t, "http://"+cfg.UIAddr+"/health/live", nil, &bytes.Buffer{})
+	done, exited := startApplication(ctx, application)
+	waitApplicationReady(t, cancel, cfg.UIAddr, cfg.IngestAddr, dataDir, exited)
 	defer func() {
 		cancel()
 		if err := <-done; err != nil {

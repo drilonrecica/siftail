@@ -59,9 +59,8 @@ func TestRestoreCLIRequiresStoppedServerConfirmationAndStaysSecretFree(
 	}
 	application := app.New(cfg, logger)
 	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan error, 1)
-	go func() { done <- application.Run(ctx) }()
-	waitForHTTP(t, "http://"+cfg.UIAddr+"/health/live", nil, &bytes.Buffer{})
+	done, exited := startApplication(ctx, application)
+	waitApplicationReady(t, cancel, cfg.UIAddr, cfg.IngestAddr, cfg.DataDir, exited)
 	stdout.Reset()
 	stderr.Reset()
 	if code := run([]string{
@@ -100,10 +99,9 @@ func TestRestoreCLIRequiresStoppedServerConfirmationAndStaysSecretFree(
 	}
 	restarted := app.New(cfg, logger)
 	restartCtx, restartCancel := context.WithCancel(context.Background())
-	restartDone := make(chan error, 1)
-	go func() { restartDone <- restarted.Run(restartCtx) }()
-	waitForHTTP(
-		t, "http://"+cfg.UIAddr+"/health/ready", nil, &bytes.Buffer{},
+	restartDone, restartExited := startApplication(restartCtx, restarted)
+	waitApplicationReady(
+		t, restartCancel, cfg.UIAddr, cfg.IngestAddr, cfg.DataDir, restartExited,
 	)
 	restartCancel()
 	if err := <-restartDone; err != nil {
