@@ -17,6 +17,10 @@ The documents are written to be standalone. Coding agents should not need access
 7. [`TASKS.md`](TASKS.md) — non-authoritative milestone dashboard and permanent
    task-ID registry; follow its link to the relevant
    [`docs/tasks/`](docs/tasks/) milestone record
+8. [`docs/audit/`](docs/audit/) — dated audit reports whose findings map to
+   tracked tasks
+9. [`tasks.md`](tasks.md) — the igris execution plan that schedules the
+   tracked tasks (see [`CLAUDE.md`](CLAUDE.md) for session rules)
 
 ## Document responsibilities
 
@@ -87,7 +91,17 @@ make playwright     # run the Chromium browser/security suite
 
 Measured engineering baselines are recorded under
 [`docs/performance/`](docs/performance/); they describe their exact hardware and
-method and are not cross-machine performance guarantees.
+method and are not cross-machine performance guarantees. Baselines recorded
+before 2026-11 were measured on tmpfs and are being re-measured on real disks
+(SFT-100).
+
+### Working through the task plan
+
+Tracked work is scheduled in [`tasks.md`](tasks.md) and executed with
+[igris](https://github.com/drilonrecica/igris): `igris check --strict`
+validates the plan, `igris arise H0` runs a phase, and each phase ends in a
+gate that waits for the maintainer. The authoritative task records stay in
+[`docs/tasks/`](docs/tasks/); the plan only mirrors them.
 
 ### Production image
 

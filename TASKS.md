@@ -29,9 +29,9 @@ Allowed task statuses:
 - `Done`: acceptance criteria and required verification are complete.
 
 Update the relevant milestone file in the implementation change. Add the issue
-or PR link, or record `direct maintainer implementation`. A task is not `Done`
-when compilation alone succeeds or required verification is deferred without a
-tracked follow-up.
+or PR link, or record `direct maintainer implementation` (or `direct maintainer
+implementation via igris`). A task is not `Done` when compilation alone
+succeeds or required verification is deferred without a tracked follow-up.
 
 Milestone implementation state and release state are separate. Completing every
 task does not tag, publish, or otherwise release a version.
@@ -44,11 +44,20 @@ task does not tag, publish, or otherwise release a version.
 | `0.2.0` | SFT-016–SFT-024 | Complete | Unreleased | [`docs/tasks/0.2.0.md`](docs/tasks/0.2.0.md) |
 | `0.3.0` | SFT-025–SFT-037 | Implementation gate complete | Unreleased | [`docs/tasks/0.3.0.md`](docs/tasks/0.3.0.md) |
 | `0.4.0` | SFT-038–SFT-049 | Implementation gate complete | Unreleased | [`docs/tasks/0.4.0.md`](docs/tasks/0.4.0.md) |
-| `0.5.0` | SFT-050–SFT-058 | In progress; SFT-052 is Ready; SFT-056 scope delivered by `0.6.0` | Unreleased | [`docs/tasks/0.5.0.md`](docs/tasks/0.5.0.md) |
+| `0.5.0` | SFT-050–SFT-058, SFT-127–SFT-128 | In progress; SFT-050/051 Done; SFT-052 waits on the hardening gates below; SFT-056 waits on the human checks SFT-127/128 | Unreleased | [`docs/tasks/0.5.0.md`](docs/tasks/0.5.0.md) |
+| `0.5.0` hardening | SFT-082–SFT-126 | Planned; remediates the [2026-11-04 audit](docs/audit/2026-11-04-full-audit.md) in phases H0–H3 before the public release | Unreleased | [`docs/tasks/0.5.0-hardening.md`](docs/tasks/0.5.0-hardening.md) |
 | `0.6.0` | SFT-064–SFT-081 | Redesign complete (SFT-064–079 Done); SFT-080/081 Planned follow-ups | Unreleased | [`docs/tasks/0.6.0.md`](docs/tasks/0.6.0.md) |
 | `1.0.0` | SFT-059–SFT-063 | Planned evidence gates | Unreleased | [`docs/tasks/1.0.0.md`](docs/tasks/1.0.0.md) |
 
-**Next implementable task:** SFT-052 — Publish and validate the manual Coolify deployment guide; the 0.6.0 redesign gate (SFT-079) is closed with two residual human checks recorded.
+**Next implementable task:** SFT-082 — Make the test suite deterministic (phase
+H0 of the hardening plan). The 2026-11-04 audit found two Critical ingestion
+defects (DAT-01, DAT-02), an unsupported toolchain, and two WCAG Level A
+keyboard failures that must be fixed before the `0.5.0` public release.
+
+**Execution:** the remaining work is scheduled in [`tasks.md`](tasks.md), the
+igris plan (one fresh agent session per task, `make check` as verify, phase
+gates that stop for the maintainer). The igris plan mirrors the milestone
+records; it never redefines them. `CLAUDE.md` carries the session rules.
 
 The completed requirement matrices and browser/security evidence are in
 [`docs/release/0.2.0-gate.md`](docs/release/0.2.0-gate.md),

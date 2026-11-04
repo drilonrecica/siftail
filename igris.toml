@@ -1,0 +1,54 @@
+# igris configuration for Siftail. The plan is tasks.md (format 2), one file per
+# phase under tasks/. docs/tasks/*.md remain the authoritative task records;
+# igris owns only the Status column in the plan. Written against igris 1.8.
+plan = "tasks.md"
+backend = "auto"
+default_mode = "yolo"             # unattended runs; gates (-G tasks) are agent + user and stop for the owner
+needs_input_after = "30s"
+poll_interval = "2s"
+
+[models]
+  fable = "fable"
+  haiku = "haiku"
+  opus = "opus"
+  sonnet = "sonnet"
+
+[columns]
+
+[claude]
+  extra_args = []
+
+[run]
+  verify = "make check"           # fmt-check, vet, test, build, compose-check
+  verify_timeout = "25m0s"
+  verify_max_attempts = 3
+  commit = "auto"                 # one commit per task on master, like the existing history
+  commit_message = "{{.ID}} {{.Title}}"
+  prompt_template = ""
+  worktree = false
+
+[verify]                          # named in the plan's Verify column
+  ui = "make check && make playwright"
+  race = "make check && make race-test"
+
+[phases.R10]
+  verify = "none"                 # 1.0.0 evidence tasks, no code gate
+
+[adapt]
+  model = "sonnet"
+
+[tui]
+  mouse = true
+  theme = "auto"
+  tail = true
+  [tui.rank_colors]
+
+[notify]
+  [notify.backend]
+    enabled = true
+  [notify.ntfy]
+    server = "https://ntfy.sh"
+    topic = ""
+    token = ""
+  [notify.discord]
+    webhook_url = ""

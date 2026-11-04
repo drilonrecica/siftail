@@ -40,3 +40,4 @@ test-results/
 # Editor/IDE
 # .idea/
 # .vscode/
+.igris/

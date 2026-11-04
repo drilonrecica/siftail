@@ -37,8 +37,13 @@ Before making a meaningful change, read:
 6. `TASKS.md`, then the linked `docs/tasks/<milestone>.md` entry for tracked
    implementation work
 7. relevant tests, migrations, and ADRs
+8. `docs/audit/` findings the task references, when remediating an audit
 
 Do not rely on issue text, chat history, or assumptions instead of these documents.
+
+`CLAUDE.md` adds the session rules for work scheduled through `tasks.md` (the
+igris plan). It never overrides this document; the plan mirrors the milestone
+records and only its Status column is machine-owned.
 
 `TASKS.md` and its linked milestone files track execution and status only. They
 cannot redefine behavior from the authoritative specifications, accepted tests,
@@ -760,7 +765,11 @@ Generated Coolify configuration must exclude Siftail's own container. Add tests/
 - profile before low-level optimization;
 - do not add complexity to eliminate insignificant allocations;
 - measure production container, not only Go benchmarks;
-- test realistic event distributions.
+- test realistic event distributions;
+- run every durability, retention, backup, or throughput benchmark with
+  `TMPDIR` on a real disk, never tmpfs (`/tmp` is tmpfs on many hosts);
+  record the filesystem and device class with the result, and label any
+  tmpfs number as a no-fsync comparison only.
 
 ### 17.3 Regression review
 
@@ -939,6 +948,19 @@ Do not add dependencies for:
 - frontend framework.
 
 Consequential dependency changes may require ADR.
+
+Keep what is already depended on current:
+
+- the Go toolchain in `go.mod`, the Dockerfile, and CI must be a release
+  line that still receives security fixes; move before the line goes out of
+  support, not after;
+- Go modules, the vendored htmx, and development-only npm packages are
+  reviewed for updates at least per milestone and whenever `govulncheck`
+  reports a reachable vulnerability;
+- `govulncheck ./...` runs in CI; a reachable vulnerability blocks the
+  release gate until fixed or explicitly accepted with reasons;
+- GitHub Actions are pinned to commit SHAs and Docker base images to digests,
+  both refreshed by automation (Renovate or Dependabot) with human review.
 
 ---
 
