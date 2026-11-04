@@ -8,13 +8,15 @@ record** (scope, acceptance, verification, evidence); this plan mirrors it so
 igris can schedule it. Task IDs are the permanent SFT registry (`TASKS.md`).
 Every session follows `CLAUDE.md` and `AGENTS.md`.
 
-Findings are in `docs/audit/2026-11-04-full-audit.md`. Phases run in order;
-each ends in a gate owned `agent + user` that stops the run for the owner.
+Findings are in `docs/audit/2026-11-04-full-audit.md`. Phases H0–H3 run in
+order unattended; each ends in a self-check gate that writes
+`docs/release/h<N>-gate.md` for the owner's review afterwards. R5 is where the
+owner is needed (Coolify validation, screen-reader and mobile passes).
 Verify is `make check` unless the Verify cell says `ui`
 (`make check && make playwright`), `race`, or `none`.
 
-Run: `igris check --strict`, then `igris arise H0`, later
-`igris arise H1 --through H3`.
+Run: `igris check --strict`, then `igris arise H0 --through R10` for the
+unattended run; it stops when a task needs the owner.
 
 <!-- igris:include tasks/h0.md -->
 

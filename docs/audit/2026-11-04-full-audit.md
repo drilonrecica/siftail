@@ -9,6 +9,7 @@ packages in full, plus maintainer re-verification of every Critical finding,
 `go build`, `go vet`, `go test ./...`, `govulncheck`, `go list -m -u all`,
 `EXPLAIN QUERY PLAN` against the production migration, and WCAG contrast
 computed from the token values.
+**Maintainer review (2026-11-05):** all findings accepted; none rejected.
 **Outcome:** every finding below maps to a task in
 [`docs/tasks/0.5.0-hardening.md`](../tasks/0.5.0-hardening.md) (SFT-082–SFT-128).
 The remediation runs through the Igris plan in [`tasks.md`](../../tasks.md).
