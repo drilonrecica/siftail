@@ -1,0 +1,53 @@
+name: Supply chain
+
+# Weekly image build, vulnerability scan and SBOM. Findings surface in the
+# job result and the uploaded artifacts; nothing is published or pushed.
+on:
+  schedule:
+    - cron: "17 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: supply-chain-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  image:
+    name: Image build, scan, and SBOM
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Build image
+        run: >-
+          docker build
+          --build-arg "COMMIT=$(git rev-parse --short HEAD)"
+          --build-arg "BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          --tag siftail:scan .
+
+      - name: Scan image for vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          version: v0.76.1
+          image-ref: siftail:scan
+          format: table
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+          vuln-type: os,library
+
+      - name: Generate SBOM
+        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+        with:
+          image: siftail:scan
+          format: cyclonedx-json
+          output-file: siftail-sbom.cdx.json
+          artifact-name: siftail-sbom.cdx.json
+          upload-release-assets: false

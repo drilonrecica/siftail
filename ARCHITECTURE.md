@@ -2515,6 +2515,26 @@ Release notes include:
 - Upgrade instructions;
 - Known issues.
 
+### 35.1 Continuous integration and supply chain
+
+CI lives in `.github/workflows/`:
+
+- `ci.yml` runs on every push and pull request to `master`/`main`: format,
+  vet, test, build and Compose validation; race tests; the Playwright browser
+  suite; and `govulncheck ./...` (pinned version, `go mod verify` first). A
+  reachable vulnerability fails the job and blocks the release gate.
+- `supply-chain.yml` runs weekly and on demand: it builds the production
+  image, scans it with a pinned Trivy (HIGH and CRITICAL, fixable findings
+  fail the job) and uploads a CycloneDX SBOM as a workflow artifact. It never
+  pushes or publishes an image.
+- Every `uses:` is pinned to a commit SHA with a version comment, every
+  workflow declares `permissions: contents: read`, and checkouts do not
+  persist credentials.
+- `renovate.json` groups updates for Go modules, Docker base-image digests,
+  GitHub Actions and development-only npm packages into scheduled weekly
+  pull requests. Nothing auto-merges; each update is reviewed by the
+  maintainer (AGENTS.md section 21).
+
 ---
 
 ## 36. Soak testing

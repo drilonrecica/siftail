@@ -1,0 +1,41 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:best-practices"],
+  "timezone": "UTC",
+  "schedule": ["before 6am on monday"],
+  "automerge": false,
+  "platformAutomerge": false,
+  "prConcurrentLimit": 5,
+  "labels": ["dependencies"],
+  "enabledManagers": ["gomod", "dockerfile", "github-actions", "npm"],
+  "postUpdateOptions": ["gomodTidy"],
+  "packageRules": [
+    {
+      "description": "Go modules, one grouped PR",
+      "matchManagers": ["gomod"],
+      "groupName": "go modules"
+    },
+    {
+      "description": "Docker base images; digests stay pinned",
+      "matchManagers": ["dockerfile"],
+      "groupName": "docker base images",
+      "pinDigests": true
+    },
+    {
+      "description": "GitHub Actions; SHA pins with version comments",
+      "matchManagers": ["github-actions"],
+      "groupName": "github actions",
+      "pinDigests": true
+    },
+    {
+      "description": "Development-only npm packages, exact pins",
+      "matchManagers": ["npm"],
+      "groupName": "npm dev dependencies",
+      "rangeStrategy": "pin"
+    }
+  ],
+  "vulnerabilityAlerts": {
+    "labels": ["security"],
+    "schedule": ["at any time"]
+  }
+}
