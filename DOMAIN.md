@@ -274,7 +274,9 @@ Rules:
 - is not silently clamped to receive time;
 - an explicitly supplied timestamp must parse unambiguously and fall within
   years 0001 through 9999 or the entire request is rejected;
-- only an absent timestamp falls back to receive time;
+- only an absent timestamp falls back to receive time; a timestamp member
+  whose value is `null` counts as absent, so a Fluent Bit record timestamp is
+  still used before the receive time;
 - whether event time was defaulted to receive time is persisted as
   `event_at_defaulted`, because a defaulted time is Siftail's observation
   rather than producer content (ADR 0007);
@@ -380,9 +382,10 @@ For structured JSON:
 
 The application payload of a received record is its `log` field, else its
 top-level `message` field, else its `msg` field, kept as that field's exact
-text; a record with none of them is itself the payload. Transport envelope
-fields of the record (time, tag, stream, source, and container identity) are
-never copied into attributes, whichever field is the payload.
+text; a member whose value is `null` counts as absent; a record with none of
+them is itself the payload. Transport envelope fields of the record (time,
+tag, stream, source, and container identity) are never copied into
+attributes, whichever field is the payload.
 
 ### 5.11 Searchable message
 

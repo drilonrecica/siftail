@@ -212,8 +212,13 @@ func normalizeTimestamp(fields map[string]json.RawMessage, fluent json.RawMessag
 	var raw json.RawMessage
 	for _, key := range []string{"timestamp", "@timestamp", "time"} {
 		if value, ok := fields[key]; ok {
-			raw = value
 			delete(fields, key)
+			if isJSONNull(value) {
+				// A null member is absent, so the Fluent Bit record
+				// timestamp is still consulted before the receive time.
+				continue
+			}
+			raw = value
 			break
 		}
 	}
@@ -221,7 +226,7 @@ func normalizeTimestamp(fields map[string]json.RawMessage, fluent json.RawMessag
 		raw = fluent
 	}
 	delete(fields, "date")
-	if len(bytes.TrimSpace(raw)) == 0 || bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+	if len(bytes.TrimSpace(raw)) == 0 || isJSONNull(raw) {
 		return received.UnixMicro(), true, nil
 	}
 	timestamp, err := parseTimestamp(raw)
@@ -229,6 +234,11 @@ func normalizeTimestamp(fields map[string]json.RawMessage, fluent json.RawMessag
 		return 0, false, fmt.Errorf("invalid supplied timestamp")
 	}
 	return timestamp.UnixMicro(), false, nil
+}
+
+// isJSONNull reports a member whose value is the JSON literal null.
+func isJSONNull(raw json.RawMessage) bool {
+	return bytes.Equal(bytes.TrimSpace(raw), []byte("null"))
 }
 
 func parseTimestamp(raw json.RawMessage) (time.Time, error) {
@@ -333,6 +343,11 @@ func normalizeMessage(fields map[string]json.RawMessage, recordRaw []byte, valid
 	var payload json.RawMessage
 	for _, key := range []string{"log", "message", "msg"} {
 		if value, ok := fields[key]; ok {
+			if isJSONNull(value) {
+				// A null member is absent (DOMAIN.md §5.10); it stays a
+				// record field, and the next payload field is tried.
+				continue
+			}
 			payload = value
 			delete(fields, key)
 			break
@@ -508,16 +523,21 @@ func normalizeCommon(fields, structured map[string]json.RawMessage) (CommonField
 	return result, nil
 }
 
+// canonicalAttributes keeps every remaining application member. Level and
+// common-field normalization delete the members they consume from these maps,
+// so a member they left behind, for example a non-numeric "status" or a numeric
+// "level", is application data that stays in attributes (DOMAIN.md §6
+// invariant 8, §11) rather than being dropped for sharing a recognized key.
 func canonicalAttributes(fields, structured map[string]json.RawMessage) ([]byte, error) {
 	attributes := make(map[string]json.RawMessage)
 	for key, value := range fields {
-		if isTransportField(key) || isCommonField(key) {
+		if isTransportField(key) {
 			continue
 		}
 		attributes[key] = value
 	}
 	for key, value := range structured {
-		if isCommonField(key) || key == "message" || key == "msg" || key == "log" || key == "level" || key == "severity" {
+		if key == "message" || key == "msg" || key == "log" {
 			continue
 		}
 		attributes[key] = value
@@ -551,17 +571,6 @@ func isTransportField(key string) bool {
 		"coolify_application_name", "service", "service_name",
 		"coolify_service_name", "coolify.app_name", "com.docker.compose.project",
 		"com.docker.compose.service", "compose_project":
-		return true
-	default:
-		return false
-	}
-}
-
-func isCommonField(key string) bool {
-	switch key {
-	case "logger", "logger_name", "request_id", "requestId", "trace_id",
-		"error_type", "error.type", "http_method", "method", "http_path",
-		"path", "http_status", "status", "duration_ms":
 		return true
 	default:
 		return false

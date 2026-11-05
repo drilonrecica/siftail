@@ -102,6 +102,9 @@ func TestTimestampPrecedenceAndFailure(t *testing.T) {
 		{"fluent date", `{"log":"x"}`, `"2024-01-01T00:00:00Z"`, time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC), false, false},
 		{"absent fallback", `{"log":"x"}`, "", received, true, false},
 		{"null fallback", `{"timestamp":null,"log":"x"}`, "", received, true, false},
+		// A null source timestamp is absent, so precedence step 2 still
+		// applies before the receive time.
+		{"null source uses fluent date", `{"time":null,"log":"x"}`, `"2024-01-01T00:00:00Z"`, time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC), false, false},
 		// A supplied time equal to the receive time is producer content.
 		{"supplied equals receive", `{"timestamp":"2026-07-28T00:00:00Z","log":"x"}`, "", received, false, false},
 		{"invalid supplied", `{"timestamp":"yesterday","log":"x"}`, "", time.Time{}, false, true},
@@ -340,4 +343,91 @@ func testRecord(body string) ReceivedRecord {
 func quote(value string) string {
 	encoded, _ := json.Marshal(value)
 	return string(encoded)
+}
+
+// Common-field normalization consumes a member only when its value has the
+// field's type. A member it did not consume is still application data and
+// stays in attributes (DOMAIN.md §6 invariant 8, §11); a consumed member is
+// removed from attributes, because its canonical column is the documented
+// representation.
+func TestUnconsumedCommonFieldsStayInAttributes(t *testing.T) {
+	tests := []struct {
+		name           string
+		record         string
+		wantRequestID  string
+		wantStatus     *int64
+		wantOriginal   string
+		wantAttributes string
+	}{
+		{
+			name: "ill-typed common and level members of a structured payload are kept",
+			record: `{"log":` + quote(`{"message":"job finished","status":"completed","request_id":12345,"duration_ms":-1,"level":30,"keep":"yes"}`) +
+				`,"stream":"stdout"}`,
+			wantAttributes: `{"duration_ms":-1,"keep":"yes","level":30,"request_id":12345,"status":"completed"}`,
+		},
+		{
+			name:           "ill-typed common member of the record itself is kept",
+			record:         `{"log":"plain text","status":"ok","request_id":["a"]}`,
+			wantAttributes: `{"request_id":["a"],"status":"ok"}`,
+		},
+		{
+			name:           "the alias that was not consumed is kept",
+			record:         `{"log":` + quote(`{"message":"m","request_id":"r1","trace_id":"t1"}`) + `}`,
+			wantRequestID:  "r1",
+			wantAttributes: `{"trace_id":"t1"}`,
+		},
+		{
+			name:          "consumed members are removed from attributes",
+			record:        `{"log":` + quote(`{"message":"m","level":"warn","request_id":"r","status":200,"duration_ms":1.5,"logger":"app"}`) + `}`,
+			wantRequestID: "r",
+			wantStatus:    int64Pointer(200),
+			wantOriginal:  "warn",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			event, err := Normalize(testRecord(tt.record), TrustedServer{ID: 1}, time.Now())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if event.Common.RequestID != tt.wantRequestID {
+				t.Fatalf("request_id = %q, want %q", event.Common.RequestID, tt.wantRequestID)
+			}
+			if (event.Common.HTTPStatus == nil) != (tt.wantStatus == nil) ||
+				(tt.wantStatus != nil && *event.Common.HTTPStatus != *tt.wantStatus) {
+				t.Fatalf("http_status = %v, want %v", event.Common.HTTPStatus, tt.wantStatus)
+			}
+			if event.OriginalLevel != tt.wantOriginal {
+				t.Fatalf("original level = %q, want %q", event.OriginalLevel, tt.wantOriginal)
+			}
+			if string(event.Attributes) != tt.wantAttributes {
+				t.Fatalf("attributes = %s, want %s", event.Attributes, tt.wantAttributes)
+			}
+		})
+	}
+}
+
+func int64Pointer(value int64) *int64 { return &value }
+
+// A payload member whose value is null is absent for payload selection
+// (DOMAIN.md §5.10): the next payload field is used, and a record whose only
+// payload member is null is itself the payload. The null member is still
+// application data and stays in attributes.
+func TestNullPayloadMemberIsAbsent(t *testing.T) {
+	event, err := Normalize(testRecord(`{"log":null,"message":"real text","stream":"stdout"}`), TrustedServer{ID: 1}, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(event.MessageRaw) != "real text" || event.MessageText != "real text" ||
+		string(event.Attributes) != `{"log":null}` {
+		t.Fatalf("raw/text/attributes = %q / %q / %s", event.MessageRaw, event.MessageText, event.Attributes)
+	}
+	event, err = Normalize(testRecord(`{"log":null,"stream":"stdout"}`), TrustedServer{ID: 1}, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(event.MessageRaw) != `{"log":null,"stream":"stdout"}` ||
+		event.MessageText != `{"log":null,"stream":"stdout"}` || string(event.Attributes) != `{"log":null}` {
+		t.Fatalf("raw/text/attributes = %q / %q / %s", event.MessageRaw, event.MessageText, event.Attributes)
+	}
 }

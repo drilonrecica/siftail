@@ -902,8 +902,9 @@ Recommended:
 - store transport envelope only where necessary for debugging compatibility.
 
 Implemented selection: the record member `log`, else `message`, else `msg`, is
-the payload and keeps its exact text; any other of the three stays a record
-field and, unless normalized, an attribute. Only a payload that is a JSON
+the payload and keeps its exact text; a member whose value is `null` is absent
+for this selection, as for the timestamp; any other of the three stays a
+record field and, unless normalized, an attribute. Only a payload that is a JSON
 object, or a string holding one, contributes structured application fields. A
 record with none of the three is itself the payload: `message_raw` keeps the
 record bytes and `message_text` is its compact JSON, while its members are

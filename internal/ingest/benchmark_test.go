@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -180,7 +181,7 @@ func BenchmarkHTTPCommitLatency(b *testing.B) {
 		fixture.handler.ServeHTTP(response, request)
 		durations = append(durations, time.Since(started))
 		if response.Code != http.StatusNoContent {
-			b.Fatalf("status = %d", response.Code)
+			fixture.failStatus(b, response.Code, time.Since(started))
 		}
 	}
 	b.StopTimer()
@@ -205,9 +206,10 @@ func BenchmarkHTTPSustained100EventBatch(b *testing.B) {
 		request.Header.Set("Authorization", "Bearer "+fixture.token)
 		request.Header.Set("Content-Type", "application/json")
 		response := httptest.NewRecorder()
+		started := time.Now()
 		fixture.handler.ServeHTTP(response, request)
 		if response.Code != http.StatusNoContent {
-			b.Fatalf("status = %d", response.Code)
+			fixture.failStatus(b, response.Code, time.Since(started))
 		}
 	}
 	b.StopTimer()
@@ -255,9 +257,61 @@ func BenchmarkQueueSaturationRSS(b *testing.B) {
 	}
 }
 
+// benchmarkRequestTimeout is the fixture's handler timeout. A request that
+// outlives it is answered 503 while the writer still commits, which a disk
+// stall under a loaded benchmark host can cause.
+const benchmarkRequestTimeout = 5 * time.Second
+
 type benchmarkHTTP struct {
-	handler *Handler
-	token   string
+	handler    *Handler
+	token      string
+	rejections *benchmarkRejections
+}
+
+// failStatus reports a non-204 benchmark response with its cause. The handler
+// observes its own rejections and the writer observes the batch outcomes, so
+// the last rejection says which side refused; none at all means the request
+// timed out while the writer still committed.
+func (f benchmarkHTTP) failStatus(b *testing.B, status int, elapsed time.Duration) {
+	b.Helper()
+	cause := f.rejections.last()
+	if cause == "" {
+		cause = fmt.Sprintf(
+			"no rejection recorded by handler or writer (request timeout %s)",
+			benchmarkRequestTimeout,
+		)
+	}
+	b.Fatalf("status = %d after %s: %s", status, elapsed, cause)
+}
+
+// benchmarkRejections records the most recent rejection either side observed.
+type benchmarkRejections struct {
+	mu   sync.Mutex
+	most string
+}
+
+func (r *benchmarkRejections) last() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.most
+}
+
+// benchmarkRejectionSource is an Observer bound to one side of the pipeline.
+type benchmarkRejectionSource struct {
+	rejections *benchmarkRejections
+	side       string
+}
+
+func (s benchmarkRejectionSource) RecordIngestAccepted(int, time.Time)         {}
+func (s benchmarkRejectionSource) RecordIngestConflicts(int64, int, time.Time) {}
+func (s benchmarkRejectionSource) RecordIngestLate(int64, int, time.Time)      {}
+
+func (s benchmarkRejectionSource) RecordIngestRejected(category ErrorCategory, databaseFailure bool, _ time.Time) {
+	s.rejections.mu.Lock()
+	s.rejections.most = fmt.Sprintf(
+		"%s rejected category=%s database_failure=%t", s.side, category, databaseFailure,
+	)
+	s.rejections.mu.Unlock()
 }
 
 func benchmarkHTTPFixture(b *testing.B) benchmarkHTTP {
@@ -279,17 +333,20 @@ func benchmarkHTTPFixture(b *testing.B) benchmarkHTTP {
 		MaxCompressedBytes: 1 << 20, MaxDecompressedBytes: 4 << 20,
 		MaxEventBytes: 1 << 20, MaxEvents: 1000, MaxJSONDepth: 32,
 	}).WithAdmission(admission)
+	rejections := &benchmarkRejections{}
 	handler := NewHandler(store, decoder, Limits{
-		MaxCompressedBytes: 1 << 20, RequestTimeout: 5 * time.Second,
-	}).WithQueue(queue)
+		MaxCompressedBytes: 1 << 20, RequestTimeout: benchmarkRequestTimeout,
+	}).WithQueue(queue).WithObserver(benchmarkRejectionSource{rejections: rejections, side: "handler"})
+	worker := NewWriterWorker(queue, writer).
+		WithObserver(benchmarkRejectionSource{rejections: rejections, side: "writer"})
 	workerDone := make(chan error, 1)
-	go func() { workerDone <- NewWriterWorker(queue, writer).Run(context.Background()) }()
+	go func() { workerDone <- worker.Run(context.Background()) }()
 	b.Cleanup(func() {
 		admission.Close()
 		queue.Close()
 		<-workerDone
 	})
-	return benchmarkHTTP{handler: handler, token: token.Token}
+	return benchmarkHTTP{handler: handler, token: token.Token, rejections: rejections}
 }
 
 func benchmarkWriter(b *testing.B, options WriterOptions) (*database.DB, *database.Coordinator, *BatchWriter, int64) {
