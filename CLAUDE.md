@@ -25,7 +25,10 @@ task). For a task `SFT-NNN`:
    the task says so.
 4. **Never edit the Status column of `tasks.md` or `tasks/*.md`**; igris owns
    it. Never commit; igris commits after verify. Never add AI attribution,
-   `Co-Authored-By`, or session trailers anywhere.
+   `Co-Authored-By`, or session trailers anywhere. If you delete or rename a
+   file, grep `tasks/*.md` for its path and update every Context cell that
+   names it in the same task; igris refuses to record a task whose plan names
+   a path that no longer exists, and that stops the whole unattended run.
 5. Keep `make check` green (fmt-check, vet, test, build, compose-check). Tasks
    whose Verify cell says `ui` must also pass `make playwright`.
 6. UI tasks (phase H3) load the `frontend-design` skill, follow `DESIGN.md` as
