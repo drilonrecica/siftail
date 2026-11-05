@@ -934,9 +934,23 @@ code {
   align-self: end;
 }
 
+/* The filter request indicator sits outside the swapped results and the
+   collapsible form, at the right of the result summary line, so it is
+   visible with the Filters disclosure closed and takes no layout space
+   (DESIGN.md §23). */
 .history-loading {
-  grid-column: 1 / -1;
+  position: relative;
+  z-index: 1;
+  height: 0;
+  margin: 0;
+}
+
+.history-loading > span {
+  position: absolute;
+  top: var(--space-3);
+  right: var(--space-3);
   color: var(--text-secondary);
+  font-size: var(--text-xs);
 }
 
 .htmx-indicator {
@@ -946,6 +960,45 @@ code {
 .htmx-request .htmx-indicator,
 .htmx-request.htmx-indicator {
   visibility: visible;
+}
+
+/* Load older and Load newer change their own label to "Loading…" while
+   their request runs (DESIGN.md §23). */
+.paging-label + .htmx-indicator {
+  display: none;
+}
+
+.htmx-request > .paging-label {
+  display: none;
+}
+
+.htmx-request > .paging-label + .htmx-indicator {
+  display: inline;
+}
+
+/* Fragment errors render beside the control that caused them and take no
+   space while empty (DESIGN.md §25). */
+.history-fragment-error:empty {
+  display: none;
+}
+
+.history-pagination {
+  flex-wrap: wrap;
+}
+
+.history-pagination > .history-fragment-error {
+  flex-basis: 100%;
+}
+
+.history-fragment-error .history-inline-error {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2) var(--space-3);
+}
+
+.history-fragment-error .history-inline-error > * + * {
+  margin-left: 0;
 }
 
 .result-summary {

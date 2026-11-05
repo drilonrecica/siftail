@@ -435,7 +435,13 @@ func TestHistoryFragmentsRenderFocusedEscapedState(t *testing.T) {
 	body := response.Body.String()
 	for _, want := range []string{
 		`id="history-region"`,
-		`hx-target="#history-region"`,
+		`hx-target="#history-results"`,
+		`hx-sync="this:replace"`,
+		`placeholder="Contains message text" data-text-filter hx-preserve>`,
+		`<div id="history-filter-error" class="history-fragment-error"`,
+		`<span class="paging-label">Load older</span><span class="htmx-indicator">Loading…</span>`,
+		`<div id="history-older-error" class="history-fragment-error"`,
+		`<div id="history-newer-error" class="history-fragment-error"`,
 		`delay:400ms`,
 		`name="levels" value="error" checked`,
 		`API &lt;unsafe&gt;`,
@@ -565,7 +571,7 @@ func TestEmbeddedAssetsTypesIntegrityAndSafety(t *testing.T) {
 	}
 	if strings.Contains(string(appJS), "innerHTML") ||
 		!strings.Contains(string(appJS), "historyCacheSize = 0") ||
-		!strings.Contains(string(appJS), "rows.length > 1000") ||
+		!strings.Contains(string(appJS), "historyRowCap = 1000") ||
 		!strings.Contains(string(appJS), "navigator.clipboard.writeText(source.textContent)") ||
 		!strings.Contains(string(appJS), "replaceChildren()") {
 		t.Fatal("application JavaScript violates DOM/history constraints")

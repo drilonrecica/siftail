@@ -281,6 +281,18 @@
       }
       return;
     }
+    // A History fragment error stays beside its cause until that control
+    // succeeds or the operator dismisses it (DESIGN.md §25).
+    const dismiss = event.target.closest("[data-dismiss-error]");
+    if (dismiss) {
+      const slot = dismiss.closest(".history-fragment-error");
+      const back = slot?.dataset.errorReturn || "";
+      slot?.replaceChildren();
+      const target = (back && document.querySelector(back)) ||
+        document.querySelector(".result-summary");
+      if (target instanceof HTMLElement) target.focus({ preventScroll: true });
+      return;
+    }
     const collapse = event.target.closest("[data-collapse-detail]");
     if (collapse) {
       const toggle = collapse.closest(".log-row")?.querySelector(".event-toggle");
@@ -368,44 +380,124 @@
     if (dialog instanceof HTMLDialogElement) dialog.close();
   });
 
-  const updateHistoryCount = () => {
-    let rows = Array.from(document.querySelectorAll("#history-rows .log-row"));
-    let trimmed = false;
-    if (rows.length > 1000) {
-      const removed = rows.length - 1000;
-      rows.slice(0, removed).forEach((row) => row.remove());
-      rows = rows.slice(removed);
-      trimmed = true;
+  // The browser render cap (DESIGN.md §10.9). Rows are trimmed from the end
+  // opposite to the load direction, so the rows just loaded stay: Load older
+  // trims the newest rows at the top, Load newer the oldest at the bottom.
+  // The focused row and expanded rows are never removed.
+  const historyRowCap = 1000;
+
+  const isProtectedRow = (row) =>
+    row.contains(document.activeElement) ||
+    row.querySelector(".event-toggle[aria-expanded='true']") !== null;
+
+  // Removes the excess from one end and returns the trimmed row nearest the
+  // kept rows (the start of the trimmed interval), or null.
+  const trimHistoryRows = (rows, fromTop) => {
+    let excess = rows.length - historyRowCap;
+    if (excess <= 0) return null;
+    const ordered = fromTop ? rows : rows.slice().reverse();
+    let nearest = null;
+    for (const row of ordered) {
+      if (excess === 0) break;
+      if (isProtectedRow(row)) continue;
+      row.remove();
+      nearest = row;
+      excess -= 1;
     }
-    const count = document.querySelector("[data-loaded-count]");
-    if (count) count.textContent = String(rows.length);
-    const label = document.querySelector("[data-loaded-label]");
-    if (label) label.textContent = rows.length === 1 ? "event" : "events";
-    if (trimmed) {
-      // The cap removed the newest loaded rows from the top of the list. The
-      // tail line becomes the recovery path back to the newest page of this
-      // query; pagination in the older direction stays available.
-      const tail = document.querySelector("#history-tail");
-      if (tail && !tail.querySelector("[data-trim-recovery]")) {
-        const canonical = tail.dataset.canonicalUrl || "/logs";
-        const recover = document.createElement("a");
-        recover.className = "tail-action";
-        recover.href = canonical;
-        recover.textContent = "Return to newest events";
-        recover.setAttribute("data-trim-recovery", "");
-        tail.querySelectorAll(".tail-action, #load-newer").forEach(
-          (action) => action.remove(),
-        );
-        tail.insertBefore(recover, tail.lastElementChild);
-      }
-      const status = document.querySelector("#history-update-status");
-      if (status) {
-        status.textContent =
-          "Browser row limit reached; the newest loaded rows were removed. Use the tail line to return to the newest events.";
-      }
-    }
+    return nearest;
   };
 
+  // The query this page shows, as a full-page History URL from the tail
+  // line, always newest first and without a page cursor.
+  const historyPageURL = () => {
+    const tail = document.querySelector("#history-tail");
+    const url = new URL(tail?.dataset.canonicalUrl || "/logs", window.location.href);
+    url.searchParams.delete("cursor");
+    url.searchParams.set("direction", "older");
+    return url;
+  };
+
+  // One microsecond after an RFC 3339 UTC instant, which makes the exclusive
+  // To bound of a range include that instant (event times are microseconds).
+  const instantAfter = (value) => {
+    const match = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d{1,9}))?Z$/.exec(value);
+    if (!match) return null;
+    let seconds = Date.parse(`${match[1]}Z`);
+    if (Number.isNaN(seconds)) return null;
+    let micros = Number(`${match[2] || ""}000000`.slice(0, 6)) + 1;
+    if (micros >= 1000000) {
+      micros -= 1000000;
+      seconds += 1000;
+    }
+    return `${new Date(seconds).toISOString().slice(0, 19)}.${String(micros).padStart(6, "0")}Z`;
+  };
+
+  const announceHistory = (message) => {
+    const status = document.querySelector("#history-update-status");
+    if (status) status.textContent = message;
+  };
+
+  // Load older trimmed the newest rows: the tail line's Load newer would
+  // skip them, so it becomes a path back to the newest page of this query.
+  const recoverNewerEdge = () => {
+    const tail = document.querySelector("#history-tail");
+    if (tail && !tail.querySelector("[data-trim-recovery]")) {
+      const recover = document.createElement("a");
+      recover.className = "tail-action";
+      recover.href = historyPageURL().toString();
+      recover.textContent = "Return to newest events";
+      recover.setAttribute("data-trim-recovery", "");
+      tail.querySelectorAll(".tail-action, #load-newer").forEach(
+        (action) => action.remove(),
+      );
+      tail.insertBefore(recover, tail.lastElementChild);
+    }
+    announceHistory(
+      "Browser row limit reached; the newest loaded rows were removed. Use the tail line to return to the newest events.",
+    );
+  };
+
+  // Load newer trimmed the oldest rows: Load older would skip them, so it
+  // becomes a link to this query ending at the newest trimmed row, which
+  // that page highlights.
+  const recoverOlderEdge = (nearest) => {
+    const pagination = document.querySelector("#history-pagination");
+    const instant = nearest.querySelector("time[datetime]")?.getAttribute("datetime") || "";
+    const to = instantAfter(instant);
+    if (!pagination || !to) return;
+    const url = historyPageURL();
+    url.searchParams.set("to", to);
+    url.searchParams.set("highlight", nearest.dataset.eventId || "");
+    const link = document.createElement("a");
+    link.className = "button button-quiet";
+    link.href = url.toString();
+    link.textContent = "Continue to older events";
+    link.setAttribute("data-trim-recovery", "");
+    pagination.querySelector("#load-older, .pagination-end, [data-trim-recovery]")?.remove();
+    pagination.prepend(link);
+    announceHistory(
+      "Browser row limit reached; the oldest loaded rows were removed. Use Continue to older events below the list to reach them.",
+    );
+  };
+
+  const updateHistoryCount = (requester) => {
+    const rows = Array.from(document.querySelectorAll("#history-rows > .log-row"));
+    if (requester === "load-newer") {
+      const nearest = trimHistoryRows(rows, false);
+      if (nearest) recoverOlderEdge(nearest);
+    } else if (requester === "load-older") {
+      if (trimHistoryRows(rows, true)) recoverNewerEdge();
+    }
+    const count = document.querySelectorAll("#history-rows > .log-row").length;
+    const counter = document.querySelector("[data-loaded-count]");
+    if (counter) counter.textContent = String(count);
+    const label = document.querySelector("[data-loaded-label]");
+    if (label) label.textContent = count === 1 ? "event" : "events";
+  };
+
+  // Below 32 rem the filter disclosure starts closed. It is outside every
+  // swap target, so the operator's open or closed choice survives filtering
+  // and paging (DESIGN.md §10.7).
   const prepareResponsiveHistory = (root) => {
     if (!window.matchMedia("(max-width: 32rem)").matches) return;
     root.querySelectorAll(".history-filter-disclosure").forEach((details) => {
@@ -467,9 +559,9 @@
   prepareResponsiveHistory(document);
   enhanceRangeInputs(document);
   document.addEventListener("htmx:afterSwap", (event) => {
-    prepareResponsiveHistory(event.target);
+    const requester = event.detail.requestConfig?.elt?.id;
     enhanceRangeInputs(event.target);
-    updateHistoryCount();
+    updateHistoryCount(requester);
     window.siftailKeyboard?.syncRows();
     window.siftailKeyboard?.landOnHighlight();
     if (event.target.matches?.(".event-detail-slot") &&
@@ -482,7 +574,6 @@
       }
       event.target.querySelector(".event-detail")?.focus({ preventScroll: true });
     }
-    const requester = event.detail.requestConfig?.elt?.id;
     if (requester === "load-older" && !document.querySelector("#load-older")) {
       document.querySelector(".result-summary")?.focus({ preventScroll: true });
     }

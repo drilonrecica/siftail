@@ -513,10 +513,14 @@ Initial page: 200 events, newest first. Both directions are reachable:
 When loading: retain existing rows; localized progress near the control;
 never replace the entire list; prevent duplicate requests.
 
-The browser render cap is 1,000 rows. When the cap trims rows from one end,
-the pagination control for that direction remains available so the trimmed
-interval stays reachable; the trim is announced politely. The cap must never
-remove the operator's only path forward.
+The browser render cap is 1,000 rows. The cap trims the end opposite to the
+load direction, so the rows just loaded stay: Load older trims the newest
+rows at the top, Load newer the oldest at the bottom. The focused row and
+expanded rows are never trimmed. The control for the trimmed end becomes a
+path to the trimmed interval: **Return to newest events** on the tail line,
+or **Continue to older events** below the list, which opens History ending
+at the newest trimmed row and highlights it (§10.10). The trim is announced
+politely. The cap must never remove the operator's only path forward.
 
 ### 10.10 URL state
 
@@ -1064,7 +1068,8 @@ trigger.
 - Preserve existing content; show localized progress.
 - History filter loading keeps rows visible, sets `aria-busy="true"` on the
   updating region for the duration of the request, and shows a small
-  indicator near the result summary.
+  indicator at the end of the result summary line, outside the Filters
+  disclosure so it shows when the disclosure is closed.
 - `Load older` / `Load newer` change their own label to "Loading…" and
   disable only themselves.
 - Live connection uses static status text. No full-page spinners anywhere.
@@ -1121,9 +1126,13 @@ No decorative illustration anywhere.
 
 ## 25. Error states
 
-- Errors render near the failed component (filter errors in the result
-  region; alias validation next to the field; token generation in its
-  panel; backup failure in its section).
+- Errors render near the failed component (alias validation next to the
+  field; token generation in its panel; backup failure in its section).
+  History fragment errors render beside their cause: a failed filter
+  request directly below the filter bar, Load older below the list beside
+  its button, Load newer below the tail line. Each stays, with a
+  **Dismiss** button, until that control next succeeds; unrelated swaps
+  never remove it.
 - Unexpected errors are generic and show `Request ID: 01…`.
 - Database unavailable during History: "Logs could not be read because the
   database is temporarily unavailable. Existing filters were preserved."
@@ -1646,8 +1655,15 @@ CSRF secrets.
   details, settings sections, alias form, status subsections, backup
   region. Never replace the shell for ordinary actions.
 - Selectors apply immediately; text search debounced; URL state pushed;
-  HTMX history caching disabled; authenticated responses use
-  `Cache-Control: no-store`.
+  HTMX history caching disabled and Back/Forward reloads the page;
+  authenticated responses use `Cache-Control: no-store`.
+- History filter requests replace only the results region
+  (`#history-results`), never the filter form: typed text, caret, focus,
+  and the Filters disclosure's open state survive every swap. A newer
+  request aborts one still in flight (`hx-sync="this:replace"`); text
+  inputs carry `hx-preserve`. The server-owned parts of the filter bar
+  (scope selects, container select, presets, mode links, the disclosure's
+  summary line) arrive as out-of-band swaps.
 - Server returns contextual error fragments for expected failures and a
   generic request-ID fragment for unexpected ones.
 - After fragment replacement: preserve focus and caret in filter inputs;

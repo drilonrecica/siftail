@@ -124,14 +124,26 @@ func TestHistoryRowsMapsAllFiltersAndEscapesHostileEvents(t *testing.T) {
 	for _, want := range []string{
 		`data-event-id="1"`,
 		`value="1" selected`,
-		`name="levels" value="error" checked`,
-		`name="streams" value="stderr" checked`,
-		`value="request-1"`,
+		`<div id="history-results">`,
+		`<div hx-swap-oob="innerHTML:#history-source-filters">`,
+		`<div hx-swap-oob="innerHTML:#history-container-field">`,
+		`<div hx-swap-oob="innerHTML:#history-filter-error"></div>`,
+		`Contains “error 100%_\”`,
 		`API &lt;prod&gt;/Web`,
 		`&lt;script&gt;alert(1)&lt;/script&gt; Error 100%_\ Café`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("fragment missing %q", want)
+		}
+	}
+	// The filter response never replaces the form or its typed inputs
+	// (DESIGN.md §38, audit UX-07).
+	for _, unwanted := range []string{
+		`id="history-filter-form"`, `id="contains-filter"`, `id="request-id-filter"`,
+		`name="levels"`, `<details`,
+	} {
+		if strings.Contains(body, unwanted) {
+			t.Errorf("filter fragment replaces form state %q", unwanted)
 		}
 	}
 	if strings.Contains(body, `<script>alert(1)</script>`) ||
@@ -163,8 +175,8 @@ func TestHistoryRejectsInvalidRangesInPagesAndFragments(t *testing.T) {
 			t.Fatalf("%s = %d %q", route, response.Code, response.Body.String())
 		}
 		if route == "/logs/rows?" &&
-			(response.Header().Get("HX-Retarget") != "#history-update-status" ||
-				response.Header().Get("HX-Reswap") != "outerHTML") {
+			(response.Header().Get("HX-Retarget") != "#history-filter-error" ||
+				response.Header().Get("HX-Reswap") != "innerHTML") {
 			t.Fatalf("fragment error headers = %#v", response.Header())
 		}
 	}
@@ -236,7 +248,7 @@ func TestHistoryFragmentSessionExpiryAndSafeQueryFailure(t *testing.T) {
 	if failedResponse.Code != http.StatusServiceUnavailable ||
 		!strings.Contains(failedResponse.Body.String(), "database is temporarily unavailable") ||
 		strings.Contains(strings.ToLower(failedResponse.Body.String()), "sqlite") ||
-		failedResponse.Header().Get("HX-Retarget") != "#history-update-status" {
+		failedResponse.Header().Get("HX-Retarget") != "#history-filter-error" {
 		t.Fatalf("failed query = %d %q", failedResponse.Code, failedResponse.Body.String())
 	}
 }
@@ -350,4 +362,38 @@ func extractHXGet(t *testing.T, body string) string {
 	}
 	matches := allMatches[len(allMatches)-1]
 	return html.UnescapeString(matches[1])
+}
+
+// Fragment errors are swapped into the slot beside the control that caused
+// them, never into a shared status line (audit UX-14).
+func TestHistoryFragmentErrorsTargetTheirCause(t *testing.T) {
+	fixture := newBrowserFixture(t, "https://logs.example.test", true)
+	cookie := loginBrowserCookie(t, fixture)
+	for _, test := range []struct {
+		name   string
+		extra  string
+		target string
+	}{
+		{"filter", "&from=bad", "#history-filter-error"},
+		{"load older", "&append=1", "#history-older-error"},
+		{"load newer", "&prepend=1", "#history-newer-error"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodGet,
+				"/logs/rows?"+baseHistoryValues().Encode()+test.extra, nil)
+			request.AddCookie(cookie)
+			request.Header.Set("HX-Request", "true")
+			response := httptest.NewRecorder()
+			fixture.handler().ServeHTTP(response, request)
+			body := response.Body.String()
+			if response.Code != http.StatusBadRequest ||
+				response.Header().Get("HX-Retarget") != test.target ||
+				response.Header().Get("HX-Reswap") != "innerHTML" ||
+				!strings.Contains(body, `role="alert"`) ||
+				!strings.Contains(body, `data-dismiss-error`) ||
+				strings.Contains(body, `id="history-update-status"`) {
+				t.Fatalf("error = %d %#v %q", response.Code, response.Header(), body)
+			}
+		})
+	}
 }

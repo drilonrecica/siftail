@@ -48,9 +48,10 @@ func (b *Browser) historyPage(w http.ResponseWriter, r *http.Request) {
 
 func (b *Browser) historyRows(w http.ResponseWriter, r *http.Request) {
 	values := cloneURLValues(r.URL.Query())
+	errorTarget := historyErrorTarget(values)
 	appendValues, hasAppend := values["append"]
 	if hasAppend && (len(appendValues) != 1 || appendValues[0] != "1") {
-		historyErrorHeaders(w)
+		historyErrorHeaders(w, errorTarget)
 		_ = b.ui.HistoryError(w, http.StatusBadRequest, webui.HistoryView{
 			Error: "Check the time range and filters.",
 		})
@@ -58,7 +59,7 @@ func (b *Browser) historyRows(w http.ResponseWriter, r *http.Request) {
 	}
 	prependValues, hasPrepend := values["prepend"]
 	if hasPrepend && (len(prependValues) != 1 || prependValues[0] != "1" || hasAppend) {
-		historyErrorHeaders(w)
+		historyErrorHeaders(w, errorTarget)
 		_ = b.ui.HistoryError(w, http.StatusBadRequest, webui.HistoryView{
 			Error: "Check the time range and filters.",
 		})
@@ -76,7 +77,7 @@ func (b *Browser) historyRows(w http.ResponseWriter, r *http.Request) {
 			CanonicalURL: "/logs",
 			Error:        "Check the time range and filters.",
 		}
-		historyErrorHeaders(w)
+		historyErrorHeaders(w, errorTarget)
 		_ = b.ui.HistoryError(w, http.StatusBadRequest, view)
 		return
 	}
@@ -88,7 +89,7 @@ func (b *Browser) historyRows(w http.ResponseWriter, r *http.Request) {
 			Error:          message,
 			ErrorRequestID: requestID,
 		}
-		historyErrorHeaders(w)
+		historyErrorHeaders(w, errorTarget)
 		_ = b.ui.HistoryError(w, status, view)
 		return
 	}
@@ -105,14 +106,36 @@ func (b *Browser) historyRows(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("HX-Push-Url", historyURL(query))
-	if err := b.ui.HistoryRegion(w, http.StatusOK, view); err != nil {
+	if err := b.ui.HistoryResults(w, http.StatusOK, view); err != nil {
 		http.Error(w, "Logs are temporarily unavailable.", http.StatusInternalServerError)
 	}
 }
 
-func historyErrorHeaders(w http.ResponseWriter) {
-	w.Header().Set("HX-Retarget", "#history-update-status")
-	w.Header().Set("HX-Reswap", "outerHTML")
+// History fragment errors render beside the control that caused them
+// (DESIGN.md §25, audit UX-14): Load older below the list, Load newer at the
+// tail line, and filter requests beside the filter form. Each slot is cleared
+// only by a later success of the same control or by dismissal, never by an
+// unrelated swap.
+const (
+	historyFilterErrorTarget = "#history-filter-error"
+	historyOlderErrorTarget  = "#history-older-error"
+	historyNewerErrorTarget  = "#history-newer-error"
+)
+
+func historyErrorTarget(values url.Values) string {
+	switch {
+	case values.Has("append"):
+		return historyOlderErrorTarget
+	case values.Has("prepend"):
+		return historyNewerErrorTarget
+	default:
+		return historyFilterErrorTarget
+	}
+}
+
+func historyErrorHeaders(w http.ResponseWriter, target string) {
+	w.Header().Set("HX-Retarget", target)
+	w.Header().Set("HX-Reswap", "innerHTML")
 }
 
 func (b *Browser) historyView(

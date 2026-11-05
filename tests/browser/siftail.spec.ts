@@ -82,6 +82,84 @@ async function ingestSource(
   }
 }
 
+// Ingests events for one browser-project/test application at fixed
+// timestamps, one millisecond apart from baseMs, oldest first.
+async function ingestAt(
+  application: string,
+  count: number,
+  baseMs: number,
+  label = application,
+): Promise<void> {
+  const state = readState();
+  for (let start = 0; start < count; start += 100) {
+    const size = Math.min(100, count - start);
+    const response = await fetch(`http://${state.ingestAddress}/api/v1/ingest`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${getLiveToken()}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(Array.from({ length: size }, (_, offset) => ({
+        timestamp: new Date(baseMs + start + offset).toISOString(),
+        project: "browser-project",
+        environment: "test",
+        application,
+        service: "web",
+        stream: "stdout",
+        level: "INFO",
+        log: `${label}-${start + offset}`,
+      }))),
+    });
+    if (response.status !== 204) {
+      throw new Error(`fixture ingestion returned HTTP ${response.status}`);
+    }
+  }
+}
+
+function historyScopeURL(application: string, fromMs: number, toMs: number): string {
+  const values = new URLSearchParams({
+    mode: "history",
+    server: "1",
+    project: "browser-project",
+    environment: "test",
+    application,
+    service: "web",
+    from: new Date(fromMs).toISOString(),
+    to: new Date(toMs).toISOString(),
+    direction: "older",
+    limit: "200",
+  });
+  return `/logs?${values.toString()}`;
+}
+
+// Holds matching requests until release() so a test can act while they are
+// in flight.
+async function holdRequests(page: Page, pattern: RegExp): Promise<{
+  release: () => void;
+  held: () => number;
+}> {
+  let waiting: Array<() => void> = [];
+  let count = 0;
+  let open = false;
+  await page.route(pattern, async (route) => {
+    count += 1;
+    if (open) {
+      await route.continue();
+      return;
+    }
+    await new Promise<void>((resolve) => waiting.push(resolve));
+    await route.continue().catch(() => undefined);
+  });
+  return {
+    release: () => {
+      open = true;
+      waiting.forEach((resolve) => resolve());
+      waiting = [];
+    },
+    held: () => count,
+  };
+}
+
 async function ingestWithToken(token: string, application: string): Promise<number> {
   const state = readState();
   const response = await fetch(`http://${state.ingestAddress}/api/v1/ingest`, {
@@ -854,6 +932,241 @@ test("Show events around this time lands on the event from History and Live", as
   const liveHit = page.locator("#history-rows > .log-row[data-highlighted]");
   await expect(liveHit).toContainText("surrounding-live-hit");
   await expect(liveHit).toBeFocused();
+});
+
+test("typing during a slowed filter request is kept and the form is never swapped", async ({
+  page,
+}) => {
+  await login(page);
+  const form = page.locator("#history-filter-form");
+  await form.evaluate((element) => { element.dataset.marker = "original"; });
+  const hold = await holdRequests(page, /\/logs\/rows\?/);
+  const contains = page.locator("#contains-filter");
+  await contains.click();
+  await contains.pressSequentially("needle");
+  await expect.poll(hold.held).toBe(1);
+  // The indicator beside the result summary shows the request, and the
+  // region reports it is busy.
+  await expect(page.locator("#history-filter-loading > span")).toBeVisible();
+  await expect(page.locator("#history-region")).toHaveAttribute("aria-busy", "true");
+  await page.locator(".result-summary").screenshot({
+    path: ".playwright-artifacts/sft-117-filter-loading.png",
+  });
+  await contains.pressSequentially("-hostile");
+  await expect.poll(hold.held).toBe(2);
+  hold.release();
+  await expect(page).toHaveURL(/contains=needle-hostile/);
+  await expect(page.locator(".log-row")).toHaveCount(1);
+  await expect(contains).toHaveValue("needle-hostile");
+  await expect(contains).toBeFocused();
+  expect(await contains.evaluate((input: HTMLInputElement) => input.selectionStart)).toBe(14);
+  await expect(form).toHaveAttribute("data-marker", "original");
+  await expect(page.locator("#history-filter-loading > span")).toBeHidden();
+  await expect(page.locator("#history-region")).toHaveAttribute("aria-busy", "false");
+  await page.unrouteAll({ behavior: "ignoreErrors" });
+
+  // A select replaced out of band keeps focus, and its cascade still loads.
+  await page.locator("#server-filter").focus();
+  await page.locator("#server-filter").selectOption("1");
+  await expect(page).toHaveURL(/server=1/);
+  await expect(page.locator("#server-filter")).toBeFocused();
+  await expect(page.locator("#project-filter option[value='browser-project']")).toHaveCount(1);
+  await expect(form).toHaveAttribute("data-marker", "original");
+});
+
+test("the mobile Filters disclosure keeps its open state across swaps", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await login(page);
+  const disclosure = page.locator(".history-filter-disclosure");
+  await expect(disclosure).not.toHaveAttribute("open", "");
+  // Toggled from the keyboard, as an operator on a phone keyboard would.
+  await page.locator(".history-filter-disclosure > summary").focus();
+  await page.keyboard.press("Enter");
+  await expect(disclosure).toHaveAttribute("open", "");
+  await page.locator("#level-debug").uncheck();
+  await expect(page).toHaveURL(/levels=/);
+  await expect(disclosure).toHaveAttribute("open", "");
+  await expect(page.locator("#level-debug")).toBeFocused();
+  await page.locator("#server-filter").selectOption("1");
+  await expect(page).toHaveURL(/server=1/);
+  await expect(disclosure).toHaveAttribute("open", "");
+  for (const theme of ["dark", "light"] as const) {
+    await setTheme(page, theme);
+    await page.screenshot({ path: `.playwright-artifacts/sft-117-mobile-open-${theme}.png` });
+  }
+
+  // Closed stays closed too, and the summary names the new scope.
+  await page.locator(".history-filter-disclosure > summary").focus();
+  await page.keyboard.press("Enter");
+  await expect(disclosure).not.toHaveAttribute("open", "");
+  await page.getByRole("button", { name: "Load older" }).click();
+  await expect(page.locator(".log-row")).not.toHaveCount(200);
+  await expect(disclosure).not.toHaveAttribute("open", "");
+  await expect(page.locator("#history-filter-scope")).toContainText("Browser");
+});
+
+test("Load older and Load newer show Loading inside the button", async ({ page }) => {
+  await login(page);
+  for (const [name, pattern] of [
+    ["Load older", /\/logs\/rows\?.*append=1/],
+    ["Load newer", /\/logs\/rows\?.*prepend=1/],
+  ] as const) {
+    const hold = await holdRequests(page, pattern);
+    const button = page.locator(name === "Load older" ? "#load-older" : "#load-newer");
+    await button.click();
+    await expect.poll(hold.held).toBe(1);
+    await expect(button).toBeDisabled();
+    await expect(button).toHaveAccessibleName("Loading…");
+    await expect(button.locator(".htmx-indicator")).toBeVisible();
+    await expect(button.locator(".paging-label")).toBeHidden();
+    await (name === "Load older" ? page.locator("#history-pagination") : page.locator("#history-tail"))
+      .screenshot({
+        path: `.playwright-artifacts/sft-117-${name === "Load older" ? "older" : "newer"}-loading.png`,
+      });
+    hold.release();
+    await expect(page.locator("#history-update-status")).not.toBeEmpty();
+    await page.unrouteAll({ behavior: "ignoreErrors" });
+    if (name === "Load newer") {
+      await expect(page.locator("#load-newer")).toHaveAccessibleName("Load newer");
+    }
+  }
+});
+
+test("fragment errors render beside their cause and survive unrelated swaps", async ({
+  page,
+}) => {
+  await login(page);
+  const filterError = page.locator("#history-filter-error");
+  await page.getByText("More filters").click();
+  await page.locator("#http-status-filter").fill("abc");
+  await page.locator("#http-status-filter").press("Tab");
+  await expect(filterError.getByRole("alert")).toContainText("Check the time range and filters.");
+  // The error sits directly after the filter form, before the results.
+  expect(await page.evaluate(() => {
+    const error = document.querySelector("#history-filter-error");
+    const form = document.querySelector(".history-filter-disclosure");
+    return error?.previousElementSibling === form;
+  })).toBe(true);
+  await expect(page.locator("#http-status-filter")).toHaveValue("abc");
+
+  // A successful Load older does not clear it.
+  await page.getByRole("button", { name: "Load older" }).click();
+  await expect(page.locator("#history-update-status")).toContainText("additional");
+  await expect(filterError.getByRole("alert")).toBeVisible();
+  for (const theme of ["dark", "light"] as const) {
+    await setTheme(page, theme);
+    await filterError.scrollIntoViewIfNeeded();
+    await page.screenshot({ path: `.playwright-artifacts/sft-117-filter-error-${theme}.png` });
+  }
+
+  // Fixing the cause clears it.
+  await page.locator("#http-status-filter").fill("");
+  await page.locator("#http-status-filter").press("Enter");
+  await expect(filterError).toBeEmpty();
+
+  // A failed Load older reports below the list, beside its button.
+  await page.route(/\/logs\/rows\?.*append=1/, async (route) => {
+    const url = new URL(route.request().url());
+    url.searchParams.set("cursor", "tampered");
+    await route.continue({ url: url.toString() });
+  });
+  await page.getByRole("button", { name: "Load older" }).click();
+  const olderError = page.locator("#history-pagination #history-older-error");
+  await expect(olderError.getByRole("alert")).toContainText(
+    "The page cursor is invalid for these filters.",
+  );
+  await expect(page.getByRole("button", { name: "Load older" })).toBeEnabled();
+  // Load newer succeeds without removing it.
+  await page.getByRole("button", { name: "Load newer" }).click();
+  await expect(page.locator("#history-update-status")).toContainText(/newer/);
+  await expect(olderError.getByRole("alert")).toBeVisible();
+  for (const theme of ["dark", "light"] as const) {
+    await setTheme(page, theme);
+    await page.locator("#history-pagination").screenshot({
+      path: `.playwright-artifacts/sft-117-older-error-${theme}.png`,
+    });
+  }
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.locator("#history-pagination").screenshot({
+    path: ".playwright-artifacts/sft-117-older-error-mobile-light.png",
+  });
+  expect(await page.evaluate(
+    () => document.documentElement.scrollWidth > window.innerWidth,
+  )).toBe(false);
+  await page.setViewportSize({ width: 1280, height: 720 });
+  // Dismiss removes it and returns focus to the control.
+  await olderError.getByRole("button", { name: "Dismiss" }).click();
+  await expect(olderError).toBeEmpty();
+  await expect(page.locator("#load-older")).toBeFocused();
+  await page.unrouteAll({ behavior: "ignoreErrors" });
+});
+
+test("the row cap trims opposite to the load direction and keeps focused and expanded rows", async ({
+  page,
+}) => {
+  test.setTimeout(90_000);
+  await login(page);
+  // Older direction: 1,100 events, five Load older pages.
+  const olderBase = Date.now() - 3 * 60 * 60 * 1000;
+  await ingestAt("cap-older", 1100, olderBase);
+  await page.goto(historyScopeURL("cap-older", olderBase - 60_000, olderBase + 60_000));
+  const rows = page.locator("#history-rows > .log-row");
+  await expect(rows).toHaveCount(200);
+  const newest = rows.first();
+  const newestID = await newest.getAttribute("data-event-id");
+  await newest.locator(".event-toggle").click();
+  await expect(newest.locator(".event-toggle")).toHaveAttribute("aria-expanded", "true");
+  for (let page_ = 1; page_ <= 5; page_ += 1) {
+    await page.getByRole("button", { name: "Load older" }).click();
+    await expect(page.locator("#history-update-status")).toContainText(/additional|limit/);
+    await expect(rows).toHaveCount(Math.min(200 * (page_ + 1), 1000));
+  }
+  // The just-loaded oldest rows stay; the expanded newest row stays; the
+  // trimmed newest interval is reachable from the tail line.
+  await expect(rows.last()).toContainText("cap-older-0");
+  await expect(rows.first()).toHaveAttribute("data-event-id", newestID ?? "");
+  await expect(rows.nth(1)).toContainText("cap-older-998");
+  await expect(page.locator("[data-loaded-count]")).toHaveText("1000");
+  await expect(page.locator("#history-tail").getByRole("link", { name: "Return to newest events" }))
+    .toBeVisible();
+  await expect(page.locator("#history-update-status")).toContainText("newest loaded rows were removed");
+
+  // Newer direction: 1,000 events loaded, then 200 newer arrive.
+  const newerBase = Date.now() - 4 * 60 * 60 * 1000;
+  await ingestAt("cap-newer", 1000, newerBase);
+  await page.goto(historyScopeURL("cap-newer", newerBase - 60_000, newerBase + 60_000));
+  await expect(rows).toHaveCount(200);
+  for (let page_ = 1; page_ <= 4; page_ += 1) {
+    await page.getByRole("button", { name: "Load older" }).click();
+    await expect(rows).toHaveCount(200 * (page_ + 1));
+  }
+  const oldest = rows.last();
+  await expect(oldest).toContainText("cap-newer-0");
+  const oldestID = await oldest.getAttribute("data-event-id");
+  await oldest.locator(".event-toggle").click();
+  await expect(oldest.locator(".event-toggle")).toHaveAttribute("aria-expanded", "true");
+  await ingestAt("cap-newer", 200, newerBase + 5_000, "cap-newer-late");
+  await page.getByRole("button", { name: "Load newer" }).click();
+  await expect(page.locator("#history-update-status")).toContainText("oldest loaded rows were removed");
+  await expect(rows).toHaveCount(1000);
+  await expect(page.locator("[data-loaded-count]")).toHaveText("1000");
+  // The rows just loaded are at the top; the expanded oldest row remains.
+  await expect(rows.first()).toContainText("cap-newer-late-199");
+  await expect(page.locator(`#history-rows > .log-row[data-event-id="${oldestID}"]`)).toHaveCount(1);
+  await expect(page.locator("#load-older")).toHaveCount(0);
+  const kept = await rows.nth(998).locator(".row-message").textContent();
+  expect(kept).toBe("cap-newer-201");
+  // The trimmed older interval is reachable: the link lands on its newest
+  // row, the one directly below the kept rows.
+  const recover = page.locator("#history-pagination").getByRole("link", {
+    name: "Continue to older events",
+  });
+  await expect(recover).toBeVisible();
+  await recover.click();
+  const highlighted = page.locator("#history-rows > .log-row[data-highlighted]");
+  await expect(highlighted).toContainText("cap-newer-200");
+  await expect(highlighted).toBeFocused();
+  await expect(rows.first()).toContainText("cap-newer-200");
 });
 
 test("Live enforces rendered and pending caps and does not steal scroll", async ({ page }) => {

@@ -675,6 +675,13 @@ func (r *Renderer) HistoryRegion(w http.ResponseWriter, status int, view History
 	return r.render(w, status, "history-region.html", view)
 }
 
+// HistoryResults renders a filter response: the results region plus
+// out-of-band updates for the server-owned parts of the filter bar, so the
+// form's text inputs and disclosure are never replaced (DESIGN.md §38).
+func (r *Renderer) HistoryResults(w http.ResponseWriter, status int, view HistoryView) error {
+	return r.render(w, status, "history-results.html", view)
+}
+
 func (r *Renderer) HistoryAppend(w http.ResponseWriter, status int, view HistoryView) error {
 	return r.render(w, status, "history-append.html", view)
 }
