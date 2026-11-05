@@ -3,7 +3,24 @@
 **Measured:** 2026-07-28
 **Scope:** SFT-029 development baseline; not a hardware-independent guarantee
 
-## Method and environment
+## Real-disk rerun (SFT-100, 2026-11-05)
+
+- Host: Fedora Linux, kernel 7.2.10, x86-64; Intel Core i5-7500, four cores,
+  3.40 GHz nominal; 31 GiB RAM; no container limits.
+- Storage: `TMPDIR` on **btrfs** (`/dev/sda3`) on a Crucial BX500 480 GB SATA
+  SSD (`CT480BX500SSD1`, non-rotational). Real disk with `fsync`; not tmpfs.
+- Toolchain: Go 1.27.3 linux/amd64 with CGO; `github.com/mattn/go-sqlite3`
+  v1.14.52 (SQLite 3.53.4); production migrations and pragmas.
+- Command: `make bench BENCH_GROUPS="sources"` (`scripts/bench.sh`, which refuses a
+  tmpfs `TMPDIR` and prints the filesystem and device class).
+- Benchmark: `BenchmarkSourceCatalog10000`, `-benchtime=3s -count=5`.
+
+Median **382.1 µs/page** (range 379.0–398.1 µs), 111,510 bytes/op, 2,391
+allocations/op, against 385.3 µs, 111,462 bytes, and 2,391 allocations on
+2026-07-28 (storage unrecorded, presumed tmpfs). The fixture is read-only, so
+the result is unchanged within noise.
+
+## Method and environment (2026-07-28)
 
 - Host: Fedora Linux 7.1.4-204.fc44.x86_64, linux/amd64.
 - CPU: Intel Core i5-7500, four physical cores, 3.40 GHz nominal.

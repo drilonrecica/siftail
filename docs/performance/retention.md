@@ -2,9 +2,42 @@
 
 **Measured:** 2026-11-05
 **Host:** Fedora Linux, Intel Core i5-7500 at 3.40 GHz, linux/amd64, Go 1.27.3
-**Storage:** btrfs on a SATA SSD (`TMPDIR` on the data volume, not tmpfs)
+**Storage:** btrfs (`/dev/sda3`) on a Crucial BX500 SATA SSD (non-rotational); `TMPDIR` on the data volume, not tmpfs. Environment, command, and SQLite version are in the SFT-100 section
 **Scope:** SFT-033 bounded application-event retention; SFT-092 chunked
 reclamation and the in-use-page footprint (audit DAT-05, DAT-13)
+
+## SFT-100 real-disk rerun (2026-11-05)
+
+- Host: Fedora Linux, kernel 7.2.10, x86-64; Intel Core i5-7500, four cores,
+  3.40 GHz nominal; 31 GiB RAM; no container limits.
+- Storage: `TMPDIR` on **btrfs** (`/dev/sda3`) on a Crucial BX500 480 GB SATA
+  SSD (`CT480BX500SSD1`, non-rotational). Real disk with `fsync`; not tmpfs.
+- Toolchain: Go 1.27.3 linux/amd64 with CGO; `github.com/mattn/go-sqlite3`
+  v1.14.52 (SQLite 3.53.4); production migrations and pragmas.
+- Command: `make bench BENCH_GROUPS="retention"` (`scripts/bench.sh`, which refuses a
+  tmpfs `TMPDIR` and prints the filesystem and device class).
+- Benchmark: `^BenchmarkRetention`, `-benchtime=1x -count=5`, current tree
+  (schema 9).
+
+| Benchmark | Median (range) |
+|---|---:|
+| `DeleteChunk10000`, complete cleanup | 247 ms (200–536 ms) |
+| `WriterBaseline` p95 | 4.30 ms (2.86–5.15 ms) |
+| `WriterInterference` p95 (concurrent cleanup) | 16.4 ms (12.2–22.9 ms) |
+| `WriterInterference`, run | 581 ms (540–699 ms) |
+| `ReclaimChunks`, `max_chunk_ms` | 79.4 ms (69.9–535.9 ms) |
+| `ReclaimChunks`, `max_checkpoint_ms` | 19.0 ms (13.7–286.1 ms) |
+| `ReclaimChunks`, `reclaim_ms` | 270 ms (249–1,023 ms) |
+
+`DeleteChunk10000` ends at 8.148 MiB from 40.19 MiB with 2,048 free pages;
+`ReclaimChunks` released 8,192 pages in eight chunks and took the file from
+48.42 MiB to 16.38 MiB in all five runs. The first `ReclaimChunks` run had a
+535.9 ms chunk and a 286 ms checkpoint, which is a disk stall (the other four
+runs peaked at 69.9–82.8 ms); the median is the figure to read. The
+concurrent-cleanup p95 median (16.4 ms) is below the SFT-092 record (21.1 ms)
+and the baseline p95 (4.30 ms) is above it (3.66 ms); both differences are
+inside this disk's run-to-run spread. The 1 s hold ceiling and the 250 ms
+commit target hold at the median.
 
 ## Production limits and ordering
 

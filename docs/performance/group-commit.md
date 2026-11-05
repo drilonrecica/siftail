@@ -104,6 +104,45 @@ gave these numbers for three runs of 500 operations each:
 | `BenchmarkHTTPCommitLatency` p95 | 6.39 / 6.81 / 6.11 ms | 5.88 / 5.38 / 5.54 ms |
 | `BenchmarkHTTPSustained100EventBatch` (one client) | 6,014 / 6,289 / 6,243 events/s | 6,982 / 6,800 / 6,914 events/s |
 
+## SFT-100 rerun on the current tree (2026-11-05)
+
+Same benchmark and command as above (`make bench BENCH_GROUPS=group-commit`,
+`-benchtime=1000x -count=3`), after SFT-099's hot-path work. `TMPDIR` on
+**btrfs** (`/dev/sda3`) on the Crucial BX500 SATA SSD (non-rotational); Go
+1.27.3; go-sqlite3 v1.14.52 (SQLite 3.53.4); schema 9. Batches/s in run order
+(events/s is that times the batch size); p95 in ms.
+
+| Batch | Producers | `max-batches=1` | `=16` | `=64` (default) | `=256` |
+|---:|---:|---|---|---|---|
+| 1 event | 16 | 117 / 262 / 293, p95 1,029 / 95 / 85 | 1,751 / 1,580 / 1,587, p95 19 / 19 / 17 | 1,518 / 1,476 / 1,409, p95 18 / 18 / 17 | 1,619 / 1,979 / 1,855, p95 20 / 15 / 11 |
+| 1 event | 64 | 246 / 248 / 268, p95 321 / 330 / 300 | 2,664 / 3,175 / 2,779, p95 40 / 28 / 37 | 5,374 / 5,001 / 4,324, p95 13 / 14 / 35 | 4,555 / 4,078 / 4,724, p95 20 / 18 / 20 |
+| 10 events | 16 | 242 / 265 / 210, p95 103 / 86 / 125 | 1,161 / 900 / 963, p95 28 / 35 / 31 | 1,059 / 979 / 1,287, p95 30 / 34 / 18 | 876 / 1,081 / 1,095, p95 38 / 30 / 28 |
+| 10 events | 64 | 211 / 204 / 235, p95 392 / 410 / 373 | 1,732 / 1,478 / 1,536, p95 59 / 58 / 63 | 1,578 / 1,440 / 1,972, p95 60 / 130 / 58 | 2,161 / 1,972 / 1,879, p95 37 / 58 / 64 |
+| 100 events | 16 | 124 / 129 / 133, p95 183 / 165 / 173 | 279 / 269 / 268, p95 83 / 95 / 96 | 46 / 122 / 285, p95 839 / 403 / 77 | 240 / 276 / 239, p95 90 / 86 / 94 |
+| 100 events | 64 | 116 / 119 / 123, p95 776 / 677 / 642 | 297 / 293 / 274, p95 256 / 260 / 355 | 313 / 310 / 326, p95 245 / 235 / 230 | 324 / 324 / 315, p95 226 / 231 / 249 |
+
+What it shows:
+
+- Group commit still lifts small batches 4–20× over one commit per batch:
+  1-event, 64 producers, 248 → about 5,000 events/s at the default bound, with
+  p95 down from about 320 ms to 13–35 ms. The 1,000 events/s target
+  (`AGENTS.md` §17.1) is met at 16 producers with 1-event batches (about
+  1,500/s) and well exceeded at 10 and 100 events per batch.
+- The CPU-bound ceiling at 100 events per batch moved from about 9,500 to about
+  31,000 events/s (64 producers, default bound), which is SFT-099's decode,
+  prepared-statement, and parse work, not the disk.
+- Disk noise is visible and not hidden. The first `max-batches=1` run (117
+  batches/s, p95 1,029 ms) and the 100-event, 16-producer default (46 and 122
+  batches/s in runs 1 and 2, p95 839 and 403 ms, against 285 in run 3) were
+  stalled by the disk; the same cell gave 240–279 batches/s at bounds 16 and
+  256. Read the medians and the neighbouring bounds, not those cells alone.
+- The bound choice remains unchanged: 16, 64, and 256 are within noise of each
+  other at 16 producers; at 64 producers 64 and 256 lead 16 at small batches.
+  No default changes.
+
+The figures in the earlier sections (2026-11-05, pre-SFT-099) were also taken
+on this disk and stay as the historical before/after for SFT-098.
+
 ## Defaults
 
 | Variable | Default | Allowed |
@@ -131,5 +170,6 @@ gave these numbers for three runs of 500 operations each:
   source discovery and deduplication lookups add per-event CPU, which lowers
   the CPU ceiling but not the fsync saving.
 - This is not the production-container measurement that `AGENTS.md` §17.2
-  asks for. That, and re-running the older documents on a real disk, belong
-  to SFT-100.
+  asks for; it measures the Go write path through the real writer and SQLite
+  with `TMPDIR` on a real disk. A production-container measurement is a
+  release-gate item, not part of SFT-100.

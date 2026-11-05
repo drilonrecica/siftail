@@ -4,7 +4,34 @@
 **Scope:** SFT-028 development and release-gate evidence; not a
 hardware-independent guarantee
 
-## Method and environment
+## Real-disk rerun (SFT-100, 2026-11-05)
+
+These benchmarks are in-memory (broker fan-out and SSE encoding) and touch no
+disk, so storage cannot change them; they are re-run so the environment is
+recorded. The 2026-07-28 figures below did not record `TMPDIR`.
+
+- Host: Fedora Linux, kernel 7.2.10, x86-64; Intel Core i5-7500, four cores,
+  3.40 GHz nominal; 31 GiB RAM; no container limits.
+- Storage: `TMPDIR` on **btrfs** (`/dev/sda3`) on a Crucial BX500 480 GB SATA
+  SSD (`CT480BX500SSD1`, non-rotational). Real disk with `fsync`; not tmpfs.
+- Toolchain: Go 1.27.3 linux/amd64 with CGO; `github.com/mattn/go-sqlite3`
+  v1.14.52 (SQLite 3.53.4); production migrations and pragmas.
+- Command: `make bench BENCH_GROUPS="live"` (`scripts/bench.sh`, which refuses a
+  tmpfs `TMPDIR` and prints the filesystem and device class).
+
+Five runs of `-benchtime=3s`:
+
+| Benchmark | Median | Sample range | Bytes/op | Allocs/op |
+|---|---:|---:|---:|---:|
+| Broker publication to 16 subscribers | 4.893 µs/event | 4.876–4.937 µs | 440 | 2 |
+| SSE JSON encoding and framing | 3.187 µs/frame | 3.143–3.473 µs | 2,297 | 8 |
+
+The broker result matches the earlier run. SSE framing is 40% slower
+(2.277 → 3.187 µs) and allocates one more object per frame (7 → 8, 1,913 →
+2,297 bytes) than the 2026-07-28 record; the cause is not investigated in this task. It is well
+inside any plausible per-event budget (about 3 ms per 1,000 events).
+
+## Method and environment (2026-07-28)
 
 - Host: Fedora Linux 7.1.4-204.fc44.x86_64, linux/amd64.
 - CPU: Intel Core i5-7500, four physical cores, 3.40 GHz nominal.

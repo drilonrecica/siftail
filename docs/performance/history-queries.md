@@ -3,6 +3,51 @@
 **Measured:** 2026-07-28 (SFT-020 baseline); 2026-11-05 (SFT-095 bounds)  
 **Scope:** development measurements; not a hardware-independent guarantee
 
+**Real-disk note (SFT-100).** The SFT-020 baseline and 0.2.0 gate rerun
+below (2026-07-28) did not record where `TMPDIR` pointed; with the default
+`/tmp` on tmpfs they are presumed **no-fsync comparison numbers only**. They
+are read-only queries, so the page cache dominates either way, but the
+current-tree figures are in the SFT-100 section that follows.
+
+## SFT-100: real-disk rerun (2026-11-05)
+
+- Host: Fedora Linux, kernel 7.2.10, x86-64; Intel Core i5-7500, four cores,
+  3.40 GHz nominal; 31 GiB RAM; no container limits.
+- Storage: `TMPDIR` on **btrfs** (`/dev/sda3`) on a Crucial BX500 480 GB SATA
+  SSD (`CT480BX500SSD1`, non-rotational). Real disk with `fsync`; not tmpfs.
+- Toolchain: Go 1.27.3 linux/amd64 with CGO; `github.com/mattn/go-sqlite3`
+  v1.14.52 (SQLite 3.53.4); production migrations and pragmas.
+- Command: `make bench BENCH_GROUPS="logs"` (`scripts/bench.sh`, which refuses a
+  tmpfs `TMPDIR` and prints the filesystem and device class).
+- Benchmark: `BenchmarkHistoryStore(100K|1M)`, `-benchtime=5x -count=1`, the
+  SFT-095 fixture and cases, schema 9.
+
+| Rows | Query | Time/op | Allocs/op |
+|---:|---|---:|---:|
+| 100,000 | unfiltered | 1.14 ms | 7,695 |
+| 100,000 | source + level | 1.18 ms | 7,745 |
+| 100,000 | literal `needle` | 117 ms | 3,880 |
+| 100,000 | Server only | 1.28 ms | 7,702 |
+| 100,000 | Server + two levels | 1.61 ms | 7,726 |
+| 100,000 | deep cursor, unfiltered | 1.14 ms | 7,728 |
+| 100,000 | deep cursor, source | 1.19 ms | 7,779 |
+| 100,000 | deep cursor, Server only | 1.14 ms | 7,737 |
+| 1,000,000 | unfiltered | 1.16 ms | 7,696 |
+| 1,000,000 | source + level | 1.30 ms | 7,744 |
+| 1,000,000 | literal `needle` | 236 ms | 7,686 |
+| 1,000,000 | Server only | 1.28 ms | 7,704 |
+| 1,000,000 | Server + two levels | 1.66 ms | 7,726 |
+| 1,000,000 | deep cursor, unfiltered | 1.14 ms | 7,728 |
+| 1,000,000 | deep cursor, source | 1.17 ms | 7,778 |
+| 1,000,000 | deep cursor, Server only | 1.25 ms | 7,736 |
+
+One run of five iterations. The results agree with the SFT-095 "after" column:
+every indexed shape costs one page of index reads at both sizes, a deep cursor
+costs the same as the first page, and the literal scan (117 ms and 236 ms,
+against 139 ms and 248 ms) is bounded by the time range. Unlike the SFT-095
+run, the 100,000-row unfiltered and source cases were not slowed by a cold
+cache.
+
 ## SFT-095: cursor and hierarchy bounds (2026-11-05)
 
 Audit DAT-06 found that a History cursor was only an `OR` predicate, so page N
@@ -96,7 +141,7 @@ hierarchy that is a small fraction of a busy instance skips more rows, bounded
 by the 31-day range, like literal search. The 10-million-event review remains
 the pre-public release gate below.
 
-## SFT-020 baseline (2026-07-28)
+## SFT-020 baseline (2026-07-28; storage unrecorded, presumed tmpfs)
 
 The sections below record the original fixture (two sources, 14-byte
 messages, events one microsecond apart, no cursor) and are kept as history.

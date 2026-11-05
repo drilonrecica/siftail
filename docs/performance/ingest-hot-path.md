@@ -6,6 +6,18 @@
 SATA SSD (`CT480BX500SSD1`, non-rotational). Real disk with `fsync`; no tmpfs
 number appears here.
 
+## SFT-100 rerun (2026-11-05)
+
+Same benchmarks, `make bench BENCH_GROUPS=ingest`, five runs, Go 1.27.3,
+SQLite 3.53.4 (go-sqlite3 v1.14.52), `TMPDIR` on btrfs (`/dev/sda3`) on the
+Crucial BX500 SATA SSD (non-rotational), the same disk as below. Medians:
+`DecodeBatch100` 407 µs, 331,888 B, 3,813 allocs; `Normalize` 8.90 µs, 83
+allocs; `BatchWriter100Events` 7.63 ms, 4,631 allocs; `BatchWriterSQLiteCommit`
+3.77 ms, 164 allocs; `BatchWriterIdempotentRetry` 3.38 ms, 206 allocs;
+`AuditRecordAtCapacity` 3.60 ms, 74 allocs. Allocation counts reproduce the
+SFT-099 "after" column exactly and times fall inside its ranges. The whole
+document is real-disk; none of it is tmpfs.
+
 ## What changed
 
 - Each received record is tokenized once. `logs.ParseRecord` validates the

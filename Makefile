@@ -1,4 +1,4 @@
-.PHONY: fmt fmt-check vet test race-test build compose-check check frontend-check playwright clean
+.PHONY: fmt fmt-check vet test race-test build compose-check check bench frontend-check playwright clean
 
 GO       := go
 # Upper bound for one package's test binary; a hung test fails instead of stalling igris.
@@ -41,6 +41,13 @@ compose-check:
 
 check: fmt-check vet test build compose-check
 
+# Benchmarks recorded under docs/performance. TMPDIR must be on a real disk
+# (AGENTS.md section 17.2); scripts/bench.sh refuses tmpfs. BENCH_GROUPS limits
+# the run, e.g. `make bench BENCH_GROUPS="ingest logs"`; `all` adds group-commit.
+BENCH_GROUPS ?=
+bench:
+	scripts/bench.sh $(BENCH_GROUPS)
+
 frontend-check:
 	npm run frontend-check
 
@@ -49,3 +56,4 @@ playwright:
 
 clean:
 	rm -f $(BINARY)
+	rm -rf .bench-tmp
