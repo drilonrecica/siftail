@@ -106,7 +106,13 @@ values are constants, not configuration.
 - **In-memory state.** Throttle entries are bounded at 4,096 idle keys and
   expire after 15 minutes idle. An entry with an attempt in flight is never
   evicted, so a burst of fresh keys cannot erase another key's in-flight
-  limit.
+  limit. Above capacity, entries with no failure history go first, then
+  entries whose delay has passed, and only then entries inside an active
+  delay, each least recently seen first. A flood of cheap, uncounted
+  attempts on fresh usernames therefore evicts only its own entries; erasing
+  a locked account's delay would need 4,096 keys that each completed five
+  counted Argon2 failures inside the 60-second delay, which the two hash
+  slots cannot deliver (the H2 gate, SFT-111, found and closed this gap).
 - **Auditing.** No rejected attempt writes during its request. Wrong
   credentials, throttled, in-flight, and overloaded attempts are counted in
   memory and recorded as at most one `sign_in.rejected_summary` row per

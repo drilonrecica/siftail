@@ -495,3 +495,43 @@ func TestLoginFloodLeavesRecentAdministratorAbleToSignIn(t *testing.T) {
 	t.Logf("recent administrator signed in after %s during a flood of %d requests (%d overloaded)",
 		elapsed, sequence.Load(), overloaded.Load())
 }
+
+func TestThrottleCapacityEvictionKeepsThrottledKeys(t *testing.T) {
+	throttle := newLoginThrottle()
+	now := time.Unix(100, 0)
+	throttle.now = func() time.Time { return now }
+	// Five counted failures from different clients lock the account key.
+	for i := 0; i < throttleFreeFailures; i++ {
+		reservation, decision, _ := throttle.Check(fmt.Sprintf("client:a%d", i), "account:admin")
+		if decision != throttleAllowed {
+			t.Fatalf("attempt %d: decision = %d", i, decision)
+		}
+		throttle.Failure(reservation)
+	}
+	if _, decision, _ := throttle.Check("client:fresh", "account:admin"); decision != throttleLimited {
+		t.Fatalf("account was not locked: decision = %d", decision)
+	}
+
+	// A flood of withdrawn reservations on fresh usernames fills the map
+	// with idle, zero-failure entries. Capacity eviction must drop those,
+	// never a key that still carries a failure history or a retry delay.
+	for i := 0; i < throttleCapacity+10; i++ {
+		reservation, decision, _ := throttle.Check("client:flood", fmt.Sprintf("account:z%d", i))
+		if decision != throttleAllowed {
+			t.Fatalf("flood attempt %d: decision = %d", i, decision)
+		}
+		throttle.Release(reservation)
+		now = now.Add(time.Microsecond)
+	}
+	if len(throttle.entries) > throttleCapacity {
+		t.Fatalf("entries = %d", len(throttle.entries))
+	}
+	if _, decision, _ := throttle.Check("client:fresh", "account:admin"); decision != throttleLimited {
+		t.Fatalf("account lock was evicted by the flood: decision = %d", decision)
+	}
+	for i := 0; i < throttleFreeFailures; i++ {
+		if entry, ok := throttle.entries[fmt.Sprintf("client:a%d", i)]; !ok || entry.failures != 1 {
+			t.Fatalf("failure history of client a%d was evicted: %+v, present=%v", i, entry, ok)
+		}
+	}
+}

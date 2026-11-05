@@ -137,7 +137,7 @@ func (t *loginThrottle) Check(clientKey, accountKey string) (*throttleReservatio
 		entry.lastSeen = now
 		t.entries[key] = entry
 	}
-	t.bound()
+	t.bound(now)
 	return &throttleReservation{clientKey: clientKey, accountKey: accountKey, recent: recent}, throttleAllowed, 0
 }
 
@@ -294,27 +294,53 @@ func (t *loginThrottle) cleanup(now time.Time) {
 	}
 }
 
-// bound evicts the least recently seen idle entries above throttleCapacity.
-// In-flight entries are kept: evicting one would let a flood of fresh keys
-// erase another key's in-flight limit. Their number is bounded by the
-// sign-in requests being handled at once, which hash admission keeps short.
-func (t *loginThrottle) bound() {
+// bound evicts idle entries above throttleCapacity. In-flight entries are
+// kept: evicting one would let a flood of fresh keys erase another key's
+// in-flight limit. Their number is bounded by the sign-in requests being
+// handled at once, which hash admission keeps short.
+//
+// Among idle entries the least valuable state goes first: entries with no
+// failure history (withdrawn or released attempts), then entries whose
+// retry delay has passed, and only then entries inside an active delay, each
+// tier least recently seen first. A flood of cheap, uncounted attempts on
+// fresh usernames therefore evicts only its own entries and cannot erase a
+// locked account's delay (a key enters the last tier only after
+// throttleFreeFailures counted Argon2 failures).
+func (t *loginThrottle) bound(now time.Time) {
 	for len(t.entries) > throttleCapacity {
 		var oldestKey string
 		var oldest time.Time
+		oldestTier := -1
 		for key, entry := range t.entries {
 			if entry.inFlight > 0 {
 				continue
 			}
-			if oldestKey == "" || entry.lastSeen.Before(oldest) ||
-				(entry.lastSeen.Equal(oldest) && key < oldestKey) {
+			tier := evictionTier(entry, now)
+			if oldestKey == "" || tier < oldestTier ||
+				(tier == oldestTier && (entry.lastSeen.Before(oldest) ||
+					(entry.lastSeen.Equal(oldest) && key < oldestKey))) {
 				oldestKey = key
 				oldest = entry.lastSeen
+				oldestTier = tier
 			}
 		}
 		if oldestKey == "" {
 			return
 		}
 		delete(t.entries, oldestKey)
+	}
+}
+
+// evictionTier ranks an idle entry for capacity eviction: 0 carries no
+// failure history, 1 carries counted failures but no active delay, 2 is
+// inside its retry delay.
+func evictionTier(entry throttleEntry, now time.Time) int {
+	switch {
+	case entry.failures <= 0:
+		return 0
+	case !entry.retryAfter.After(now):
+		return 1
+	default:
+		return 2
 	}
 }

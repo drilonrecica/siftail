@@ -261,6 +261,11 @@ func (b *Browser) login(w http.ResponseWriter, r *http.Request) {
 		b.writeRateLimitedLogin(w, r, delay)
 		return
 	}
+	// Every exit below resolves the reservation exactly once. Should a panic
+	// escape before that, withdraw it here so the recovered request cannot
+	// leave both keys in flight until restart; Release is a no-op once the
+	// reservation is resolved.
+	defer b.throttle.Release(reservation)
 	lane := hashLaneGeneral
 	if reservation.recent {
 		lane = hashLaneRecent
