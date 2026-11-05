@@ -14,6 +14,9 @@ import (
 type ownerOnlyListener struct {
 	*net.UnixListener
 	ownerUID uint32
+	// peerAllowed authorizes one accepted connection; nil means
+	// controlPeerAllowed. Tests substitute it to simulate lookup failures.
+	peerAllowed func(*net.UnixConn, uint32) (bool, error)
 }
 
 func openOwnerOnlyControlSocket(path string) (net.Listener, error) {
@@ -82,12 +85,15 @@ func (l *ownerOnlyListener) Accept() (net.Conn, error) {
 		if err != nil {
 			return nil, err
 		}
-		allowed, err := controlPeerAllowed(conn, l.ownerUID)
-		if err != nil {
-			_ = conn.Close()
-			return nil, fmt.Errorf("authorizing control connection: %w", err)
+		check := l.peerAllowed
+		if check == nil {
+			check = controlPeerAllowed
 		}
-		if !allowed {
+		allowed, err := check(conn, l.ownerUID)
+		// A failed SO_PEERCRED lookup concerns only this connection: drop it
+		// and keep accepting. Returning the error would make http.Server.Serve
+		// exit and take the whole application down with it.
+		if err != nil || !allowed {
 			_ = conn.Close()
 			continue
 		}

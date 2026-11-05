@@ -360,3 +360,64 @@ func logoutRequest(cookie *http.Cookie, origin, contentType, csrf string) *http.
 	request.Header.Set("Content-Type", contentType)
 	return request
 }
+
+func TestSafeReturnPathRejectsBrowserRedirectTricks(t *testing.T) {
+	for _, value := range []string{
+		`/\evil.test`,
+		`/%5Cevil.test`,
+		`/%5cevil.test`,
+		"/\t/evil.test",
+		"/%09/evil.test",
+		"/ /evil.test",
+		"/%20/evil.test",
+		"/\x00x",
+		"/\u0085x",
+		"/%C2%85x",
+		"//evil.test",
+		"/%2F%2Fevil.test",
+		"/%2fevil.test",
+		"https://evil.test",
+		"javascript:alert(1)",
+		"logs",
+		"/logs\r\nSet-Cookie: x",
+		"/logs\xff",
+		"/%ZZ",
+	} {
+		if got := safeReturnPath(value); got != "" {
+			t.Errorf("safeReturnPath(%q) = %q, want rejection", value, got)
+		}
+	}
+	for _, value := range []string{
+		"/logs",
+		"/logs?mode=history&q=status%3A500",
+		"/logs?q=a+b",
+		"/servers/3",
+		"/logs#latest",
+	} {
+		if got := safeReturnPath(value); got != value {
+			t.Errorf("safeReturnPath(%q) = %q, want unchanged", value, got)
+		}
+	}
+}
+
+func TestLoginRedirectRejectsBackslashReturn(t *testing.T) {
+	fixture := newBrowserFixture(t, "https://logs.example.test", true)
+	response := httptest.NewRecorder()
+	fixture.handler().ServeHTTP(response, loginRequest("Admin", "browser-password", `/\evil.test`))
+	if got := response.Header().Get("Location"); got != "/logs" {
+		t.Fatalf("backslash login redirect = %q", got)
+	}
+}
+
+func TestProxyTrustJoinsEveryForwardedForLine(t *testing.T) {
+	trust := newProxyTrust([]string{"10.0.0.0/8"})
+	request := httptest.NewRequest(http.MethodGet, "http://internal/login", nil)
+	request.RemoteAddr = "10.0.0.2:1234"
+	// The client sends its own line; the trusted proxy appends a second line
+	// rather than extending the first one.
+	request.Header.Add("X-Forwarded-For", "198.51.100.66")
+	request.Header.Add("X-Forwarded-For", "203.0.113.9, 10.0.0.5")
+	if got := trust.clientIdentity(request); got != "203.0.113.9" {
+		t.Fatalf("multi-line forwarded client identity = %q", got)
+	}
+}

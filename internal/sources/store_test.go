@@ -89,3 +89,25 @@ func TestTokenCreateRollsBackOnMissingServer(t *testing.T) {
 		t.Fatalf("token rows = %d", count)
 	}
 }
+
+func TestValidTextRejectsEveryControlCharacter(t *testing.T) {
+	for _, value := range []string{"a\x00b", "a\x1bb", "a\x7fb", "a\u0080b", "a\u009b31mb", "a\u009fb", "line\nbreak"} {
+		if err := validText(value, 128, false); err == nil {
+			t.Errorf("validText(%q) accepted a control character", value)
+		}
+	}
+	for _, value := range []string{"Production", "Prod – Zürich", "東京 node"} {
+		if err := validText(value, 128, false); err != nil {
+			t.Errorf("validText(%q) = %v", value, err)
+		}
+	}
+
+	db, err := database.Open(context.Background(), filepath.Join(t.TempDir(), "siftail.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := NewStore(db.Writer()).CreateServer(context.Background(), "evil\u009b2J", ""); err == nil {
+		t.Fatal("server name with a C1 control character accepted")
+	}
+}

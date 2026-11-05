@@ -48,7 +48,9 @@ func (p proxyTrust) clientIdentity(r *http.Request) string {
 	if !p.trusted(peer) {
 		return peer.String()
 	}
-	forwarded := strings.Split(r.Header.Get("X-Forwarded-For"), ",")
+	// A proxy may append its own header line rather than extending the
+	// existing value, so every line is joined before the right-to-left walk.
+	forwarded := strings.Split(strings.Join(r.Header.Values("X-Forwarded-For"), ","), ",")
 	for index := len(forwarded) - 1; index >= 0; index-- {
 		address, err := netip.ParseAddr(strings.TrimSpace(forwarded[index]))
 		if err != nil {

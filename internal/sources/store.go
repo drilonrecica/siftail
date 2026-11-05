@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/drilonrecica/siftail/internal/audit"
@@ -317,7 +318,7 @@ func validText(value string, max int, emptyOK bool) error {
 		return errors.New("invalid length or UTF-8")
 	}
 	for _, char := range value {
-		if char < 0x20 || char == 0x7f {
+		if unicode.IsControl(char) {
 			return errors.New("control characters are not allowed")
 		}
 	}

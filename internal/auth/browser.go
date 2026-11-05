@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/drilonrecica/siftail/internal/audit"
@@ -415,13 +416,35 @@ func safeReturnPath(value string) string {
 	if value == "" {
 		return ""
 	}
+	if len(value) > 2048 || !returnPathCharsSafe(value) {
+		return ""
+	}
 	parsed, err := url.Parse(value)
-	if err != nil || parsed.IsAbs() || parsed.Host != "" ||
-		!strings.HasPrefix(parsed.Path, "/") || strings.HasPrefix(parsed.Path, "//") ||
-		len(value) > 2048 || strings.ContainsAny(value, "\r\n") {
+	if err != nil || parsed.IsAbs() || parsed.Host != "" || parsed.Opaque != "" ||
+		!strings.HasPrefix(parsed.Path, "/") || strings.HasPrefix(parsed.Path, "//") {
+		return ""
+	}
+	// The decoded path must be just as clean: browsers treat a backslash as
+	// a slash, so "/%5Cevil.test" must not survive a later decode either.
+	decoded, err := url.PathUnescape(parsed.EscapedPath())
+	if err != nil || !returnPathCharsSafe(decoded) || strings.HasPrefix(decoded, "//") {
 		return ""
 	}
 	return value
+}
+
+// returnPathCharsSafe rejects backslashes, control characters (C0, DEL, and
+// C1), whitespace, and invalid UTF-8 anywhere in value.
+func returnPathCharsSafe(value string) bool {
+	if !utf8.ValidString(value) {
+		return false
+	}
+	for _, char := range value {
+		if char == '\\' || unicode.IsControl(char) || unicode.IsSpace(char) {
+			return false
+		}
+	}
+	return true
 }
 
 func summarizeUserAgent(value string) string {
