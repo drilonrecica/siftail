@@ -1691,8 +1691,11 @@ Responses must not reveal whether username exists.
 ### 19.6 Reverse-proxy boundary
 
 Version one supports ordinary reverse proxies and TLS termination but does not accept
-identity headers or forward-auth assertions. Forwarded scheme, host, and client
-address metadata is considered only from configured proxy networks. Trusted identity
+identity headers or forward-auth assertions. Forwarded client-address metadata
+(`X-Forwarded-For`) is considered only from configured proxy networks, and only
+for throttling and audit attribution. Forwarded scheme and host are never read:
+the browser origin and cookie security come from `SIFTAIL_PUBLIC_URL` alone
+(ADR 0010). Trusted identity
 authentication is deferred until after public dogfood and requires a separate ADR.
 
 ---
@@ -1788,7 +1791,8 @@ Requirements:
   public URL whose host is not loopback or `localhost` logs one startup
   warning;
 - explicit `SIFTAIL_INGEST_PUBLIC_URL` for generated source configuration, with same-origin path derivation allowed only when deliberately configured;
-- trust forwarded scheme/host only from configured proxy networks;
+- trust forwarded client addresses only from configured proxy networks, and
+  never read forwarded scheme or host;
 - secure cookie decision based on explicit public URL, not arbitrary request headers;
 - optional direct-request rejection in strict proxy-only mode;
 - ingestion may use private HTTP over an encrypted network such as Tailscale, but HTTPS is recommended across untrusted networks.

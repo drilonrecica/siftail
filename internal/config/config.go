@@ -209,7 +209,7 @@ func (c Config) Validate() error {
 	}
 
 	if c.PublicURL != "" {
-		if err := validateURL(c.PublicURL, "SIFTAIL_PUBLIC_URL"); err != nil {
+		if err := validatePublicOrigin(c.PublicURL); err != nil {
 			return err
 		}
 	}
@@ -295,6 +295,39 @@ func (c Config) Validate() error {
 	return nil
 }
 
+// ValidateServe checks the configuration that `siftail serve` (and therefore
+// `siftail config validate`) needs on top of Validate. The browser origin, the
+// session cookie's security, and HSTS derive only from SIFTAIL_PUBLIC_URL
+// (ADR 0010), so serving without it is refused. Commands that serve no
+// browser traffic call Validate alone.
+func (c Config) ValidateServe() error {
+	if c.PublicURL == "" {
+		return fmt.Errorf("SIFTAIL_PUBLIC_URL is required to serve the browser interface: " +
+			"set it to the exact browser origin, for example https://logs.example.com")
+	}
+	if err := c.Validate(); err != nil {
+		return err
+	}
+	return nil
+}
+
+// PublicURLPlainHTTPOutsideLoopback reports whether the browser origin uses
+// plain http on a host that is neither a loopback address nor localhost. That
+// mode sends the session cookie without Secure across a network, so serve logs
+// one warning for it (ADR 0010).
+func (c Config) PublicURLPlainHTTPOutsideLoopback() bool {
+	u, err := url.Parse(c.PublicURL)
+	if err != nil || u.Scheme != "http" {
+		return false
+	}
+	host := strings.ToLower(u.Hostname())
+	if host == "localhost" || strings.HasSuffix(host, ".localhost") {
+		return false
+	}
+	address, err := netip.ParseAddr(host)
+	return err != nil || !address.IsLoopback()
+}
+
 // Sanitized returns a config safe for logging and diagnostics.
 // It redacts any secret fields and omits full environment contents.
 func (c Config) Sanitized() Config {
@@ -355,6 +388,33 @@ func validateURL(raw, name string) error {
 	}
 	if u.User != nil {
 		return fmt.Errorf("%s: URL must not contain credentials", name)
+	}
+	return nil
+}
+
+// validatePublicOrigin accepts only an exact browser origin: http or https, a
+// host, an optional port, and an empty or "/" path, with no credentials,
+// query, or fragment. Sub-path deployment is not supported (ADR 0010).
+func validatePublicOrigin(raw string) error {
+	const name = "SIFTAIL_PUBLIC_URL"
+	if err := validateURL(raw, name); err != nil {
+		return err
+	}
+	u, _ := url.Parse(raw)
+	if u.Path != "" && u.Path != "/" || u.RawPath != "" {
+		return fmt.Errorf("%s must be an origin without a path; sub-path deployment is not supported", name)
+	}
+	if u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || strings.Contains(raw, "#") {
+		return fmt.Errorf("%s must not contain a query or fragment", name)
+	}
+	if u.Hostname() == "" {
+		return fmt.Errorf("%s: URL must include a host", name)
+	}
+	if port := u.Port(); port != "" {
+		value, err := strconv.Atoi(port)
+		if err != nil || value < 1 || value > 65535 {
+			return fmt.Errorf("%s: invalid port", name)
+		}
 	}
 	return nil
 }

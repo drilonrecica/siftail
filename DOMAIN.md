@@ -1100,7 +1100,8 @@ Rules:
 
 - expiration makes a session invalid immediately;
 - expired or revoked record may remain for seven days for security context;
-- default session absolute lifetime is 14 days and default inactivity lifetime is 7 days; both are process constants initially, not user-facing settings;
+- session absolute lifetime is 7 days from creation and inactivity lifetime is 12 hours; both are process constants, not user-facing settings (ADR 0010); the absolute limit is the earlier of the stored expiry and creation plus 7 days, so records created under the earlier 14-day policy follow it without a rewrite;
+- the administrator can revoke every active session except the current one ("Sign out other sessions"); `siftail sessions revoke-all` and password reset revoke every session;
 - session token plaintext exists only in the browser cookie and during request verification;
 - stored hash must be suitable for high-entropy token verification;
 - sessions are not JWTs;

@@ -32,6 +32,7 @@ func testConfig(t *testing.T) config.Config {
 		DatabasePath:                filepath.Join(dir, "siftail.db"),
 		UIAddr:                      freePort(t),
 		IngestAddr:                  freePort(t),
+		PublicURL:                   "https://logs.example.test",
 		LogLevel:                    "error",
 		LogFormat:                   "text",
 		ShutdownTimeout:             5 * time.Second,
@@ -98,6 +99,11 @@ func TestAppStartsListeners(t *testing.T) {
 	if ingestReady.StatusCode != http.StatusNotFound {
 		t.Fatalf("ingestion router unexpectedly exposes UI readiness: %d", ingestReady.StatusCode)
 	}
+	// ADR 0010: with an https public URL only the UI listener sends HSTS,
+	// without includeSubDomains or preload; the ingestion listener never does.
+	if got := ingestReady.Header.Get("Strict-Transport-Security"); got != "" {
+		t.Fatalf("ingestion listener sent HSTS %q", got)
+	}
 
 	resp, err := noKeepAliveClient.Get("http://" + cfg.UIAddr + "/health/live")
 	if err != nil {
@@ -109,6 +115,9 @@ func TestAppStartsListeners(t *testing.T) {
 	}
 	if resp.Header.Get("X-Request-ID") == "" {
 		t.Fatal("missing X-Request-ID header")
+	}
+	if got := resp.Header.Get("Strict-Transport-Security"); got != "max-age=31536000" {
+		t.Fatalf("UI listener HSTS = %q", got)
 	}
 
 	cancel()
@@ -123,6 +132,18 @@ func TestAppStartsListeners(t *testing.T) {
 
 	if _, err := os.Stat(filepath.Join(cfg.DataDir, "siftail-control.sock")); !os.IsNotExist(err) {
 		t.Fatal("control socket was not removed on shutdown")
+	}
+}
+
+func TestAppRefusesToRunWithoutPublicURL(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.PublicURL = ""
+	err := New(cfg, testLogger(t)).Run(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "SIFTAIL_PUBLIC_URL") {
+		t.Fatalf("Run without public URL = %v", err)
+	}
+	if _, statErr := os.Stat(cfg.DatabasePath); !os.IsNotExist(statErr) {
+		t.Fatalf("refused start created the database: %v", statErr)
 	}
 }
 
@@ -459,6 +480,7 @@ func TestAppControlSocketPing(t *testing.T) {
 
 func TestAppDrainsWriterBeforeClosingLiveStreams(t *testing.T) {
 	cfg := testConfig(t)
+	cfg.PublicURL = "http://" + cfg.UIAddr
 	app := New(cfg, testLogger(t))
 	ctx, cancel := context.WithCancel(context.Background())
 	errCh := make(chan error, 1)

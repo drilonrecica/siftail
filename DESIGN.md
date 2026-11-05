@@ -814,6 +814,23 @@ submitted values visible and focuses the first invalid field.
 Localized progress; success notification "Retention settings saved."; no
 full-page spinner.
 
+### 19.4 Sessions
+
+A second Settings section, **Sessions**, sits below the retention limits with
+the same form-and-explanation layout. It shows how many other sessions are
+active ("No other active sessions.", "1 other active session.", "N other
+active sessions."), omitting the line when the count cannot be read, and one
+neutral button, **Sign out other sessions**. The action is not
+typed-confirmed: it ends only other browsers, which can sign in again, and it
+never signs out the current browser. Success redirects to Settings with
+"Other sessions signed out. This browser stays signed in." (or "No other
+sessions were active. This browser stays signed in."). A database failure is
+shown inside the section with the request ID and states that no session was
+changed. The explanation states the 12-hour idle and 7-day absolute
+lifetimes, the audit record, that an open Live view on a signed-out browser
+stops within seconds, and that `siftail sessions revoke-all` or a password
+reset ends every session including the current one.
+
 ### 19.5 Interface preferences
 
 Theme (System / Dark / Light) and density (Compact / Comfortable) are

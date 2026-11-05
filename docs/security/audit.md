@@ -139,8 +139,10 @@ least) · most frequent 198.51.100.7/32 (50,000)", with the actor shown as
 "unauthenticated (5-minute aggregate)". Exact per-attempt timing within a
 window is not retained.
 
-The planned `session.revoke_others` action for "Sign out other sessions" is
-added by SFT-106.
+"Sign out other sessions" in Settings records one `session.revoke_others`
+row with the administrator actor and the number of sessions it ended
+(`session_count`, which may be 0), written in the same transaction as the
+revocation.
 
 ## Recorded actions
 
@@ -151,6 +153,7 @@ The current implementation records these normalized actions:
 | `sign_in` | successful administrator sign-in (rows from before migration 0010 may also be rejected unauthenticated attempts) |
 | `sign_in.rejected_summary` | rejected, unauthenticated: one aggregated window of rejected sign-in attempts |
 | `session.revoke`, `session.revoke_all` | successful administrator or local-operator revocation |
+| `session.revoke_others` | successful administrator "Sign out other sessions", with `session_count` |
 | `administrator.create`, `administrator.password_reset` | successful local-operator recovery action |
 | `server.create` | successful administrator or local-operator creation |
 | `ingestion_token.create`, `ingestion_token.revoke` | successful administrator or local-operator token lifecycle action |

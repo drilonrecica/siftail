@@ -101,7 +101,8 @@ func TestAdministrativeCLIUsesLiveControlSocket(t *testing.T) {
 	cfg := config.Config{
 		DataDir: dataDir, DatabasePath: filepath.Join(dataDir, "siftail.db"),
 		UIAddr: freeTCPAddr(t), IngestAddr: freeTCPAddr(t),
-		LogLevel: "error", LogFormat: "text", ShutdownTimeout: time.Second,
+		PublicURL: "http://127.0.0.1",
+		LogLevel:  "error", LogFormat: "text", ShutdownTimeout: time.Second,
 		MaxCompressedRequestBytes: 5 << 20, MaxDecompressedRequestBytes: 25 << 20,
 		MaxEventsPerRequest: 10000, MaxEventBytes: 1 << 20,
 		QueueMaxEvents: 20000, QueueMaxBytes: 32 << 20,
@@ -175,6 +176,7 @@ func TestRunConfigValidateDoesNotOpenDatabase(t *testing.T) {
 	clearSiftailEnv(t)
 	dataDir := t.TempDir()
 	t.Setenv("SIFTAIL_DATA_DIR", dataDir)
+	t.Setenv("SIFTAIL_PUBLIC_URL", "https://logs.example.test")
 
 	var stdout, stderr bytes.Buffer
 	if code := run([]string{"config", "validate"}, &stdout, &stderr); code != 0 {
@@ -182,6 +184,42 @@ func TestRunConfigValidateDoesNotOpenDatabase(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dataDir, "siftail.db")); !os.IsNotExist(err) {
 		t.Fatalf("config validation opened or created the database: %v", err)
+	}
+}
+
+// ADR 0010: serve refuses to start without SIFTAIL_PUBLIC_URL and names it;
+// config validate reports the same error; commands that serve no browser
+// traffic keep working without it.
+func TestServeAndConfigValidateRequirePublicURL(t *testing.T) {
+	clearSiftailEnv(t)
+	dataDir := t.TempDir()
+	t.Setenv("SIFTAIL_DATA_DIR", dataDir)
+
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"config", "validate"}, &stdout, &stderr); code == 0 ||
+		!strings.Contains(stderr.String(), "SIFTAIL_PUBLIC_URL is required") {
+		t.Fatalf("config validate = %d %q", code, stderr.String())
+	}
+	stdout.Reset()
+	stderr.Reset()
+	if code := run([]string{"serve"}, &stdout, &stderr); code == 0 ||
+		!strings.Contains(stderr.String(), "configuration invalid: SIFTAIL_PUBLIC_URL is required") {
+		t.Fatalf("serve = %d %q", code, stderr.String())
+	}
+	if _, err := os.Stat(filepath.Join(dataDir, "siftail.db")); !os.IsNotExist(err) {
+		t.Fatalf("refused serve touched the database: %v", err)
+	}
+	stdout.Reset()
+	stderr.Reset()
+	if code := run([]string{"server", "list"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("offline command without public URL = %d %q", code, stderr.String())
+	}
+
+	t.Setenv("SIFTAIL_PUBLIC_URL", "https://logs.example.test/siftail")
+	stderr.Reset()
+	if code := run([]string{"config", "validate"}, &stdout, &stderr); code == 0 ||
+		!strings.Contains(stderr.String(), "SIFTAIL_PUBLIC_URL must be an origin without a path") {
+		t.Fatalf("config validate with sub-path = %d %q", code, stderr.String())
 	}
 }
 
@@ -194,6 +232,7 @@ func TestServeHandlesSIGTERMAndRemovesControlSocket(t *testing.T) {
 			"SIFTAIL_DATA_DIR="+dataDir,
 			"SIFTAIL_UI_ADDR="+uiAddr,
 			"SIFTAIL_INGEST_ADDR="+ingestAddr,
+			"SIFTAIL_PUBLIC_URL=http://"+uiAddr,
 			"SIFTAIL_LOG_LEVEL=error",
 		)
 		return cmd
@@ -232,6 +271,7 @@ func TestDurableIngestionSubprocessSmoke(t *testing.T) {
 			"SIFTAIL_DATA_DIR="+dataDir,
 			"SIFTAIL_UI_ADDR="+uiAddr,
 			"SIFTAIL_INGEST_ADDR="+ingestAddr,
+			"SIFTAIL_PUBLIC_URL=http://"+uiAddr,
 			"SIFTAIL_INGEST_PUBLIC_URL=http://"+ingestAddr+"/api/v1/ingest",
 			"SIFTAIL_LOG_LEVEL=error",
 		)

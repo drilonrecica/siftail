@@ -503,6 +503,10 @@ code {
   gap: var(--space-6);
 }
 
+.settings-grid + .settings-grid {
+  margin-top: var(--space-6);
+}
+
 .settings-form,
 .settings-explanation {
   min-width: 0;
@@ -531,6 +535,10 @@ code {
 
 .settings-explanation > p {
   max-width: 72ch;
+}
+
+.settings-session-count {
+  margin: 0;
 }
 
 .settings-explanation .notice {

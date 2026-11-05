@@ -319,10 +319,16 @@ func loginBrowserCookie(t *testing.T, fixture *browserFixture) *http.Cookie {
 		response,
 		loginRequest("Admin", "browser-password", "/logs"),
 	)
-	if response.Code != http.StatusSeeOther || len(response.Result().Cookies()) != 1 {
+	if response.Code != http.StatusSeeOther {
 		t.Fatalf("login = %d %#v", response.Code, response.Header())
 	}
-	return response.Result().Cookies()[0]
+	for _, cookie := range response.Result().Cookies() {
+		if cookie.Name == fixture.browser.cookies.Name() && cookie.MaxAge > 0 {
+			return cookie
+		}
+	}
+	t.Fatalf("login set no session cookie: %#v", response.Header())
+	return nil
 }
 
 func baseHistoryValues() url.Values {

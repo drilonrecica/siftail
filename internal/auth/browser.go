@@ -58,9 +58,13 @@ type BrowserConfig struct {
 }
 
 type Browser struct {
-	administrators     *Store
-	sessions           *sessions.Store
-	publicURL          string
+	administrators *Store
+	sessions       *sessions.Store
+	publicURL      string
+	// publicOrigin is the only origin accepted on state-changing requests,
+	// derived from SIFTAIL_PUBLIC_URL; empty means every mutation is refused.
+	publicOrigin       string
+	cookies            sessions.CookiePolicy
 	ingestPublicURL    string
 	proxies            proxyTrust
 	throttle           *loginThrottle
@@ -100,7 +104,13 @@ func NewBrowser(administrators *Store, sessionStore *sessions.Store, config Brow
 	if config.ExportWriteTimeout <= 0 {
 		config.ExportWriteTimeout = 30 * time.Second
 	}
+	// serve refuses to start without a valid public URL (ADR 0010). Should a
+	// caller still pass none, the zero policy and an empty origin fail
+	// closed: no mutation passes the origin check and no cookie is Secure.
+	cookies, _ := sessions.NewCookiePolicy(config.PublicURL)
 	return &Browser{
+		publicOrigin:       publicOrigin(config.PublicURL),
+		cookies:            cookies,
 		administrators:     administrators,
 		sessions:           sessionStore,
 		publicURL:          strings.TrimSuffix(config.PublicURL, "/"),
@@ -174,6 +184,9 @@ func (b *Browser) Register(mux *http.ServeMux) {
 	mux.Handle("POST /tokens/{id}/revoke", b.Protect(http.HandlerFunc(b.tokenRevoke)))
 	mux.Handle("GET /settings", b.Protect(http.HandlerFunc(b.settingsPage)))
 	mux.Handle("POST /settings/retention", b.Protect(http.HandlerFunc(b.retentionSettingsSave)))
+	mux.Handle("POST /settings/sessions/revoke-others", b.Protect(
+		http.HandlerFunc(b.revokeOtherSessions),
+	))
 	mux.Handle("GET /status", b.Protect(http.HandlerFunc(b.statusPage)))
 	mux.Handle("POST /status/database-check", b.Protect(http.HandlerFunc(b.databaseCheck)))
 	mux.Handle("GET /audit", b.Protect(http.HandlerFunc(b.auditPage)))
@@ -190,7 +203,7 @@ func (b *Browser) Register(mux *http.ServeMux) {
 
 func (b *Browser) loginPage(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
-	if cookie, err := r.Cookie(sessions.CookieName); err == nil {
+	if cookie, err := r.Cookie(b.cookies.Name()); err == nil {
 		if _, err := b.sessions.Lookup(r.Context(), cookie.Value); err == nil {
 			http.Redirect(w, r, "/logs", http.StatusSeeOther)
 			return
@@ -286,13 +299,16 @@ func (b *Browser) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	b.throttle.Success(reservation)
-	cookie, err := sessions.NewCookie(issued.Token, issued.Session.ExpiresAt, b.publicURL)
+	cookie, err := b.cookies.New(issued.Token, issued.Session.ExpiresAt)
 	if err != nil {
 		_ = b.sessions.Revoke(r.Context(), issued.Token)
 		http.Error(w, "Sign-in is temporarily unavailable.", http.StatusServiceUnavailable)
 		return
 	}
 	http.SetCookie(w, cookie)
+	if legacy := b.cookies.ExpiredLegacy(); legacy != nil {
+		http.SetCookie(w, legacy)
+	}
 	returnPath := safeReturnPath(r.PostForm.Get("return"))
 	if returnPath == "" {
 		returnPath = "/logs"
@@ -302,7 +318,7 @@ func (b *Browser) login(w http.ResponseWriter, r *http.Request) {
 
 func (b *Browser) Protect(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		cookie, err := r.Cookie(sessions.CookieName)
+		cookie, err := r.Cookie(b.cookies.Name())
 		if err != nil {
 			b.requireLogin(w, r, false)
 			return
@@ -355,9 +371,9 @@ func (b *Browser) logout(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Sign-out failed.", http.StatusServiceUnavailable)
 		return
 	}
-	cookie, _ := sessions.NewCookie("deleted", time.Unix(1, 0), b.publicURL)
-	cookie.MaxAge = -1
-	http.SetCookie(w, cookie)
+	for _, cookie := range b.cookies.Expired() {
+		http.SetCookie(w, cookie)
+	}
 	http.Redirect(w, r, "/login", http.StatusSeeOther)
 }
 
@@ -375,7 +391,7 @@ func (b *Browser) requireLogin(w http.ResponseWriter, r *http.Request, expired b
 }
 
 func (b *Browser) validRequestOrigin(r *http.Request) bool {
-	allowed := b.allowedOrigin(r)
+	allowed := b.publicOrigin
 	if allowed == "" {
 		return false
 	}
@@ -390,15 +406,25 @@ func (b *Browser) validRequestOrigin(r *http.Request) bool {
 	return subtle.ConstantTimeCompare([]byte(parsed.Scheme+"://"+parsed.Host), []byte(allowed)) == 1
 }
 
-func (b *Browser) allowedOrigin(r *http.Request) string {
-	if b.publicURL != "" {
-		parsed, err := url.Parse(b.publicURL)
-		if err == nil && parsed.Scheme != "" && parsed.Host != "" {
-			return parsed.Scheme + "://" + parsed.Host
-		}
+// publicOrigin serializes the configured public URL the way browsers send the
+// Origin header: lower-case scheme and host, and no default port. It never
+// consults Host or forwarded headers (ADR 0010).
+func publicOrigin(publicURL string) string {
+	parsed, err := url.Parse(publicURL)
+	if err != nil || parsed.Host == "" || parsed.User != nil ||
+		(parsed.Scheme != "http" && parsed.Scheme != "https") {
 		return ""
 	}
-	return b.proxies.requestOrigin(r)
+	host := strings.ToLower(parsed.Hostname())
+	if strings.Contains(host, ":") {
+		host = "[" + host + "]"
+	}
+	if port := parsed.Port(); port != "" &&
+		!(parsed.Scheme == "http" && port == "80") &&
+		!(parsed.Scheme == "https" && port == "443") {
+		host += ":" + port
+	}
+	return parsed.Scheme + "://" + host
 }
 
 func formContentType(r *http.Request) bool {

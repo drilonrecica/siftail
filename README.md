@@ -355,9 +355,12 @@ All browser sessions can be invalidated locally:
 The command uses the same online owner-only control path or stopped-server
 offline path. It prints only the number revoked, never a session token or hash.
 Password reset revokes every active session in the same database transaction.
-Sessions have a 14-day absolute lifetime, a 7-day idle lifetime, and a maximum
-of 64 active records; invalid records are removed after a 7-day grace period by
-bounded hourly cleanup.
+Sessions end after 12 hours without use and 7 days after sign-in, whichever
+comes first; both are constants (ADR 0010). At most 64 records are active, and
+invalid records are removed after a 7-day grace period by bounded hourly
+cleanup. Settings offers **Sign out other sessions**, which ends every other
+active session, keeps the current browser signed in, and records
+`session.revoke_others` with the number ended.
 
 ### Browser security boundary
 
@@ -375,14 +378,27 @@ the account lockout. See
 Every authenticated browser mutation requires the session, an HMAC-derived CSRF
 token, form content type, and an exact allowed Origin or Referer. Authenticated
 responses use `Cache-Control: no-store`. UI responses set a self-only CSP,
-clickjacking, MIME, referrer, permissions, opener, and resource-policy headers;
-HTTPS public URLs also enable HSTS and Secure session cookies.
+clickjacking, MIME, referrer, permissions, opener, and resource-policy headers.
+An `https` public URL names the session cookie `__Host-siftail_session` with
+`Secure`, `HttpOnly`, `SameSite=Strict`, `Path=/`, and no `Domain`, and the UI
+listener sends `Strict-Transport-Security: max-age=31536000` (no
+`includeSubDomains` or `preload`; the ingestion listener never sends HSTS). An
+`http` public URL keeps `siftail_session` without `Secure` and sends no HSTS; it
+is meant for loopback or private access, and `serve` logs one warning when its
+host is not loopback or `localhost`.
 UI responses use a same-origin-only referrer policy so native forms can satisfy
 exact Origin/Referer validation without sending referrers cross-origin.
 
-Set `SIFTAIL_PUBLIC_URL` to the operator-facing HTTP(S) origin. Forwarded
-client, scheme, and host metadata is considered only when the immediate peer is
-inside `SIFTAIL_TRUSTED_PROXY_CIDRS`; direct clients cannot spoof it. Siftail
+`SIFTAIL_PUBLIC_URL` is required: `siftail serve` refuses to start without it
+and `siftail config validate` reports the same error. Set it to the exact
+operator-facing origin (`http` or `https`, host, optional port, and no path,
+credentials, query, or fragment). The allowed browser origin, the session
+cookie's security, and HSTS derive only from it, never from `Host` or forwarded
+headers, which closes DNS-rebinding access. Commands that serve no browser
+traffic (`admin`, `sessions`, `server`, `token`, `database`, `backup`,
+`restore`, `healthcheck`) do not require it. Forwarded client-address metadata
+is considered only when the immediate peer is inside
+`SIFTAIL_TRUSTED_PROXY_CIDRS`; direct clients cannot spoof it. Siftail
 does not treat `Remote-User`, `X-Forwarded-User`, or other identity headers as
 authentication.
 

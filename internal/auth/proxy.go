@@ -4,7 +4,6 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
-	"net/url"
 	"strings"
 )
 
@@ -61,30 +60,4 @@ func (p proxyTrust) clientIdentity(r *http.Request) string {
 		}
 	}
 	return peer.String()
-}
-
-func (p proxyTrust) requestOrigin(r *http.Request) string {
-	scheme := "http"
-	host := r.Host
-	peer := p.immediatePeer(r)
-	if peer.IsValid() && p.trusted(peer) {
-		if forwarded := strings.TrimSpace(r.Header.Get("X-Forwarded-Proto")); forwarded == "http" || forwarded == "https" {
-			scheme = forwarded
-		}
-		if forwarded := strings.TrimSpace(r.Header.Get("X-Forwarded-Host")); validForwardedHost(forwarded) {
-			host = forwarded
-		}
-	}
-	if host == "" {
-		return ""
-	}
-	return scheme + "://" + host
-}
-
-func validForwardedHost(host string) bool {
-	if host == "" || strings.ContainsAny(host, "/\\\r\n\t ,") {
-		return false
-	}
-	parsed, err := url.Parse("http://" + host)
-	return err == nil && parsed.Host == host
 }

@@ -52,5 +52,30 @@
       </div>
     </aside>
   </div>
+
+  <section class="settings-grid" aria-labelledby="sessions-heading">
+    <form class="settings-form" method="post" action="/settings/sessions/revoke-others">
+      <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+      <header>
+        <p class="eyebrow">Administrator</p>
+        <h2 id="sessions-heading">Sessions</h2>
+        <p>Sign out every other browser that is signed in to this administrator account. This browser stays signed in.</p>
+      </header>
+      {{if .SessionsError}}<div class="form-error" role="alert">
+        <p>{{.SessionsError}}</p>
+        {{if .SessionsReqID}}<p>Request ID: <code>{{.SessionsReqID}}</code></p>{{end}}
+      </div>{{end}}
+      {{if .SessionsKnown}}<p class="settings-session-count" data-other-sessions="{{.OtherSessions}}">{{if eq .OtherSessions 0}}No other active sessions.{{else if eq .OtherSessions 1}}1 other active session.{{else}}{{.OtherSessions}} other active sessions.{{end}}</p>{{end}}
+      <div>
+        <button class="button" type="submit">Sign out other sessions</button>
+      </div>
+    </form>
+
+    <aside class="settings-explanation" aria-labelledby="session-lifetime-heading">
+      <h2 id="session-lifetime-heading">Session lifetime</h2>
+      <p>A session ends after 12 hours without use and 7 days after sign-in, whichever comes first. Signing out other sessions is recorded in the security audit history with the number of sessions ended.</p>
+      <p>Signed-out browsers return to the sign-in page on their next request, and an open Live view stops within a few seconds. To end every session, including this one, run <code>siftail sessions revoke-all</code> on the server or reset the password.</p>
+    </aside>
+  </section>
 </section>
 {{end}}

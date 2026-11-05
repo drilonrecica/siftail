@@ -2,7 +2,6 @@ package auth
 
 import (
 	"net/http"
-	"net/url"
 	"strings"
 
 	webui "github.com/drilonrecica/siftail/internal/web/ui"
@@ -65,11 +64,7 @@ func (b *Browser) shellBase(w http.ResponseWriter, r *http.Request, mode string)
 }
 
 func (b *Browser) preferencesSecure() bool {
-	if b.publicURL == "" {
-		return false
-	}
-	parsed, err := url.Parse(b.publicURL)
-	return err == nil && parsed.Scheme == "https"
+	return b.cookies.Secure()
 }
 
 // preferencesSave persists validated theme and density values in the

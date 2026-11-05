@@ -32,6 +32,10 @@ var flashMessages = map[string]flashMessage{
 	"token-revoked": {Kind: "success",
 		Text: "Token revoked. New ingestion requests using it fail immediately."},
 	"database-check-complete": {Kind: "success", Text: "Database check completed."},
+	"other-sessions-signed-out": {Kind: "success",
+		Text: "Other sessions signed out. This browser stays signed in."},
+	"no-other-sessions": {Kind: "success",
+		Text: "No other sessions were active. This browser stays signed in."},
 	"database-check-failed": {Kind: "warning",
 		Text: "Database check did not complete successfully."},
 }

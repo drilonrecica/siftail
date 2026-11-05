@@ -441,3 +441,94 @@ func TestParseGroupCommitRejectsOutOfRangeBounds(t *testing.T) {
 		})
 	}
 }
+
+func TestServeRequiresPublicURLButOtherCommandsDoNot(t *testing.T) {
+	clearEnv(t)
+	cfg, err := Parse()
+	if err != nil {
+		t.Fatalf("commands without browser traffic must parse without SIFTAIL_PUBLIC_URL: %v", err)
+	}
+	err = cfg.ValidateServe()
+	if err == nil || !strings.Contains(err.Error(), "SIFTAIL_PUBLIC_URL is required") {
+		t.Fatalf("serve without public URL = %v", err)
+	}
+
+	setEnv(t, "SIFTAIL_PUBLIC_URL", "https://logs.example.com")
+	cfg, err = Parse()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cfg.ValidateServe(); err != nil {
+		t.Fatalf("serve with public URL = %v", err)
+	}
+	// ValidateServe still applies every Validate rule.
+	cfg.UIAddr = cfg.IngestAddr
+	if err := cfg.ValidateServe(); err == nil {
+		t.Fatal("ValidateServe skipped Validate")
+	}
+}
+
+func TestPublicURLMustBeExactOrigin(t *testing.T) {
+	for _, valid := range []string{
+		"https://logs.example.com",
+		"https://logs.example.com/",
+		"http://127.0.0.1:8080",
+		"http://[::1]:8080",
+		"https://logs.example.com:8443",
+	} {
+		t.Run("valid "+valid, func(t *testing.T) {
+			clearEnv(t)
+			setEnv(t, "SIFTAIL_PUBLIC_URL", valid)
+			if _, err := Parse(); err != nil {
+				t.Fatalf("Parse(%q) = %v", valid, err)
+			}
+		})
+	}
+	for _, invalid := range []string{
+		"logs.example.com",
+		"ftp://logs.example.com",
+		"https://",
+		"https://:8443",
+		"https://logs.example.com/siftail",
+		"https://logs.example.com/%2F",
+		"https://logs.example.com?next=/",
+		"https://logs.example.com/?",
+		"https://logs.example.com#top",
+		"https://logs.example.com:0",
+		"https://logs.example.com:70000",
+		"https://user@logs.example.com",
+	} {
+		t.Run("invalid "+invalid, func(t *testing.T) {
+			clearEnv(t)
+			setEnv(t, "SIFTAIL_PUBLIC_URL", invalid)
+			_, err := Parse()
+			if err == nil || !strings.Contains(err.Error(), "SIFTAIL_PUBLIC_URL") {
+				t.Fatalf("Parse(%q) = %v", invalid, err)
+			}
+		})
+	}
+	clearEnv(t)
+	setEnv(t, "SIFTAIL_PUBLIC_URL_FILE", "/run/secrets/public-url")
+	if _, err := Parse(); err == nil || !strings.Contains(err.Error(), "SIFTAIL_PUBLIC_URL_FILE") {
+		t.Fatalf("non-secret _FILE variant = %v", err)
+	}
+}
+
+func TestPublicURLPlainHTTPOutsideLoopback(t *testing.T) {
+	for raw, want := range map[string]bool{
+		"https://logs.example.com":  false,
+		"http://127.0.0.1:8080":     false,
+		"http://127.1.2.3:8080":     false,
+		"http://[::1]:8080":         false,
+		"http://localhost:8080":     false,
+		"http://siftail.localhost":  false,
+		"http://logs.example.com":   true,
+		"http://192.168.1.10:8080":  true,
+		"http://[2001:db8::1]:8080": true,
+		"":                          false,
+	} {
+		if got := (Config{PublicURL: raw}).PublicURLPlainHTTPOutsideLoopback(); got != want {
+			t.Errorf("%q warns = %v, want %v", raw, got, want)
+		}
+	}
+}

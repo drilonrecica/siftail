@@ -1,8 +1,8 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import AxeBuilder from "@axe-core/playwright";
-import { expect, test, type Page } from "@playwright/test";
+import { expect, request as playwrightRequest, test, type Page } from "@playwright/test";
 import {
   administratorPassword,
   administratorUsername,
@@ -1134,6 +1134,145 @@ test("server-side session invalidation redirects the active browser", async ({ p
   await page.reload();
   await expect(page).toHaveURL(/\/login\?return=.*expired=1/);
   await expect(page.getByText("Your session expired")).toBeVisible();
+});
+
+test("session cookie follows the http public URL and Settings signs out other sessions", async ({
+  page,
+  browser,
+}) => {
+  await login(page);
+  const cookies = await page.context().cookies();
+  const session = cookies.find((cookie) => cookie.name === "siftail_session");
+  expect(session).toMatchObject({
+    httpOnly: true, secure: false, sameSite: "Strict", path: "/",
+  });
+  expect(cookies.some((cookie) => cookie.name.startsWith("__Host-"))).toBe(false);
+  const lifetimeDays = ((session?.expires ?? 0) * 1000 - Date.now()) / 86_400_000;
+  expect(lifetimeDays).toBeGreaterThan(6.99);
+  expect(lifetimeDays).toBeLessThanOrEqual(7);
+
+  const otherContext = await browser.newContext();
+  const otherPage = await otherContext.newPage();
+  await login(otherPage);
+
+  await navigateSystem(page, "Settings");
+  const sessions = page.getByRole("region", { name: "Sessions" });
+  await expect(sessions.getByText(/^\d+ other active sessions?\.$/)).toBeVisible();
+  await expect(sessions.getByText(
+    "A session ends after 12 hours without use and 7 days after sign-in",
+    { exact: false },
+  )).toBeVisible();
+  await setTheme(page, "dark");
+  await page.screenshot({ path: ".playwright-artifacts/settings-sessions-dark.png", fullPage: true });
+  let results = await new AxeBuilder({ page })
+    .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"])
+    .analyze();
+  expect(results.violations.map((violation) => violation.id)).toEqual([]);
+
+  const signOutOthers = sessions.getByRole("button", { name: "Sign out other sessions" });
+  await signOutOthers.focus();
+  await page.keyboard.press("Enter");
+  await expect(page).toHaveURL(/\/settings$/);
+  await expect(page.getByText(
+    "Other sessions signed out. This browser stays signed in.",
+  )).toBeVisible();
+  await expect(sessions.getByText("No other active sessions.")).toBeVisible();
+
+  await otherPage.reload();
+  await expect(otherPage).toHaveURL(/\/login\?return=.*expired=1/);
+  await expect(otherPage.getByText("Your session expired")).toBeVisible();
+  await otherContext.close();
+  await page.reload();
+  await expect(page).toHaveURL(/\/settings$/);
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await setTheme(page, "light");
+  expect(await page.evaluate(
+    () => document.documentElement.scrollWidth > window.innerWidth,
+  )).toBe(false);
+  await sessions.scrollIntoViewIfNeeded();
+  await page.screenshot({ path: ".playwright-artifacts/settings-sessions-mobile-light.png", fullPage: true });
+  results = await new AxeBuilder({ page })
+    .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"])
+    .analyze();
+  expect(results.violations.map((violation) => violation.id)).toEqual([]);
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await setTheme(page, "system");
+
+  const auditNow = Date.now();
+  const auditQuery = new URLSearchParams({
+    from: new Date(auditNow - 60 * 60 * 1000).toISOString().replace(/\.\d{3}Z$/, "Z"),
+    to: new Date(auditNow + 60 * 60 * 1000).toISOString().replace(/\.\d{3}Z$/, "Z"),
+    action: "session.revoke_others",
+  });
+  await page.goto(`/audit?${auditQuery.toString()}`);
+  await expect(page.locator(".audit-table tbody tr code", {
+    hasText: "session.revoke_others",
+  }).first()).toBeVisible();
+});
+
+test("login behind an https public URL uses a __Host- cookie, HSTS, and only that origin", async () => {
+  const state = readState();
+  const dataDirectory = path.join(state.runDirectory, "https-data");
+  fs.mkdirSync(dataDirectory, { mode: 0o700 });
+  const uiAddress = process.env.SIFTAIL_PLAYWRIGHT_HTTPS_UI_ADDR ?? "127.0.0.1:19082";
+  const ingestAddress = process.env.SIFTAIL_PLAYWRIGHT_HTTPS_INGEST_ADDR ?? "127.0.0.1:19083";
+  const publicURL = "https://logs.playwright.test";
+  const env = siftailEnvironment({
+    SIFTAIL_DATA_DIR: dataDirectory,
+    SIFTAIL_UI_ADDR: uiAddress,
+    SIFTAIL_INGEST_ADDR: ingestAddress,
+    SIFTAIL_PUBLIC_URL: publicURL,
+  });
+  execFileSync(state.binary, ["admin", "create", "--username", administratorUsername], {
+    env, input: `${administratorPassword}\n${administratorPassword}\n`, encoding: "utf8",
+  });
+  const server = spawn(state.binary, ["serve"], { env, stdio: "ignore" });
+  const exited = new Promise((resolve) => server.once("exit", resolve));
+  // The test plays the TLS-terminating proxy: it reaches the UI listener over
+  // loopback while the browser-visible origin is the https public URL.
+  const api = await playwrightRequest.newContext({ baseURL: `http://${uiAddress}` });
+  try {
+    await expect.poll(async () => {
+      try {
+        return (await api.get("/health/ready")).status();
+      } catch {
+        return 0;
+      }
+    }, { timeout: 10_000 }).toBe(200);
+
+    const loginPage = await api.get("/login");
+    expect(loginPage.headers()["strict-transport-security"]).toBe("max-age=31536000");
+    const ingestHealth = await api.get(`http://${ingestAddress}/health/live`);
+    expect(ingestHealth.headers()["strict-transport-security"]).toBeUndefined();
+
+    const form = { username: administratorUsername, password: administratorPassword };
+    // DNS rebinding: an Origin that only matches the Host header is refused.
+    const rebound = await api.post("/session", {
+      form, headers: { Origin: `http://${uiAddress}` }, maxRedirects: 0,
+    });
+    expect(rebound.status()).toBe(403);
+
+    const signedIn = await api.post("/session", {
+      form, headers: { Origin: publicURL }, maxRedirects: 0,
+    });
+    expect(signedIn.status()).toBe(303);
+    const setCookies = signedIn.headersArray()
+      .filter((header) => header.name.toLowerCase() === "set-cookie")
+      .map((header) => header.value);
+    const session = setCookies.find((value) => value.startsWith("__Host-siftail_session="));
+    expect(session).toBeDefined();
+    expect(session).toMatch(/; Path=\/(;|$)/);
+    expect(session).toContain("; HttpOnly");
+    expect(session).toContain("; Secure");
+    expect(session).toContain("; SameSite=Strict");
+    expect(session?.toLowerCase()).not.toContain("domain=");
+    expect(setCookies.some((value) => /^siftail_session=;.*Max-Age=0/.test(value))).toBe(true);
+  } finally {
+    await api.dispose();
+    server.kill("SIGTERM");
+    await exited;
+  }
 });
 
 test("login failures are uniform and throttle the fifth attempt", async ({ page }) => {

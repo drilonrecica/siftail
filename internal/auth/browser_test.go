@@ -153,12 +153,13 @@ func TestLoginSessionProtectedPageAndLogoutSecurity(t *testing.T) {
 		t.Fatalf("login response = %d %q", response.Code, response.Header().Get("Location"))
 	}
 	cookies := response.Result().Cookies()
-	if len(cookies) != 1 {
+	// The https session cookie, then deletion of the legacy unprefixed name.
+	if len(cookies) != 2 || cookies[1].Name != sessions.CookieName || cookies[1].MaxAge >= 0 {
 		t.Fatalf("cookies = %#v", cookies)
 	}
 	cookie := cookies[0]
-	if cookie.Name != sessions.CookieName || !cookie.HttpOnly || !cookie.Secure ||
-		cookie.SameSite != http.SameSiteStrictMode || cookie.Path != "/" {
+	if cookie.Name != sessions.SecureCookieName || !cookie.HttpOnly || !cookie.Secure ||
+		cookie.SameSite != http.SameSiteStrictMode || cookie.Path != "/" || cookie.Domain != "" {
 		t.Fatalf("session cookie = %#v", cookie)
 	}
 
@@ -282,15 +283,9 @@ func TestProxyTrustIgnoresSpoofedForwardingFromUntrustedPeer(t *testing.T) {
 	if got := trust.clientIdentity(request); got != "192.0.2.10" {
 		t.Fatalf("untrusted client identity = %q", got)
 	}
-	if got := trust.requestOrigin(request); got != "http://internal" {
-		t.Fatalf("untrusted origin = %q", got)
-	}
 	request.RemoteAddr = "10.0.0.2:1234"
 	if got := trust.clientIdentity(request); got != "203.0.113.9" {
 		t.Fatalf("trusted client identity = %q", got)
-	}
-	if got := trust.requestOrigin(request); got != "https://logs.example.test" {
-		t.Fatalf("trusted origin = %q", got)
 	}
 	// Identity headers are deliberately irrelevant to every resolver.
 	request.Header.Set("Remote-User", "administrator")

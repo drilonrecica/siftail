@@ -58,6 +58,9 @@ func New(cfg config.Config, logger *slog.Logger) *App {
 func (a *App) Run(ctx context.Context) error {
 	g, serverCtx := errgroup.WithContext(ctx)
 
+	if err := a.cfg.ValidateServe(); err != nil {
+		return fmt.Errorf("configuration invalid: %w", err)
+	}
 	if err := a.ensureDataDir(); err != nil {
 		return err
 	}

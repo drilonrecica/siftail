@@ -63,11 +63,38 @@ SIFTAIL_PUBLIC_URL=https://logs.example.com
 SIFTAIL_INGEST_PUBLIC_URL=https://ingest.logs.example.com/api/v1/ingest
 ```
 
-`SIFTAIL_PUBLIC_URL` is the exact browser-facing HTTP(S) origin.
-`SIFTAIL_INGEST_PUBLIC_URL` is the complete source-reachable HTTP(S) URL and
-must end at `/api/v1/ingest`; it cannot contain credentials, a query, or a
-fragment. Compose interpolation rejects either missing value before container
-creation.
+`SIFTAIL_PUBLIC_URL` is the exact browser-facing origin: `http` or `https`, a
+host, an optional port, and no path, credentials, query, or fragment. Sub-path
+deployment is not supported. `SIFTAIL_INGEST_PUBLIC_URL` is the complete
+source-reachable HTTP(S) URL and must end at `/api/v1/ingest`; it cannot
+contain credentials, a query, or a fragment. Compose interpolation rejects
+either missing value before container creation.
+
+`SIFTAIL_PUBLIC_URL` is required by `siftail serve` itself, not only by
+Compose: a `docker run` or any other start without it fails immediately with
+`configuration invalid: SIFTAIL_PUBLIC_URL is required to serve the browser
+interface`, and `siftail config validate` reports the same error. Setup and
+recovery commands (`admin`, `sessions`, `server`, `token`, `database`,
+`backup`, `restore`, `healthcheck`) do not need it. The browser origin check,
+the session cookie, and HSTS derive only from this value, never from `Host` or
+forwarded headers:
+
+| Public URL | Session cookie | HSTS from the UI listener |
+| --- | --- | --- |
+| `https://…` | `__Host-siftail_session`; `Secure`, `HttpOnly`, `SameSite=Strict`, `Path=/`, no `Domain` | `Strict-Transport-Security: max-age=31536000` |
+| `http://…` | `siftail_session`; `HttpOnly`, `SameSite=Strict`, `Path=/`, not `Secure` | none |
+
+HSTS deliberately omits `includeSubDomains` and `preload`, because the
+ingestion host may be a different subdomain under different rules; the
+ingestion listener never sends HSTS. Once a browser has reached Siftail over
+`https`, it refuses plain `http` to that host for one year. Use `http` only for
+loopback or private access: when its host is not a loopback address or
+`localhost`, `serve` logs one `public_url_plain_http` warning at startup.
+
+Browser sessions end after 12 hours without use and 7 days after sign-in.
+Settings offers **Sign out other sessions** to end every other browser's
+session; `siftail sessions revoke-all` ends every session, including the
+current one.
 
 For loopback-only operation, the defaults in `.env.example` are usable:
 
@@ -92,8 +119,10 @@ container-network proxying because it publishes no host ports.
 ## Trusted reverse proxies
 
 `SIFTAIL_TRUSTED_PROXY_CIDRS` is empty by default. Leave it empty unless
-Siftail must accept forwarded scheme, host, or client-address metadata and you
-know the exact networks from which the reverse proxy connects.
+Siftail must accept forwarded client-address metadata (`X-Forwarded-For`, used
+for sign-in throttling and audit attribution) and you know the exact networks
+from which the reverse proxy connects. Forwarded scheme and host headers are
+never read; the browser origin comes from `SIFTAIL_PUBLIC_URL` alone.
 
 If configured, list only those exact CIDRs:
 
@@ -256,6 +285,24 @@ docker compose up -d --wait --force-recreate siftail
 
 Local deployments must include their two `-f` arguments on both commands so
 the recreated service retains its loopback publications.
+
+### Upgrading to 0.5.0: public URL and sessions
+
+Version 0.5.0 changes browser security (ADR 0010):
+
+- `SIFTAIL_PUBLIC_URL` is mandatory for `serve`. Compose deployments already
+  set it. A deployment started some other way without it now stops at startup
+  with `configuration invalid: SIFTAIL_PUBLIC_URL is required to serve the
+  browser interface`. A value with a path (sub-path deployment), query, or
+  fragment is also refused. Run `siftail config validate` with the new image
+  before switching.
+- On an `https` public URL the session cookie is renamed to
+  `__Host-siftail_session`, so every browser signs in again once after the
+  upgrade. The old `siftail_session` cookie is ignored and deleted at the
+  next sign-in or sign-out. The UI listener starts sending HSTS.
+- Sessions now end after 12 hours idle and 7 days after sign-in. Sessions
+  that were issued earlier with a 14-day lifetime follow the 7-day limit
+  immediately; no data is rewritten.
 
 The recreated container uses the existing named volume. Startup applies
 supported forward migrations transactionally and refuses a schema newer than

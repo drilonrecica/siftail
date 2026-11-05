@@ -47,13 +47,33 @@ func TestIssueStoresOnlyHashAndLookupTouchesAtMostEveryFiveMinutes(t *testing.T)
 	}
 }
 
-func TestSessionAbsoluteIdleAndRevokedExpiry(t *testing.T) {
+func TestSessionLifetimesAreTwelveHoursIdleAndSevenDaysAbsolute(t *testing.T) {
+	if IdleLifetime != 12*time.Hour || AbsoluteLifetime != 7*24*time.Hour {
+		t.Fatalf("lifetimes = idle %s, absolute %s", IdleLifetime, AbsoluteLifetime)
+	}
 	_, store := newSessionStore(t)
 	base := time.Date(2026, 7, 28, 8, 0, 0, 0, time.UTC)
 	store.now = func() time.Time { return base }
 	absolute, err := store.Issue(context.Background(), 1, "", "")
 	if err != nil {
 		t.Fatal(err)
+	}
+	if !absolute.Session.ExpiresAt.Equal(base.Add(AbsoluteLifetime)) {
+		t.Fatalf("issued expiry = %s", absolute.Session.ExpiresAt)
+	}
+	// Use the session every 11 hours: it never idles out, yet it still ends
+	// exactly at the absolute limit.
+	at := base
+	for at.Add(11 * time.Hour).Before(base.Add(AbsoluteLifetime)) {
+		at = at.Add(11 * time.Hour)
+		store.now = func() time.Time { return at }
+		if _, err := store.Lookup(context.Background(), absolute.Token); err != nil {
+			t.Fatalf("active session at %s: %v", at.Sub(base), err)
+		}
+	}
+	store.now = func() time.Time { return base.Add(AbsoluteLifetime - time.Microsecond) }
+	if _, err := store.Lookup(context.Background(), absolute.Token); err != nil {
+		t.Fatalf("session before absolute limit: %v", err)
 	}
 	store.now = func() time.Time { return base.Add(AbsoluteLifetime) }
 	if _, err := store.Lookup(context.Background(), absolute.Token); !errors.Is(err, ErrInvalidSession) {
@@ -65,7 +85,11 @@ func TestSessionAbsoluteIdleAndRevokedExpiry(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store.now = func() time.Time { return base.Add(IdleLifetime) }
+	store.now = func() time.Time { return base.Add(IdleLifetime - time.Microsecond) }
+	if _, err := store.Lookup(context.Background(), idle.Token); err != nil {
+		t.Fatalf("session before idle limit: %v", err)
+	}
+	store.now = func() time.Time { return base.Add(IdleLifetime - time.Microsecond + IdleLifetime) }
 	if _, err := store.Lookup(context.Background(), idle.Token); !errors.Is(err, ErrInvalidSession) {
 		t.Fatalf("idle expiry error = %v", err)
 	}
@@ -80,6 +104,128 @@ func TestSessionAbsoluteIdleAndRevokedExpiry(t *testing.T) {
 	}
 	if _, err := store.Lookup(context.Background(), revoked.Token); !errors.Is(err, ErrInvalidSession) {
 		t.Fatalf("revoked lookup error = %v", err)
+	}
+}
+
+// A session issued by an earlier version stores a 14-day expiry. Lookup, the
+// active-session cap, and cleanup must all apply the 7-day absolute limit
+// from creation without rewriting the row (ADR 0010 point 15).
+func TestLegacyFourteenDaySessionFollowsSevenDayAbsoluteLimit(t *testing.T) {
+	db, store := newSessionStore(t)
+	base := time.Date(2026, 7, 28, 8, 0, 0, 0, time.UTC)
+	store.now = func() time.Time { return base }
+	legacy, err := store.Issue(context.Background(), 1, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacyExpiry := base.Add(14 * 24 * time.Hour).UnixMicro()
+	if _, err := db.Writer().Exec("UPDATE sessions SET expires_at_us=? WHERE id=?",
+		legacyExpiry, legacy.Session.ID); err != nil {
+		t.Fatal(err)
+	}
+	store.now = func() time.Time { return base.Add(time.Hour) }
+	session, err := store.Lookup(context.Background(), legacy.Token)
+	if err != nil || !session.ExpiresAt.Equal(base.Add(AbsoluteLifetime)) {
+		t.Fatalf("legacy lookup = %#v, %v", session, err)
+	}
+	// Keep it used so only the absolute limit can end it.
+	beforeLimit := base.Add(AbsoluteLifetime - time.Hour)
+	if _, err := db.Writer().Exec("UPDATE sessions SET last_used_at_us=? WHERE id=?",
+		beforeLimit.UnixMicro(), legacy.Session.ID); err != nil {
+		t.Fatal(err)
+	}
+	afterLimit := base.Add(AbsoluteLifetime + time.Minute)
+	store.now = func() time.Time { return afterLimit }
+	if _, err := store.Lookup(context.Background(), legacy.Token); !errors.Is(err, ErrInvalidSession) {
+		t.Fatalf("legacy session after 7 days = %v", err)
+	}
+	other, err := store.CountOthers(context.Background(), 1, -1)
+	if err != nil || other != 0 {
+		t.Fatalf("legacy session still counted active: %d, %v", other, err)
+	}
+	var stored int64
+	if err := db.Reader().QueryRow("SELECT expires_at_us FROM sessions WHERE id=?",
+		legacy.Session.ID).Scan(&stored); err != nil || stored != legacyExpiry {
+		t.Fatalf("legacy row was rewritten: %d, %v", stored, err)
+	}
+
+	store.now = func() time.Time { return base.Add(AbsoluteLifetime + CleanupGrace - time.Minute) }
+	if deleted, err := store.Cleanup(context.Background(), 10); err != nil || deleted != 0 {
+		t.Fatalf("cleanup inside grace deleted=%d err=%v", deleted, err)
+	}
+	store.now = func() time.Time { return base.Add(AbsoluteLifetime + CleanupGrace) }
+	if deleted, err := store.Cleanup(context.Background(), 10); err != nil || deleted != 1 {
+		t.Fatalf("cleanup after absolute limit and grace deleted=%d err=%v", deleted, err)
+	}
+}
+
+func TestRevokeOthersKeepsCurrentSessionAndAuditsCount(t *testing.T) {
+	db, store := newSessionStore(t)
+	base := time.Date(2026, 7, 28, 8, 0, 0, 0, time.UTC)
+	// One other session has idled out and one is already revoked; neither
+	// counts as signed out by this action.
+	store.now = func() time.Time { return base.Add(-IdleLifetime) }
+	idle, err := store.Issue(context.Background(), 1, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	store.now = func() time.Time { return base }
+	issued := []Issued{}
+	for i := 0; i < 3; i++ {
+		session, err := store.Issue(context.Background(), 1, "", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		issued = append(issued, session)
+	}
+	issued = append(issued, idle)
+	if err := store.Revoke(context.Background(), issued[2].Token); err != nil {
+		t.Fatal(err)
+	}
+	current := issued[0]
+	store.now = func() time.Time { return base.Add(time.Minute) }
+	if count, err := store.CountOthers(context.Background(), 1, current.Session.ID); err != nil || count != 1 {
+		t.Fatalf("other active sessions = %d, %v", count, err)
+	}
+	revoked, err := store.RevokeOthers(context.Background(), 1, current.Session.ID)
+	if err != nil || revoked != 1 {
+		t.Fatalf("revoke others = %d, %v", revoked, err)
+	}
+	if _, err := store.Lookup(context.Background(), current.Token); err != nil {
+		t.Fatalf("current session revoked: %v", err)
+	}
+	for _, other := range issued[1:] {
+		if _, err := store.Lookup(context.Background(), other.Token); !errors.Is(err, ErrInvalidSession) {
+			t.Fatalf("other session still valid: %v", err)
+		}
+	}
+	var action, metadata string
+	if err := db.Reader().QueryRow(`SELECT action, safe_metadata_json
+		FROM security_audit_events WHERE category='session'
+		ORDER BY id DESC LIMIT 1`).Scan(&action, &metadata); err != nil {
+		t.Fatal(err)
+	}
+	if action != "session.revoke_others" || metadata != `{"session_count":"1"}` {
+		t.Fatalf("audit = %q %s", action, metadata)
+	}
+
+	// A current session revoked concurrently cannot sign out the others.
+	store.now = func() time.Time { return base.Add(2 * time.Minute) }
+	survivor, err := store.Issue(context.Background(), 1, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Revoke(context.Background(), current.Token); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.RevokeOthers(context.Background(), 1, current.Session.ID); !errors.Is(err, ErrInvalidSession) {
+		t.Fatalf("revoked current session error = %v", err)
+	}
+	if _, err := store.Lookup(context.Background(), survivor.Token); err != nil {
+		t.Fatalf("rejected revoke-others still revoked a session: %v", err)
+	}
+	if _, err := store.RevokeOthers(context.Background(), 1, survivor.Session.ID+100); !errors.Is(err, ErrInvalidSession) {
+		t.Fatalf("unknown current session error = %v", err)
 	}
 }
 

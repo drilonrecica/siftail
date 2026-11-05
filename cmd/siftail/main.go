@@ -129,6 +129,10 @@ func runConfigValidate(stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
+	// config validate checks the configuration serve would use (ADR 0010).
+	if err := cfg.ValidateServe(); err != nil {
+		return err
+	}
 	if err := cfg.IsWritableDataDir(); err != nil {
 		return err
 	}
@@ -136,6 +140,7 @@ func runConfigValidate(stdout io.Writer) error {
 	fmt.Fprintf(stdout, "data dir: %s\n", cfg.DataDir)
 	fmt.Fprintf(stdout, "ui addr: %s\n", cfg.UIAddr)
 	fmt.Fprintf(stdout, "ingest addr: %s\n", cfg.IngestAddr)
+	fmt.Fprintf(stdout, "public url: %s\n", cfg.PublicURL)
 	return nil
 }
 
@@ -144,10 +149,19 @@ func runServe() error {
 	if err != nil {
 		return fmt.Errorf("configuration invalid: %w", err)
 	}
+	if err := cfg.ValidateServe(); err != nil {
+		return fmt.Errorf("configuration invalid: %w", err)
+	}
 
 	logger, err := config.ConfigureLogger(cfg)
 	if err != nil {
 		return fmt.Errorf("logger setup failed: %w", err)
+	}
+	if cfg.PublicURLPlainHTTPOutsideLoopback() {
+		logger.Warn("public URL uses plain http outside loopback; session cookies are not Secure",
+			"component", "config",
+			"error_category", "public_url_plain_http",
+		)
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

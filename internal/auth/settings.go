@@ -6,6 +6,7 @@ import (
 	"strconv"
 
 	"github.com/drilonrecica/siftail/internal/retention"
+	"github.com/drilonrecica/siftail/internal/sessions"
 	"github.com/drilonrecica/siftail/internal/web"
 	webui "github.com/drilonrecica/siftail/internal/web/ui"
 )
@@ -27,6 +28,42 @@ func (b *Browser) settingsPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	b.renderSettings(w, r, session.CSRFToken, http.StatusOK, view)
+}
+
+// revokeOtherSessions signs out every other active session of the
+// administrator and keeps the current one (ADR 0010). Live streams on the
+// revoked sessions end at their next session re-check.
+func (b *Browser) revokeOtherSessions(w http.ResponseWriter, r *http.Request) {
+	session, _ := BrowserSessionFromContext(r.Context())
+	if _, err := exactManagementForm(r); err != nil {
+		b.renderSettings(w, r, session.CSRFToken, http.StatusBadRequest, webui.SettingsView{
+			Error: "Check the sign-out request.",
+		})
+		return
+	}
+	revoked, err := b.sessions.RevokeOthers(
+		r.Context(), session.Session.AdministratorID, session.Session.ID,
+	)
+	if errors.Is(err, sessions.ErrInvalidSession) {
+		b.requireLogin(w, r, true)
+		return
+	}
+	if err != nil {
+		view, loadErr := b.loadSettingsView(r, session.CSRFToken)
+		if loadErr != nil {
+			view = webui.SettingsView{}
+		}
+		view.SessionsError = "Other sessions could not be signed out because the database is temporarily unavailable. No session was changed."
+		view.SessionsReqID = web.RequestIDFromContext(r.Context())
+		b.renderSettings(w, r, session.CSRFToken, http.StatusServiceUnavailable, view)
+		return
+	}
+	if revoked == 0 {
+		b.setFlash(w, "no-other-sessions")
+	} else {
+		b.setFlash(w, "other-sessions-signed-out")
+	}
+	http.Redirect(w, r, "/settings", http.StatusSeeOther)
 }
 
 func (b *Browser) retentionSettingsSave(w http.ResponseWriter, r *http.Request) {
@@ -101,11 +138,23 @@ func (b *Browser) loadSettingsView(
 	if err != nil {
 		return webui.SettingsView{}, err
 	}
-	return webui.SettingsView{
+	view := webui.SettingsView{
 		CSRFToken:      csrfToken,
 		RetentionDays:  strconv.Itoa(settings.AgeDays),
 		MaxDatabaseGiB: strconv.Itoa(settings.MaxDatabaseGiB()),
-	}, nil
+	}
+	// The session count is informative only; the sign-out action works
+	// without it, so a read failure hides the count instead of the page.
+	if current, ok := BrowserSessionFromContext(r.Context()); ok {
+		others, err := b.sessions.CountOthers(
+			r.Context(), current.Session.AdministratorID, current.Session.ID,
+		)
+		if err == nil {
+			view.OtherSessions = others
+			view.SessionsKnown = true
+		}
+	}
+	return view, nil
 }
 
 func (b *Browser) renderSettings(

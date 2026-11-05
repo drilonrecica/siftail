@@ -405,7 +405,13 @@ type OneTimeTokenView struct {
 }
 
 type SettingsView struct {
-	CSRFToken      string
+	CSRFToken string
+	// OtherSessions is the number of other active administrator sessions;
+	// SessionsKnown is false when that count could not be read.
+	OtherSessions  int
+	SessionsKnown  bool
+	SessionsError  string
+	SessionsReqID  string
 	RetentionDays  string
 	MaxDatabaseGiB string
 	RetentionError string

@@ -18,12 +18,17 @@ import (
 	"github.com/drilonrecica/siftail/internal/database"
 )
 
+// Session lifetimes are constants, not configuration (ADR 0010).
 const (
-	AbsoluteLifetime = 14 * 24 * time.Hour
-	IdleLifetime     = 7 * 24 * time.Hour
-	TouchInterval    = 5 * time.Minute
-	CleanupGrace     = 7 * 24 * time.Hour
-	MaxActive        = 64
+	// AbsoluteLifetime bounds a session from creation. Lookup enforces the
+	// earlier of the stored expiry and creation plus this lifetime, so rows
+	// issued under the earlier 14-day policy follow it without a rewrite.
+	AbsoluteLifetime = 7 * 24 * time.Hour
+	// IdleLifetime ends a session that has not been used for this long.
+	IdleLifetime  = 12 * time.Hour
+	TouchInterval = 5 * time.Minute
+	CleanupGrace  = 7 * 24 * time.Hour
+	MaxActive     = 64
 )
 
 var (
@@ -119,19 +124,17 @@ func (s *Store) Issue(
 		}
 		var active int
 		if err := tx.QueryRowContext(mutationCtx, `SELECT count(*) FROM sessions
-			WHERE administrator_id=? AND revoked_at_us IS NULL
-			AND expires_at_us>? AND last_used_at_us>?`,
-			administratorID, now.UnixMicro(), now.Add(-IdleLifetime).UnixMicro(),
+			WHERE administrator_id=? AND `+activeSessionPredicate,
+			activeSessionArgs(administratorID, now)...,
 		).Scan(&active); err != nil {
 			return database.Classify("count active sessions", err)
 		}
 		if active >= MaxActive {
 			var evictedID int64
 			if err := tx.QueryRowContext(mutationCtx, `SELECT id FROM sessions
-				WHERE administrator_id=? AND revoked_at_us IS NULL
-				AND expires_at_us>? AND last_used_at_us>?
+				WHERE administrator_id=? AND `+activeSessionPredicate+`
 				ORDER BY last_used_at_us ASC, created_at_us ASC, id ASC LIMIT 1`,
-				administratorID, now.UnixMicro(), now.Add(-IdleLifetime).UnixMicro(),
+				activeSessionArgs(administratorID, now)...,
 			).Scan(&evictedID); err != nil {
 				return database.Classify("select session eviction", err)
 			}
@@ -199,6 +202,9 @@ func (s *Store) Lookup(ctx context.Context, token string) (Session, error) {
 	session.CreatedAt = time.UnixMicro(created).UTC()
 	session.LastUsedAt = time.UnixMicro(lastUsed).UTC()
 	session.ExpiresAt = time.UnixMicro(expires).UTC()
+	if absolute := session.CreatedAt.Add(AbsoluteLifetime); absolute.Before(session.ExpiresAt) {
+		session.ExpiresAt = absolute
+	}
 	if revoked.Valid {
 		value := time.UnixMicro(revoked.Int64).UTC()
 		session.RevokedAt = &value
@@ -215,8 +221,9 @@ func (s *Store) Lookup(ctx context.Context, token string) (Session, error) {
 		result, err := tx.ExecContext(context.WithoutCancel(ctx), `UPDATE sessions
 			SET last_used_at_us=?
 			WHERE id=? AND revoked_at_us IS NULL AND expires_at_us>?
-			AND last_used_at_us>? AND last_used_at_us<=?`,
+			AND created_at_us>? AND last_used_at_us>? AND last_used_at_us<=?`,
 			now.UnixMicro(), session.ID, now.UnixMicro(),
+			now.Add(-AbsoluteLifetime).UnixMicro(),
 			now.Add(-IdleLifetime).UnixMicro(), now.Add(-TouchInterval).UnixMicro())
 		if err != nil {
 			return database.Classify("touch session", err)
@@ -292,6 +299,92 @@ func (s *Store) RevokeAll(ctx context.Context, administratorID int64) (int64, er
 	return affected, err
 }
 
+// RevokeOthers revokes every active session of the administrator except
+// currentID in one transaction and records session.revoke_others with the
+// revoked count. It fails with ErrInvalidSession when the current session is
+// no longer active, so a concurrently revoked session cannot sign out the
+// others.
+func (s *Store) RevokeOthers(ctx context.Context, administratorID, currentID int64) (int64, error) {
+	if administratorID <= 0 || currentID <= 0 {
+		return 0, ErrInvalidSession
+	}
+	now := s.now().UTC()
+	var affected int64
+	err := s.mutator.Do(ctx, func(tx *sql.Tx) error {
+		mutationCtx := context.WithoutCancel(ctx)
+		var current int
+		if err := tx.QueryRowContext(mutationCtx, `SELECT EXISTS(
+			SELECT 1 FROM sessions se
+			JOIN administrators a ON a.id=se.administrator_id
+			WHERE se.id=? AND se.administrator_id=? AND a.disabled_at_us IS NULL
+			AND `+activeSessionPredicateFor("se")+`)`,
+			append([]any{currentID}, activeSessionArgs(administratorID, now)...)...,
+		).Scan(&current); err != nil {
+			return database.Classify("verify current session", err)
+		}
+		if current != 1 {
+			return ErrInvalidSession
+		}
+		result, err := tx.ExecContext(mutationCtx, `UPDATE sessions
+			SET revoked_at_us=?
+			WHERE id<>? AND administrator_id=? AND `+activeSessionPredicate,
+			append([]any{now.UnixMicro(), currentID}, activeSessionArgs(administratorID, now)...)...,
+		)
+		if err != nil {
+			return database.Classify("revoke other sessions", err)
+		}
+		affected, err = result.RowsAffected()
+		if err != nil {
+			return database.Classify("read other session revocations", err)
+		}
+		auditInput := audit.InputFromContext(
+			ctx, audit.CategorySession, "session.revoke_others",
+			audit.OutcomeSucceeded,
+			audit.Metadata{
+				audit.MetadataSessionCount: strconv.FormatInt(affected, 10),
+			},
+		)
+		auditInput.OccurredAt = now
+		_, err = audit.RecordTx(mutationCtx, tx, auditInput)
+		return err
+	})
+	if err != nil {
+		return 0, err
+	}
+	return affected, nil
+}
+
+// CountOthers returns the number of active sessions of the administrator
+// other than currentID.
+func (s *Store) CountOthers(ctx context.Context, administratorID, currentID int64) (int, error) {
+	var count int
+	err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM sessions
+		WHERE id<>? AND administrator_id=? AND `+activeSessionPredicate,
+		append([]any{currentID}, activeSessionArgs(administratorID, s.now().UTC())...)...,
+	).Scan(&count)
+	if err != nil {
+		return 0, database.Classify("count other sessions", err)
+	}
+	return count, nil
+}
+
+// activeSessionPredicate selects unrevoked sessions within the stored expiry,
+// the absolute lifetime from creation, and the idle lifetime. Its arguments
+// follow the administrator ID; see activeSessionArgs.
+var activeSessionPredicate = activeSessionPredicateFor("sessions")
+
+func activeSessionPredicateFor(table string) string {
+	return table + `.revoked_at_us IS NULL AND ` + table + `.expires_at_us>? AND ` +
+		table + `.created_at_us>? AND ` + table + `.last_used_at_us>?`
+}
+
+func activeSessionArgs(administratorID int64, now time.Time) []any {
+	return []any{
+		administratorID, now.UnixMicro(),
+		now.Add(-AbsoluteLifetime).UnixMicro(), now.Add(-IdleLifetime).UnixMicro(),
+	}
+}
+
 func (s *Store) Cleanup(ctx context.Context, limit int) (int64, error) {
 	if limit < 1 || limit > 1000 {
 		return 0, errors.New("session cleanup limit must be between 1 and 1000")
@@ -299,14 +392,15 @@ func (s *Store) Cleanup(ctx context.Context, limit int) (int64, error) {
 	now := s.now().UTC()
 	cutoff := now.Add(-CleanupGrace).UnixMicro()
 	idleCutoff := now.Add(-IdleLifetime - CleanupGrace).UnixMicro()
+	absoluteCutoff := now.Add(-AbsoluteLifetime - CleanupGrace).UnixMicro()
 	var affected int64
 	err := s.mutator.Do(ctx, func(tx *sql.Tx) error {
 		result, err := tx.ExecContext(context.WithoutCancel(ctx), `DELETE FROM sessions WHERE id IN (
 			SELECT id FROM sessions
 			WHERE (revoked_at_us IS NOT NULL AND revoked_at_us<=?)
-			OR expires_at_us<=? OR last_used_at_us<=?
+			OR expires_at_us<=? OR last_used_at_us<=? OR created_at_us<=?
 			ORDER BY id LIMIT ?
-		)`, cutoff, cutoff, idleCutoff, limit)
+		)`, cutoff, cutoff, idleCutoff, absoluteCutoff, limit)
 		if err != nil {
 			return database.Classify("clean sessions", err)
 		}

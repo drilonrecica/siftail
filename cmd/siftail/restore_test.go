@@ -52,6 +52,7 @@ func TestRestoreCLIRequiresStoppedServerConfirmationAndStaysSecretFree(
 	}
 	cfg.UIAddr = freeTCPAddr(t)
 	cfg.IngestAddr = freeTCPAddr(t)
+	cfg.PublicURL = "http://127.0.0.1"
 	cfg.LogLevel = "error"
 	cfg.ShutdownTimeout = time.Second
 	logger, err := config.ConfigureLogger(cfg)
