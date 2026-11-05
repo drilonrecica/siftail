@@ -2,7 +2,8 @@
 
 **Reviewed:** 2026-11-05  
 **Scope:** SFT-042–SFT-043 format-1 backup creation and verification; SFT-093
-`VACUUM INTO` snapshot (ADR 0009)
+`VACUUM INTO` snapshot (ADR 0009); SFT-108 browser backup directory (audit
+SEC-11)
 
 ## Create
 
@@ -22,8 +23,30 @@ For configuration without retained history:
 ```
 
 The server must be active because the CLI uses the owner-only Unix control
-socket. The authenticated Backup workspace provides the same operation. Only
-one backup runs at a time. The CLI polls typed status until completion; the
+socket. The CLI accepts any server-side path. Only one backup runs at a time.
+
+### Browser backups and `SIFTAIL_BACKUP_DIR`
+
+The authenticated Backup workspace provides the same operations, confined to
+one directory: `SIFTAIL_BACKUP_DIR`, default `<SIFTAIL_DATA_DIR>/backups`
+(`/data/backups` in the container). It must not be the data directory itself.
+The browser submits only a plain file name of 1–128 ASCII letters, digits,
+`.`, `_`, and `-`, starting with a letter or digit; absolute paths,
+separators, `.`/`..`, hidden names, and anything else are refused before a
+job starts and are never echoed back. An empty name creates
+`siftail-full-<UTC time>.sqlite` or `siftail-configuration-<UTC time>.sqlite`.
+Browser verification reads only a file of that name in the same directory.
+Siftail creates a missing backup directory with mode `0700` on the first
+browser backup; the directory may itself be a symbolic link the operator
+chose, but a symbolic link at an artifact name is refused for both creation
+and verification, so a link planted in the directory cannot redirect a write
+or read outside it.
+
+This bounds what a stolen browser session can do (audit SEC-11): it cannot
+write a full database copy to an arbitrary writable path or probe arbitrary
+files for existence. The default directory is on the data volume, so copy
+artifacts off the volume and off-host; or point `SIFTAIL_BACKUP_DIR` at a
+separate mounted volume. Use the CLI for any other destination. The CLI polls typed status until completion; the
 browser replaces only its Backup region once per second. Neither path streams
 database bytes through HTTP.
 
@@ -171,7 +194,7 @@ final verification or success auditing fails, it removes that link too. A
 foreign file that won a no-overwrite race is never removed or changed.
 
 The Backup page retains only the latest typed process-local result. It never
-retains or re-renders the submitted full path. Restart clears this presentation
+retains or re-renders a full path, including the backup directory. Restart clears this presentation
 state but does not alter completed artifacts.
 
 ## Measured development-host cost

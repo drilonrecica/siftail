@@ -266,6 +266,12 @@ The copied artifact contains sensitive application data and credential
 hashes. Protect it. Compare the host `sha256sum` with the digest printed by
 Siftail's verification before relying on the copy.
 
+The CLI accepts any path inside the container. Backups started from the
+browser Backup workspace go only to `SIFTAIL_BACKUP_DIR` (default
+`/data/backups`, on the same volume) under a plain file name; copy them off
+the volume the same way, for example
+`docker compose cp siftail:/data/backups/<name>.sqlite ./`.
+
 The full backup and restore contracts, including off-volume verification and
 stopped-server restore, are documented in
 [`full-backups.md`](full-backups.md) and [`restores.md`](restores.md).

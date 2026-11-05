@@ -30,6 +30,7 @@ func testConfig(t *testing.T) config.Config {
 	return config.Config{
 		DataDir:                     dir,
 		DatabasePath:                filepath.Join(dir, "siftail.db"),
+		BackupDir:                   filepath.Join(dir, "backups"),
 		UIAddr:                      freePort(t),
 		IngestAddr:                  freePort(t),
 		PublicURL:                   "https://logs.example.test",

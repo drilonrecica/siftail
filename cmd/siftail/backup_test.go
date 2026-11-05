@@ -19,7 +19,8 @@ func TestBackupCLIUsesActiveControlSocketAndReportsVerifiedArtifact(t *testing.T
 	dataDir := t.TempDir()
 	cfg := config.Config{
 		DataDir: dataDir, DatabasePath: filepath.Join(dataDir, "siftail.db"),
-		UIAddr: freeTCPAddr(t), IngestAddr: freeTCPAddr(t),
+		BackupDir: filepath.Join(dataDir, "backups"),
+		UIAddr:    freeTCPAddr(t), IngestAddr: freeTCPAddr(t),
 		PublicURL: "http://127.0.0.1",
 		LogLevel:  "error", LogFormat: "text", ShutdownTimeout: time.Second,
 		MaxCompressedRequestBytes:   5 << 20,

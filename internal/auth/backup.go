@@ -6,8 +6,6 @@ import (
 	"net/http"
 	"strconv"
 	"time"
-	"unicode"
-	"unicode/utf8"
 
 	"github.com/drilonrecica/siftail/internal/backup"
 	webui "github.com/drilonrecica/siftail/internal/web/ui"
@@ -54,11 +52,20 @@ func (b *Browser) startBackup(
 			"Backup is temporarily unavailable.")
 		return
 	}
-	outputPath := r.PostForm.Get("output_path")
+	name := r.PostForm.Get("file_name")
 	if len(r.PostForm) != 2 || len(r.PostForm["csrf_token"]) != 1 ||
-		len(r.PostForm["output_path"]) != 1 || !validBackupPathInput(outputPath) {
+		len(r.PostForm["file_name"]) != 1 ||
+		(name != "" && !backup.ValidFileName(name)) {
 		b.renderBackupError(w, r, session.CSRFToken, http.StatusBadRequest,
-			"Enter a valid server-side output path.")
+			invalidBackupNameMessage)
+		return
+	}
+	if name == "" {
+		name = backup.GeneratedFileName(backupType, b.now())
+	}
+	outputPath, err := b.backupDirectory.OutputPath(name)
+	if err != nil {
+		b.renderBackupDirectoryError(w, r, session.CSRFToken, err)
 		return
 	}
 	start := b.backups.Start
@@ -85,12 +92,16 @@ func (b *Browser) backupVerifyStart(w http.ResponseWriter, r *http.Request) {
 			"Backup verification is temporarily unavailable.")
 		return
 	}
-	artifactPath := r.PostForm.Get("artifact_path")
+	name := r.PostForm.Get("artifact_name")
 	if len(r.PostForm) != 2 || len(r.PostForm["csrf_token"]) != 1 ||
-		len(r.PostForm["artifact_path"]) != 1 ||
-		!validBackupPathInput(artifactPath) {
+		len(r.PostForm["artifact_name"]) != 1 || !backup.ValidFileName(name) {
 		b.renderBackupError(w, r, session.CSRFToken, http.StatusBadRequest,
-			"Enter a valid server-side artifact path.")
+			invalidBackupNameMessage)
+		return
+	}
+	artifactPath, err := b.backupDirectory.ArtifactPath(name)
+	if err != nil {
+		b.renderBackupDirectoryError(w, r, session.CSRFToken, err)
 		return
 	}
 	if _, err := b.backups.StartVerify(r.Context(), artifactPath); err != nil {
@@ -104,6 +115,25 @@ func (b *Browser) backupVerifyStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.Redirect(w, r, "/backup", http.StatusSeeOther)
+}
+
+// invalidBackupNameMessage never echoes the submitted value.
+const invalidBackupNameMessage = "Enter a plain file name of up to 128 letters, digits, dots, " +
+	"underscores, or dashes, such as siftail-full.sqlite. Paths are not accepted."
+
+func (b *Browser) renderBackupDirectoryError(
+	w http.ResponseWriter,
+	r *http.Request,
+	csrfToken string,
+	err error,
+) {
+	if errors.Is(err, backup.ErrInvalidFileName) {
+		b.renderBackupError(w, r, csrfToken, http.StatusBadRequest,
+			invalidBackupNameMessage)
+		return
+	}
+	b.renderBackupError(w, r, csrfToken, http.StatusServiceUnavailable,
+		"The backup directory is unavailable. Check SIFTAIL_BACKUP_DIR and its permissions.")
 }
 
 func (b *Browser) renderBackupError(
@@ -170,18 +200,6 @@ func (b *Browser) backupView(csrfToken string) webui.BackupView {
 		}
 	}
 	return view
-}
-
-func validBackupPathInput(value string) bool {
-	if value == "" || len(value) > 4096 || !utf8.ValidString(value) {
-		return false
-	}
-	for _, character := range value {
-		if unicode.IsControl(character) {
-			return false
-		}
-	}
-	return true
 }
 
 func formatBackupBytes(value int64) string {

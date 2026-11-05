@@ -378,6 +378,7 @@ Initial set:
 
 ```env
 SIFTAIL_DATA_DIR=/data
+SIFTAIL_BACKUP_DIR=/data/backups
 SIFTAIL_UI_ADDR=:8080
 SIFTAIL_INGEST_ADDR=:8081
 SIFTAIL_PUBLIC_URL=https://logs.example.com
@@ -404,6 +405,9 @@ SIFTAIL_INGEST_GROUP_MAX_BATCHES=64
 SIFTAIL_INGEST_GROUP_MAX_BYTES=8388608
 SIFTAIL_INGEST_GROUP_MAX_WAIT=0s
 ```
+
+`SIFTAIL_BACKUP_DIR` defaults to `<SIFTAIL_DATA_DIR>/backups`, must not equal
+the data directory, and is the only destination of browser backups (§25.2).
 
 The three commit-group bounds (§14.3) accept 1–1024 batches, 1 byte to
 `SIFTAIL_QUEUE_MAX_BYTES`, and 0s–100ms respectively.
@@ -2008,6 +2012,16 @@ duration, so WAL grows and the space preflight includes WAL headroom.
 ```
 
 Every backup type excludes the `sessions` table contents.
+
+The CLI submits any server-side output path over the owner-only control
+socket. Browser requests are confined to `SIFTAIL_BACKUP_DIR` (audit SEC-11):
+the form carries only a plain file name (1–128 ASCII letters, digits, `.`,
+`_`, `-`, starting alphanumeric) or is empty for a generated
+`siftail-<type>-<UTC time>.sqlite`. The handler joins it to the resolved
+directory (created `0700` when missing) before the job starts; step 2's
+no-existing-path rule refuses a symbolic link at that name. Browser
+verification resolves its name the same way and §25.4 refuses symbolic links.
+
 The manager retains only the latest process-local typed progress/outcome and
 never retains the requested full path after completion. CLI and authenticated
 browser requests start a job quickly and poll that bounded state; they do not
@@ -2053,7 +2067,8 @@ Checks:
 
 Verification opens the artifact read-only and never applies migrations or
 changes. With the server active, the CLI and browser submit it to the same
-single-job manager and record `backup.verify`. With the server stopped, the CLI
+single-job manager and record `backup.verify`; the browser names only a file
+in `SIFTAIL_BACKUP_DIR` (§25.2). With the server stopped, the CLI
 verifies directly without opening the active database and therefore cannot
 record an audit event. Errors expose only a closed category, not paths, SQLite
 details, hashes, or artifact contents.

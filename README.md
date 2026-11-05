@@ -706,7 +706,9 @@ applying it:
 
 The authenticated Backup workspace exposes the same single-job operation with
 bounded byte/row progress, read-only verification, and a sanitized final result.
-The destination directory
+It accepts only a plain file name (or generates one) inside `SIFTAIL_BACKUP_DIR`,
+default `<SIFTAIL_DATA_DIR>/backups`, created mode `0700` when missing; the CLI
+keeps arbitrary paths. A CLI destination directory
 must already exist on protected storage and have room for the logical database
 plus 5% or at least 1 MiB of slack, and the database volume needs WAL headroom
 because ingestion continues during the snapshot. Existing output files are never overwritten.

@@ -532,3 +532,35 @@ func TestPublicURLPlainHTTPOutsideLoopback(t *testing.T) {
 		}
 	}
 }
+
+func TestParseBackupDir(t *testing.T) {
+	clearEnv(t)
+	cfg, err := Parse()
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if cfg.BackupDir != "/data/backups" {
+		t.Fatalf("default BackupDir = %q, want /data/backups", cfg.BackupDir)
+	}
+
+	clearEnv(t)
+	setEnv(t, "SIFTAIL_DATA_DIR", "/srv/siftail")
+	if cfg, err = Parse(); err != nil || cfg.BackupDir != "/srv/siftail/backups" {
+		t.Fatalf("derived BackupDir = %q, %v", cfg.BackupDir, err)
+	}
+
+	clearEnv(t)
+	setEnv(t, "SIFTAIL_BACKUP_DIR", "/backups")
+	if cfg, err = Parse(); err != nil || cfg.BackupDir != "/backups" {
+		t.Fatalf("explicit BackupDir = %q, %v", cfg.BackupDir, err)
+	}
+
+	for _, value := range []string{"", "   ", "/data", "/data/", "/backups\nx"} {
+		clearEnv(t)
+		setEnv(t, "SIFTAIL_BACKUP_DIR", value)
+		if _, err := Parse(); err == nil ||
+			!strings.Contains(err.Error(), "SIFTAIL_BACKUP_DIR") {
+			t.Errorf("SIFTAIL_BACKUP_DIR=%q error = %v", value, err)
+		}
+	}
+}

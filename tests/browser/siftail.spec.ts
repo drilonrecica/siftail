@@ -901,15 +901,27 @@ test("full and configuration backups are typed, verified, and accessible", async
   test.setTimeout(45_000);
   await login(page);
   const state = readState();
-  const output = path.join(state.runDirectory, "browser-full.sqlite");
+  // Browser backups go only to SIFTAIL_BACKUP_DIR, default <data>/backups (SEC-11).
+  const backupDirectory = path.join(state.dataDirectory, "backups");
+  const output = path.join(backupDirectory, "browser-full.sqlite");
   await navigateSystem(page, "Backup");
   await expect(page.getByRole("heading", { name: "Backup", exact: true })).toBeVisible();
-  await expect(page.locator("#backup-output-path")).toBeFocused();
+  await expect(page.locator("#backup-file-name")).toBeFocused();
   await expect(page.getByText("Browser sessions are always excluded")).toBeVisible();
   await expect(page.getByText("restore --confirm RESTORE", {
     exact: false,
   })).toBeVisible();
-  await page.locator("#backup-output-path").fill(output);
+
+  const escape = path.join(state.runDirectory, "escape.sqlite");
+  for (const value of [escape, "../escape.sqlite"]) {
+    await page.locator("#backup-file-name").fill(value);
+    await page.getByRole("button", { name: "Create verified full backup" }).click();
+    await expect(page.getByRole("alert")).toContainText("Paths are not accepted.");
+  }
+  expect(fs.existsSync(escape)).toBe(false);
+  expect(fs.existsSync(path.join(state.dataDirectory, "escape.sqlite"))).toBe(false);
+
+  await page.locator("#backup-file-name").fill("browser-full.sqlite");
   await page.getByRole("button", { name: "Create verified full backup" }).click();
   await expect(page).toHaveURL(/\/backup$/);
   await expect(page.getByText("Backup verified.", { exact: true })).toBeVisible({
@@ -919,13 +931,11 @@ test("full and configuration backups are typed, verified, and accessible", async
   await expect(page.getByText("SHA-256", { exact: true })).toBeVisible();
   expect(await page.content()).not.toContain(state.runDirectory);
   expect(fs.statSync(output).mode & 0o777).toBe(0o600);
+  expect(fs.statSync(backupDirectory).mode & 0o777).toBe(0o700);
 
-  const configurationOutput = path.join(
-    state.runDirectory,
-    "browser-configuration.sqlite",
-  );
+  // An empty name asks the server to generate one inside the directory.
   await expect(page.getByText("not a merge", { exact: false })).toBeVisible();
-  await page.locator("#configuration-backup-output-path").fill(configurationOutput);
+  await page.locator("#configuration-backup-file-name").fill("");
   await page.getByRole("button", {
     name: "Create verified configuration-only backup",
   }).click();
@@ -933,14 +943,16 @@ test("full and configuration backups are typed, verified, and accessible", async
     timeout: 15_000,
   });
   await expect(page.getByText("configuration", { exact: true })).toBeVisible();
-  await expect(page.getByText(
-    "browser-configuration.sqlite",
-    { exact: true },
-  )).toBeVisible();
+  const configurationName = (await page
+    .locator(".status-facts div", { hasText: "Artifact" })
+    .locator("dd")
+    .textContent())?.trim() ?? "";
+  expect(configurationName).toMatch(/^siftail-configuration-\d{8}T\d{6}Z\.sqlite$/);
   expect(await page.content()).not.toContain(state.runDirectory);
-  expect(fs.statSync(configurationOutput).mode & 0o777).toBe(0o600);
+  expect(fs.statSync(path.join(backupDirectory, configurationName)).mode & 0o777)
+    .toBe(0o600);
 
-  await page.locator("#verify-backup-path").fill(configurationOutput);
+  await page.getByLabel("Artifact file name").fill(configurationName);
   await page.getByRole("button", { name: "Verify backup" }).click();
   await expect(page.getByText("Backup verified.", { exact: true })).toBeVisible({
     timeout: 15_000,
@@ -953,6 +965,10 @@ test("full and configuration backups are typed, verified, and accessible", async
     .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"])
     .analyze();
   expect(results.violations.map((violation) => violation.id)).toEqual([]);
+  await page.screenshot({
+    path: ".playwright-artifacts/backup-desktop-dark.png",
+    fullPage: true,
+  });
   await page.setViewportSize({ width: 390, height: 844 });
   await setTheme(page, "light");
   expect(await page.evaluate(

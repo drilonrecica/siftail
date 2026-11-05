@@ -34,6 +34,7 @@ type browserFixture struct {
 	done        chan error
 	backupDone  chan error
 	backupStop  context.CancelFunc
+	backupDir   string
 }
 
 func newBrowserFixture(t *testing.T, publicURL string, administrator bool) *browserFixture {
@@ -70,6 +71,11 @@ func newBrowserFixture(t *testing.T, publicURL string, administrator bool) *brow
 	backupDone := make(chan error, 1)
 	go func() { backupDone <- backupManager.Run(backupCtx) }()
 	<-backupManager.Ready()
+	backupDir := filepath.Join(filepath.Dir(databasePath), "backups")
+	backupDirectory, err := backup.NewDirectory(backupDir)
+	if err != nil {
+		t.Fatal(err)
+	}
 	operationalState := statusstate.NewState(time.Now())
 	operationalState.SetWriterReady(true)
 	databaseChecker := database.NewActiveChecker(
@@ -89,6 +95,7 @@ func newBrowserFixture(t *testing.T, publicURL string, administrator bool) *brow
 		RetentionStore:  retentionStore,
 		AuditStore:      auditStore,
 		BackupManager:   backupManager,
+		BackupDirectory: backupDirectory,
 		ExportStore:     logs.NewExportStore(db.Reader(), logs.ExportLimits{}),
 		ExportDataDir:   filepath.Dir(databasePath),
 		DatabaseChecker: databaseChecker,
@@ -100,7 +107,7 @@ func newBrowserFixture(t *testing.T, publicURL string, administrator bool) *brow
 		db: db, browser: browser, sessions: sessionStore,
 		coordinator: coordinator, operational: operationalState,
 		cancel: cancel, done: done, backupDone: backupDone,
-		backupStop: backupStop,
+		backupStop: backupStop, backupDir: backupDir,
 	}
 	t.Cleanup(func() {
 		backupStop()

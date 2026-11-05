@@ -5,13 +5,14 @@
   <section aria-labelledby="full-backup-heading">
     <h2 id="full-backup-heading">Full backup</h2>
     <p>Full backups include retained application logs, configuration, credential hashes, source metadata, and security audit history. Browser sessions are always excluded, so restore requires a fresh sign-in.</p>
-    <p>Choose a server-side path on protected storage. Existing files are never overwritten. Scheduling and copying the verified artifact off-host remain operator responsibilities.</p>
+    <p>Browser backups are written only to the server's backup directory, set by <code>SIFTAIL_BACKUP_DIR</code> (default <code>/data/backups</code>). Enter a plain file name, not a path; existing files are never overwritten. To write elsewhere, run <code>siftail backup --output</code> on the host. Scheduling and copying the verified artifact off-host remain operator responsibilities.</p>
     <form method="post" action="/backup/full">
       <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
-      <label for="backup-output-path">Output path</label>
-      <input id="backup-output-path" name="output_path" type="text" maxlength="4096"
-        placeholder="/backups/siftail-full.sqlite" required autocomplete="off"{{if ne .State "running"}} autofocus{{end}}
+      <label for="backup-file-name">File name</label>
+      <input id="backup-file-name" name="file_name" type="text" maxlength="128"
+        placeholder="siftail-full.sqlite" autocomplete="off" spellcheck="false" aria-describedby="backup-file-name-help"{{if ne .State "running"}} autofocus{{end}}
         {{if eq .State "running"}}disabled{{end}}>
+      <p id="backup-file-name-help" class="field-help">Optional. Letters, digits, dots, underscores, and dashes. Leave empty to name it siftail-full-&lt;UTC time&gt;.sqlite.</p>
       <button class="button button-primary" type="submit" {{if eq .State "running"}}disabled{{end}}>Create verified full backup</button>
     </form>
   </section>
@@ -22,10 +23,11 @@
     <p>Restoring this artifact replaces the database with that configuration and empty history; it is not a merge and not a complete log-history backup.</p>
     <form method="post" action="/backup/configuration">
       <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
-      <label for="configuration-backup-output-path">Output path</label>
-      <input id="configuration-backup-output-path" name="output_path" type="text" maxlength="4096"
-        placeholder="/backups/siftail-configuration.sqlite" required autocomplete="off"
+      <label for="configuration-backup-file-name">File name</label>
+      <input id="configuration-backup-file-name" name="file_name" type="text" maxlength="128"
+        placeholder="siftail-configuration.sqlite" autocomplete="off" spellcheck="false" aria-describedby="configuration-backup-file-name-help"
         {{if eq .State "running"}}disabled{{end}}>
+      <p id="configuration-backup-file-name-help" class="field-help">Optional. Written to the same backup directory. Leave empty to name it siftail-configuration-&lt;UTC time&gt;.sqlite.</p>
       <button class="button button-primary" type="submit" {{if eq .State "running"}}disabled{{end}}>Create verified configuration-only backup</button>
     </form>
   </section>
@@ -49,10 +51,11 @@
     <p>Verification is read-only. It checks SQLite integrity, format and schema compatibility, required tables, completed metadata, type-specific exclusions, private permissions, and SHA-256 without applying or restoring anything.</p>
     <form method="post" action="/backup/verify">
       <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
-      <label for="verify-backup-path">Artifact path</label>
-      <input id="verify-backup-path" name="artifact_path" type="text" maxlength="4096"
-        placeholder="/backups/siftail-full.sqlite" required autocomplete="off"
+      <label for="verify-backup-name">Artifact file name</label>
+      <input id="verify-backup-name" name="artifact_name" type="text" maxlength="128"
+        placeholder="siftail-full.sqlite" required autocomplete="off" spellcheck="false" aria-describedby="verify-backup-name-help"
         {{if eq .State "running"}}disabled{{end}}>
+      <p id="verify-backup-name-help" class="field-help">A file in the backup directory. To verify an artifact elsewhere, run <code>siftail backup verify</code> on the host.</p>
       <button class="button button-quiet" type="submit" {{if eq .State "running"}}disabled{{end}}>Verify backup</button>
     </form>
   </section>

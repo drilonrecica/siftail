@@ -155,6 +155,13 @@ func (a *App) Run(ctx context.Context) error {
 		<-coordinatorDone
 		return fmt.Errorf("guided ingestion setup: %w", err)
 	}
+	backupDirectory, err := webBackupDirectory(a.cfg.BackupDir)
+	if err != nil {
+		coordinator.Close()
+		cancelCoordinator()
+		<-coordinatorDone
+		return err
+	}
 	a.browser = auth.NewBrowser(administratorStore, sessionStore, auth.BrowserConfig{
 		PublicURL:         a.cfg.PublicURL,
 		IngestPublicURL:   a.cfg.IngestPublicURL,
@@ -166,6 +173,7 @@ func (a *App) Run(ctx context.Context) error {
 		StatusStore:       statusStore,
 		AuditStore:        auditStore,
 		BackupManager:     backupManager,
+		BackupDirectory:   backupDirectory,
 		ExportStore:       logs.NewExportStore(db.Reader(), logs.ExportLimits{}),
 		ExportDataDir:     a.cfg.DataDir,
 		DatabaseChecker:   databaseChecker,
@@ -665,4 +673,18 @@ func (w safeHTTPErrorWriter) Write(message []byte) (int, error) {
 		"error_category", "http_connection",
 	)
 	return len(message), nil
+}
+
+// webBackupDirectory confines browser backups to SIFTAIL_BACKUP_DIR, made
+// absolute against the working directory as SIFTAIL_DATA_DIR is.
+func webBackupDirectory(path string) (backup.Directory, error) {
+	absolute, err := filepath.Abs(path)
+	if err != nil {
+		return backup.Directory{}, fmt.Errorf("SIFTAIL_BACKUP_DIR: %w", err)
+	}
+	directory, err := backup.NewDirectory(absolute)
+	if err != nil {
+		return backup.Directory{}, fmt.Errorf("SIFTAIL_BACKUP_DIR: %w", err)
+	}
+	return directory, nil
 }

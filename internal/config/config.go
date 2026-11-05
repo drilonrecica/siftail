@@ -10,12 +10,17 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 )
 
 // Config holds all process-level configuration for Siftail.
 type Config struct {
-	DataDir           string
-	DatabasePath      string
+	DataDir      string
+	DatabasePath string
+	// BackupDir is the only destination of browser-initiated backups and
+	// the only place browser verification reads (audit SEC-11). The CLI
+	// keeps arbitrary paths. Defaults to <SIFTAIL_DATA_DIR>/backups.
+	BackupDir         string
 	UIAddr            string
 	IngestAddr        string
 	PublicURL         string
@@ -45,6 +50,7 @@ type Config struct {
 // Defaults aligned with ARCHITECTURE.md §9 and §11.3.
 const (
 	defaultDataDir                     = "/data"
+	defaultBackupSubdir                = "backups"
 	defaultUIAddr                      = ":8080"
 	defaultIngestAddr                  = ":8081"
 	defaultLogLevel                    = "info"
@@ -87,6 +93,11 @@ func Parse() (Config, error) {
 		return c, err
 	}
 	c.DatabasePath = filepath.Join(c.DataDir, "siftail.db")
+
+	c.BackupDir, err = read("SIFTAIL_BACKUP_DIR", "", filepath.Join(c.DataDir, defaultBackupSubdir))
+	if err != nil {
+		return c, err
+	}
 
 	c.UIAddr, err = read("SIFTAIL_UI_ADDR", "", defaultUIAddr)
 	if err != nil {
@@ -196,6 +207,9 @@ func (c Config) Validate() error {
 	}
 	if c.DatabasePath == "" {
 		return fmt.Errorf("database path must not be empty")
+	}
+	if err := validateBackupDir(c.BackupDir, c.DataDir); err != nil {
+		return err
 	}
 
 	if err := validateAddr(c.UIAddr, "SIFTAIL_UI_ADDR"); err != nil {
@@ -361,6 +375,24 @@ func (c Config) IsWritableDataDir() error {
 	}
 	if err := os.Remove(probePath); err != nil {
 		return fmt.Errorf("removing data directory write check: %w", err)
+	}
+	return nil
+}
+
+// validateBackupDir requires a usable directory path distinct from the data
+// directory, so browser backups never land beside the live database files.
+func validateBackupDir(backupDir, dataDir string) error {
+	if strings.TrimSpace(backupDir) == "" {
+		return fmt.Errorf("SIFTAIL_BACKUP_DIR must not be empty")
+	}
+	for _, character := range backupDir {
+		if unicode.IsControl(character) {
+			return fmt.Errorf("SIFTAIL_BACKUP_DIR must not contain control characters")
+		}
+	}
+	if filepath.Clean(backupDir) == filepath.Clean(dataDir) {
+		return fmt.Errorf("SIFTAIL_BACKUP_DIR must not be the data directory; use a subdirectory such as %s",
+			filepath.Join(dataDir, defaultBackupSubdir))
 	}
 	return nil
 }

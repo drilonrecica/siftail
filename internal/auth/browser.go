@@ -41,13 +41,17 @@ type BrowserConfig struct {
 	StatusStore       *statusstate.Store
 	AuditStore        *audit.Store
 	BackupManager     *backup.Manager
-	ExportStore       *logs.ExportStore
-	ExportDataDir     string
-	DatabaseChecker   *database.ActiveChecker
-	LiveBroker        *logs.LiveBroker
-	LiveHeartbeat     time.Duration
-	LiveSessionCheck  time.Duration
-	LiveWriteTimeout  time.Duration
+	// BackupDirectory is the only destination of browser-initiated backups
+	// and verification (SIFTAIL_BACKUP_DIR, audit SEC-11). The zero value
+	// refuses every browser backup operation.
+	BackupDirectory  backup.Directory
+	ExportStore      *logs.ExportStore
+	ExportDataDir    string
+	DatabaseChecker  *database.ActiveChecker
+	LiveBroker       *logs.LiveBroker
+	LiveHeartbeat    time.Duration
+	LiveSessionCheck time.Duration
+	LiveWriteTimeout time.Duration
 	// ExportWriteTimeout bounds each History export response chunk and the
 	// export error page written after staging. Defaults to 30 seconds.
 	ExportWriteTimeout time.Duration
@@ -77,6 +81,7 @@ type Browser struct {
 	status             *statusstate.Store
 	audit              *audit.Store
 	backups            *backup.Manager
+	backupDirectory    backup.Directory
 	exports            *logs.ExportStore
 	exportDataDir      string
 	exportSlot         chan struct{}
@@ -126,6 +131,7 @@ func NewBrowser(administrators *Store, sessionStore *sessions.Store, config Brow
 		status:             config.StatusStore,
 		audit:              config.AuditStore,
 		backups:            config.BackupManager,
+		backupDirectory:    config.BackupDirectory,
 		exports:            config.ExportStore,
 		exportDataDir:      config.ExportDataDir,
 		exportSlot:         make(chan struct{}, 1),
