@@ -171,9 +171,14 @@ Playwright, axe, browsers, and their reports are not production runtime
 dependencies. The 0.2.0 method, requirement matrix, and measured limitations
 are recorded in [`docs/release/0.2.0-gate.md`](docs/release/0.2.0-gate.md).
 
-No process secret environment variable exists yet. When one is introduced,
-direct and `_FILE` forms will be mutually exclusive; `_FILE` input removes only
-trailing CR/LF bytes and never appears in sanitized configuration or logs.
+No process secret environment variable exists yet. The `_FILE` mechanism is
+implemented and tested for the first one (ADR 0010): a secret `SIFTAIL_X` also
+accepts `SIFTAIL_X_FILE`, never both; the file must be absolute, regular, at
+most 64 KiB, and not group- or world-writable; only trailing CR/LF bytes are
+removed; and the value never appears in sanitized configuration, errors, or
+logs. Non-secret settings have no `_FILE` form. See
+[`docs/operations/docker-compose.md`](docs/operations/docker-compose.md#secret-files-_file)
+for Docker secrets usage.
 
 ### Ingestion compatibility
 

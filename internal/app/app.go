@@ -494,7 +494,7 @@ func (a *App) runControlServer(ctx context.Context, l net.Listener) error {
 		})
 		mux.ServeHTTP(w, r.WithContext(auditCtx))
 	})
-	srv := a.newServer(handler, "control")
+	srv := a.newServer(web.APIHeaders(handler), "control")
 
 	a.logger.Info("component started", "component", "control")
 	return a.serveHTTP(ctx, srv, l, "control")
@@ -559,9 +559,7 @@ func (a *App) initializeIngestion() error {
 func (a *App) newServer(handler http.Handler, name string) *http.Server {
 	base := web.RequestID(
 		web.PanicRecovery(a.logger)(
-			web.RequestLogger(a.logger)(
-				web.WithCommonHeaders(handler),
-			),
+			web.RequestLogger(a.logger)(handler),
 		),
 	)
 	return &http.Server{
@@ -584,7 +582,7 @@ func (a *App) runUIServer(ctx context.Context) error {
 }
 
 func (a *App) runIngestServer(ctx context.Context) error {
-	srv := a.newServer(a.ingestMux(), "ingest")
+	srv := a.newServer(web.APIHeaders(a.ingestMux()), "ingest")
 	return a.runHTTPServer(ctx, srv, a.cfg.IngestAddr, "ingest")
 }
 

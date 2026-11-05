@@ -1,46 +1,18 @@
 package config
 
 import (
-	"fmt"
 	"os"
 	"sort"
 	"strings"
 )
 
-// readString returns a string value from the environment.
-// If fileEnv is non-empty, it may be read from a file pointed to by fileEnv.
-// Setting both env and fileEnv is an error.
-func readString(env, fileEnv, fallback string) (string, error) {
-	v, hasV := os.LookupEnv(env)
-	f, hasF := "", false
-	if fileEnv != "" {
-		f, hasF = os.LookupEnv(fileEnv)
+// readString returns a non-secret setting from the environment, or fallback
+// when it is unset. Non-secret settings have no _FILE variant (ADR 0010 §17).
+func readString(env, fallback string) string {
+	if v, ok := os.LookupEnv(env); ok {
+		return v
 	}
-
-	if hasV && hasF {
-		return "", fmt.Errorf("both %s and %s are set; provide only one", env, fileEnv)
-	}
-	if hasF {
-		content, err := os.ReadFile(f)
-		if err != nil {
-			return "", fmt.Errorf("reading %s from %q: %w", fileEnv, f, err)
-		}
-		return strings.TrimRight(string(content), "\r\n"), nil
-	}
-	if hasV {
-		return v, nil
-	}
-	return fallback, nil
-}
-
-// hasEnv reports whether env or its _FILE variant is set.
-func hasEnv(env, fileEnv string) bool {
-	_, hasV := os.LookupEnv(env)
-	if fileEnv == "" {
-		return hasV
-	}
-	_, hasF := os.LookupEnv(fileEnv)
-	return hasV || hasF
+	return fallback
 }
 
 // listUnknownVars returns SIFTAIL_-prefixed environment variables that are not

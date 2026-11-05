@@ -37,7 +37,7 @@ func TestLoggerDoesNotLeakSecret(t *testing.T) {
 		t.Fatalf("configureLogger: %v", err)
 	}
 
-	logger.Info("test", "token", Secret("super-secret-token"))
+	logger.Info("test", "credential", newSecret("super-secret-token", SecretFromFile))
 	out := buf.String()
 	if strings.Contains(out, "super-secret-token") {
 		t.Errorf("log output leaked secret: %s", out)

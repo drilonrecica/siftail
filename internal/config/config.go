@@ -45,6 +45,10 @@ type Config struct {
 	IngestGroupMaxBatches int64
 	IngestGroupMaxBytes   int64
 	IngestGroupMaxWait    time.Duration
+
+	// secrets holds the declared secret settings that are set, keyed by
+	// variable name (ADR 0010 §17). Version 0.5.0 declares none.
+	secrets map[string]Secret
 }
 
 // Defaults aligned with ARCHITECTURE.md §9 and §11.3.
@@ -77,66 +81,33 @@ const (
 func Parse() (Config, error) {
 	known := make(map[string]struct{})
 
-	read := func(name, fileName, fallback string) (string, error) {
+	read := func(name, fallback string) string {
 		known[name] = struct{}{}
-		if fileName != "" {
-			known[fileName] = struct{}{}
-		}
-		return readString(name, fileName, fallback)
+		return readString(name, fallback)
 	}
 
 	var c Config
 	var err error
 
-	c.DataDir, err = read("SIFTAIL_DATA_DIR", "", defaultDataDir)
-	if err != nil {
-		return c, err
-	}
+	c.DataDir = read("SIFTAIL_DATA_DIR", defaultDataDir)
 	c.DatabasePath = filepath.Join(c.DataDir, "siftail.db")
 
-	c.BackupDir, err = read("SIFTAIL_BACKUP_DIR", "", filepath.Join(c.DataDir, defaultBackupSubdir))
-	if err != nil {
-		return c, err
-	}
+	c.BackupDir = read("SIFTAIL_BACKUP_DIR", filepath.Join(c.DataDir, defaultBackupSubdir))
 
-	c.UIAddr, err = read("SIFTAIL_UI_ADDR", "", defaultUIAddr)
-	if err != nil {
-		return c, err
-	}
-	c.IngestAddr, err = read("SIFTAIL_INGEST_ADDR", "", defaultIngestAddr)
-	if err != nil {
-		return c, err
-	}
-	c.PublicURL, err = read("SIFTAIL_PUBLIC_URL", "", "")
-	if err != nil {
-		return c, err
-	}
-	c.IngestPublicURL, err = read("SIFTAIL_INGEST_PUBLIC_URL", "", "")
-	if err != nil {
-		return c, err
-	}
-	c.LogLevel, err = read("SIFTAIL_LOG_LEVEL", "", defaultLogLevel)
-	if err != nil {
-		return c, err
-	}
-	c.LogFormat, err = read("SIFTAIL_LOG_FORMAT", "", defaultLogFormat)
-	if err != nil {
-		return c, err
-	}
+	c.UIAddr = read("SIFTAIL_UI_ADDR", defaultUIAddr)
+	c.IngestAddr = read("SIFTAIL_INGEST_ADDR", defaultIngestAddr)
+	c.PublicURL = read("SIFTAIL_PUBLIC_URL", "")
+	c.IngestPublicURL = read("SIFTAIL_INGEST_PUBLIC_URL", "")
+	c.LogLevel = read("SIFTAIL_LOG_LEVEL", defaultLogLevel)
+	c.LogFormat = read("SIFTAIL_LOG_FORMAT", defaultLogFormat)
 
-	shutdownStr, err := read("SIFTAIL_SHUTDOWN_TIMEOUT", "", defaultShutdownTimeout.String())
-	if err != nil {
-		return c, err
-	}
+	shutdownStr := read("SIFTAIL_SHUTDOWN_TIMEOUT", defaultShutdownTimeout.String())
 	c.ShutdownTimeout, err = time.ParseDuration(shutdownStr)
 	if err != nil {
 		return c, fmt.Errorf("SIFTAIL_SHUTDOWN_TIMEOUT: invalid duration: %w", err)
 	}
 
-	cidrsStr, err := read("SIFTAIL_TRUSTED_PROXY_CIDRS", "", "")
-	if err != nil {
-		return c, err
-	}
+	cidrsStr := read("SIFTAIL_TRUSTED_PROXY_CIDRS", "")
 	c.TrustedProxyCIDRs = splitAndFilterEmpty(cidrsStr, ",")
 
 	c.MaxCompressedRequestBytes, err = readInt64(read, "SIFTAIL_MAX_COMPRESSED_REQUEST_BYTES", defaultMaxCompressedRequestBytes)
@@ -184,13 +155,25 @@ func Parse() (Config, error) {
 	if err != nil {
 		return c, err
 	}
-	groupWaitStr, err := read("SIFTAIL_INGEST_GROUP_MAX_WAIT", "", defaultIngestGroupMaxWait.String())
-	if err != nil {
-		return c, err
-	}
+	groupWaitStr := read("SIFTAIL_INGEST_GROUP_MAX_WAIT", defaultIngestGroupMaxWait.String())
 	c.IngestGroupMaxWait, err = time.ParseDuration(groupWaitStr)
 	if err != nil {
 		return c, fmt.Errorf("SIFTAIL_INGEST_GROUP_MAX_WAIT: invalid duration: %w", err)
+	}
+
+	for _, name := range secretSettings {
+		known[name] = struct{}{}
+		known[name+"_FILE"] = struct{}{}
+		secret, present, err := readSecret(name)
+		if err != nil {
+			return c, err
+		}
+		if present {
+			if c.secrets == nil {
+				c.secrets = make(map[string]Secret, len(secretSettings))
+			}
+			c.secrets[name] = secret
+		}
 	}
 
 	if unknown := listUnknownVars(known); len(unknown) > 0 {
@@ -342,14 +325,36 @@ func (c Config) PublicURLPlainHTTPOutsideLoopback() bool {
 	return err != nil || !address.IsLoopback()
 }
 
-// Sanitized returns a config safe for logging and diagnostics.
-// It redacts any secret fields and omits full environment contents.
+// Secret returns the declared secret setting name when it is set. Only the
+// component that uses the value should call it.
+func (c Config) Secret(name string) (Secret, bool) {
+	secret, ok := c.secrets[name]
+	return secret, ok
+}
+
+// SecretSources reports, for each declared secret that is set, whether it came
+// from the environment or a file. It never exposes a value.
+func (c Config) SecretSources() map[string]SecretSource {
+	sources := make(map[string]SecretSource, len(c.secrets))
+	for name, secret := range c.secrets {
+		sources[name] = secret.source
+	}
+	return sources
+}
+
+// Sanitized returns a deep copy safe for logging and diagnostics: secret
+// values are removed and only their source is kept, so every secret formats
+// as [redacted] (ADR 0010 §22).
 func (c Config) Sanitized() Config {
-	// Currently no secret fields are present in process configuration.
-	// Clone the struct so callers cannot mutate the original.
 	s := c
 	s.TrustedProxyCIDRs = make([]string, len(c.TrustedProxyCIDRs))
 	copy(s.TrustedProxyCIDRs, c.TrustedProxyCIDRs)
+	if c.secrets != nil {
+		s.secrets = make(map[string]Secret, len(c.secrets))
+		for name, secret := range c.secrets {
+			s.secrets[name] = secret.redacted()
+		}
+	}
 	return s
 }
 
@@ -458,12 +463,8 @@ func validatePositive(v int64, name string) error {
 	return nil
 }
 
-func readInt64(read func(string, string, string) (string, error), name string, fallback int64) (int64, error) {
-	s, err := read(name, "", strconv.FormatInt(fallback, 10))
-	if err != nil {
-		return 0, err
-	}
-	v, err := strconv.ParseInt(s, 10, 64)
+func readInt64(read func(string, string) string, name string, fallback int64) (int64, error) {
+	v, err := strconv.ParseInt(read(name, strconv.FormatInt(fallback, 10)), 10, 64)
 	if err != nil {
 		return 0, fmt.Errorf("%s: invalid integer: %w", name, err)
 	}

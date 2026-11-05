@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"sort"
 	"syscall"
 
 	"github.com/drilonrecica/siftail/internal/app"
@@ -141,6 +142,17 @@ func runConfigValidate(stdout io.Writer) error {
 	fmt.Fprintf(stdout, "ui addr: %s\n", cfg.UIAddr)
 	fmt.Fprintf(stdout, "ingest addr: %s\n", cfg.IngestAddr)
 	fmt.Fprintf(stdout, "public url: %s\n", cfg.PublicURL)
+	// Declared secrets show only where they came from, never a value
+	// (ADR 0010 §22). Version 0.5.0 declares none.
+	sources := cfg.SecretSources()
+	names := make([]string, 0, len(sources))
+	for name := range sources {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		fmt.Fprintf(stdout, "%s: [redacted] (from %s)\n", name, sources[name])
+	}
 	return nil
 }
 

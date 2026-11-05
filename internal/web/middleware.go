@@ -68,8 +68,11 @@ func RequestLogger(logger *slog.Logger) func(http.Handler) http.Handler {
 	}
 }
 
-// WithCommonHeaders sets baseline headers shared by both listeners.
-func WithCommonHeaders(next http.Handler) http.Handler {
+// APIHeaders sets the response headers of the non-browser listeners
+// (ingestion and the local control socket). The UI listener uses
+// auth.SecurityHeaders instead, which owns its own Referrer-Policy
+// (same-origin), so each listener has exactly one source for every header.
+func APIHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "no-referrer")

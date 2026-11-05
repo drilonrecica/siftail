@@ -173,7 +173,6 @@ func (b *Browser) tokenCreate(w http.ResponseWriter, r *http.Request) {
 }
 
 func (b *Browser) guidedIngestionTest(w http.ResponseWriter, r *http.Request) {
-	session, _ := BrowserSessionFromContext(r.Context())
 	serverID, idErr := serverPathID(r)
 	values, formErr := exactManagementForm(r, "token")
 	if idErr != nil || formErr != nil {
@@ -181,14 +180,6 @@ func (b *Browser) guidedIngestionTest(w http.ResponseWriter, r *http.Request) {
 		b.writeGuidedTestJSON(w, http.StatusBadRequest, ingest.TestResult{
 			Outcome: ingest.TestRejected, Title: "Guided test request was invalid",
 			Detail: "Reload the one-time token page and try again.",
-		})
-		return
-	}
-	if session.CSRFToken == "" {
-		b.recordGuidedTestRejected(r)
-		b.writeGuidedTestJSON(w, http.StatusForbidden, ingest.TestResult{
-			Outcome: ingest.TestRejected, Title: "Guided test request was forbidden",
-			Detail: "Sign in again and create a replacement token.",
 		})
 		return
 	}

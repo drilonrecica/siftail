@@ -7,11 +7,7 @@ import (
 
 func TestReadStringFallback(t *testing.T) {
 	clearEnv(t)
-	v, err := readString("SIFTAIL_TEST_VALUE", "", "fallback")
-	if err != nil {
-		t.Fatalf("readString failed: %v", err)
-	}
-	if v != "fallback" {
+	if v := readString("SIFTAIL_TEST_VALUE", "fallback"); v != "fallback" {
 		t.Errorf("value = %q, want fallback", v)
 	}
 }
@@ -19,66 +15,20 @@ func TestReadStringFallback(t *testing.T) {
 func TestReadStringFromEnv(t *testing.T) {
 	clearEnv(t)
 	setEnv(t, "SIFTAIL_TEST_VALUE", "from-env")
-
-	v, err := readString("SIFTAIL_TEST_VALUE", "", "fallback")
-	if err != nil {
-		t.Fatalf("readString failed: %v", err)
-	}
-	if v != "from-env" {
+	if v := readString("SIFTAIL_TEST_VALUE", "fallback"); v != "from-env" {
 		t.Errorf("value = %q, want from-env", v)
 	}
 }
 
-func TestReadStringFromFile(t *testing.T) {
+// Non-secret settings have no _FILE variant (ADR 0010 §17): the name is an
+// unknown reserved variable and Parse fails instead of reading the file.
+func TestParseRejectsFileVariantOfNonSecretSetting(t *testing.T) {
 	clearEnv(t)
-	file := writeTempFile(t, "from-file\n")
-	setEnv(t, "SIFTAIL_TEST_VALUE_FILE", file)
+	setEnv(t, "SIFTAIL_PUBLIC_URL_FILE", writeTempFile(t, "https://logs.example.com\n"))
 
-	v, err := readString("SIFTAIL_TEST_VALUE", "SIFTAIL_TEST_VALUE_FILE", "fallback")
-	if err != nil {
-		t.Fatalf("readString failed: %v", err)
-	}
-	if v != "from-file" {
-		t.Errorf("value = %q, want from-file", v)
-	}
-}
-
-func TestReadStringConflicts(t *testing.T) {
-	clearEnv(t)
-	file := writeTempFile(t, "from-file\n")
-	setEnv(t, "SIFTAIL_TEST_VALUE", "from-env")
-	setEnv(t, "SIFTAIL_TEST_VALUE_FILE", file)
-
-	_, err := readString("SIFTAIL_TEST_VALUE", "SIFTAIL_TEST_VALUE_FILE", "fallback")
-	if err == nil {
-		t.Fatal("expected error when both direct and _FILE are set")
-	}
-	if !strings.Contains(err.Error(), "SIFTAIL_TEST_VALUE") || !strings.Contains(err.Error(), "SIFTAIL_TEST_VALUE_FILE") {
-		t.Errorf("error does not mention both variables: %v", err)
-	}
-}
-
-func TestReadStringMissingFile(t *testing.T) {
-	clearEnv(t)
-	setEnv(t, "SIFTAIL_TEST_VALUE_FILE", "/nonexistent/path")
-
-	_, err := readString("SIFTAIL_TEST_VALUE", "SIFTAIL_TEST_VALUE_FILE", "fallback")
-	if err == nil {
-		t.Fatal("expected error for missing _FILE")
-	}
-}
-
-func TestReadStringTrimsNewline(t *testing.T) {
-	clearEnv(t)
-	file := writeTempFile(t, "secret-value\r\n")
-	setEnv(t, "SIFTAIL_TEST_VALUE_FILE", file)
-
-	v, err := readString("SIFTAIL_TEST_VALUE", "SIFTAIL_TEST_VALUE_FILE", "fallback")
-	if err != nil {
-		t.Fatalf("readString failed: %v", err)
-	}
-	if v != "secret-value" {
-		t.Errorf("value = %q, want secret-value", v)
+	_, err := Parse()
+	if err == nil || !strings.Contains(err.Error(), "unknown environment variable(s): SIFTAIL_PUBLIC_URL_FILE") {
+		t.Fatalf("Parse error = %v, want unknown SIFTAIL_PUBLIC_URL_FILE", err)
 	}
 }
 

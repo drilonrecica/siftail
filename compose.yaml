@@ -17,6 +17,12 @@ services:
       SIFTAIL_LOG_FORMAT: "${SIFTAIL_LOG_FORMAT:-text}"
       SIFTAIL_SHUTDOWN_TIMEOUT: "${SIFTAIL_SHUTDOWN_TIMEOUT:-30s}"
       SIFTAIL_TRUSTED_PROXY_CIDRS: "${SIFTAIL_TRUSTED_PROXY_CIDRS:-}"
+      # Version 0.5.0 has no secret setting. A future secret SIFTAIL_X is
+      # passed as a Compose secret, never a value here (docs/operations/
+      # docker-compose.md, "Secret files (_FILE)"):
+      #   SIFTAIL_X_FILE: /run/secrets/siftail_x
+    # secrets:
+    #   - siftail_x
     expose:
       - "8080"
       - "8081"

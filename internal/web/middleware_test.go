@@ -113,8 +113,8 @@ func TestRequestLoggerDoesNotLogHostilePath(t *testing.T) {
 	}
 }
 
-func TestCommonHeaders(t *testing.T) {
-	handler := WithCommonHeaders(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+func TestAPIHeaders(t *testing.T) {
+	handler := APIHeaders(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 
@@ -124,5 +124,8 @@ func TestCommonHeaders(t *testing.T) {
 
 	if rr.Header().Get("X-Content-Type-Options") != "nosniff" {
 		t.Fatal("missing nosniff header")
+	}
+	if got := rr.Header().Get("Referrer-Policy"); got != "no-referrer" {
+		t.Fatalf("Referrer-Policy = %q, want no-referrer", got)
 	}
 }

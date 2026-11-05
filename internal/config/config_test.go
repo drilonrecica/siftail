@@ -294,16 +294,6 @@ func TestConfigureLogger(t *testing.T) {
 	}
 }
 
-func TestSecretRedacted(t *testing.T) {
-	s := Secret("super-secret")
-	if s.String() != "[redacted]" {
-		t.Errorf("String() = %q", s.String())
-	}
-	if s.Raw() != "super-secret" {
-		t.Errorf("Raw() = %q", s.Raw())
-	}
-}
-
 func TestSanitizedCopy(t *testing.T) {
 	clearEnv(t)
 	cfg, err := Parse()

@@ -135,6 +135,63 @@ forge forwarded metadata. Trusted proxy configuration does not authorize
 identity headers or forward-auth authentication; neither is supported in this
 milestone.
 
+## Secret files (`_FILE`)
+
+Version 0.5.0 has **no** secret environment variable: the administrator
+password and ingestion tokens are created through the no-echo CLI or the UI
+and stored hashed, never passed as environment values. The `_FILE` mechanism
+is implemented and tested so that the first secret setting a later release
+adds inherits it unchanged (ADR 0010). Until then, every `SIFTAIL_*_FILE`
+variable, such as `SIFTAIL_PUBLIC_URL_FILE`, is an unknown reserved variable
+and startup fails.
+
+For a secret setting `SIFTAIL_X`, the rules are:
+
+- set either `SIFTAIL_X` or `SIFTAIL_X_FILE`, never both, even if one is
+  empty; there is no precedence and startup fails naming both variables;
+- `SIFTAIL_X_FILE` is an absolute path, read once at startup, that resolves
+  (following symlinks) to a regular file of at most 64 KiB of UTF-8 without
+  NUL;
+- all trailing CR and LF bytes are removed and nothing else; spaces and tabs
+  are kept, and a line break left inside the value, or an empty value, is an
+  error;
+- a group- or world-writable file is refused; a readable one is accepted;
+- errors name the variable and the path, never the content or its length, and
+  `siftail config validate` prints a secret only as
+  `SIFTAIL_X: [redacted] (from file)` or `(from environment)`.
+
+With Docker Compose, use a file-based Compose secret. Without Swarm, Compose
+bind-mounts the host file read-only at `/run/secrets/<name>` with the host
+file's owner and mode, so make it readable by the container's numeric
+identity `65532` and writable by nobody else. Read the value without echo so
+it stays out of shell history (changing the owner needs root on the host):
+
+```bash
+mkdir -p secrets
+read -rs value && printf '%s\n' "$value" |
+  sudo install -m 0400 -o 65532 -g 65532 /dev/stdin secrets/siftail_x
+unset value
+```
+
+Then reference it from an override file (shown with the placeholder name
+`SIFTAIL_X`; substitute the real variable once one exists):
+
+```yaml
+services:
+  siftail:
+    environment:
+      SIFTAIL_X_FILE: /run/secrets/siftail_x
+    secrets:
+      - siftail_x
+
+secrets:
+  siftail_x:
+    file: ./secrets/siftail_x
+```
+
+Keep the secret file out of version control and out of `.env`. Use `0400` or
+`0440` on the host; inside the container the mount keeps that mode.
+
 ## Initialize and start
 
 Validate the resolved deployment without starting a container:

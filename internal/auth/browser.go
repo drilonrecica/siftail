@@ -376,11 +376,7 @@ func (b *Browser) Protect(next http.Handler) http.Handler {
 }
 
 func (b *Browser) logout(w http.ResponseWriter, r *http.Request) {
-	session, ok := BrowserSessionFromContext(r.Context())
-	if !ok {
-		http.Error(w, "Forbidden", http.StatusForbidden)
-		return
-	}
+	session, _ := BrowserSessionFromContext(r.Context())
 	if err := b.sessions.Revoke(r.Context(), session.Token); err != nil {
 		http.Error(w, "Sign-out failed.", http.StatusServiceUnavailable)
 		return
