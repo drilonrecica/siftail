@@ -596,6 +596,9 @@ func sanitizeDiagnostic(input DiagnosticInput) (Diagnostic, error) {
 	case "ingestion/guided_test_rejected":
 		severity = "information"
 		summary = "A guided ingestion test request was rejected."
+	case "export/export_delivery_audit_failed":
+		severity = "attention"
+		summary = "A History export delivery was interrupted after its success audit, and the interruption could not be audited."
 	default:
 		return Diagnostic{}, errors.New("invalid diagnostic event")
 	}

@@ -4,12 +4,14 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"time"
 )
 
 // Store owns bounded read-only application-log SQL.
 type Store struct {
-	db          *sql.DB
-	cursorCodec *CursorCodec
+	db           *sql.DB
+	cursorCodec  *CursorCodec
+	queryTimeout time.Duration
 }
 
 func NewStore(db *sql.DB) *Store {

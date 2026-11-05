@@ -104,6 +104,18 @@ func NewExportStore(db *sql.DB, limits ExportLimits) *ExportStore {
 	return &ExportStore{db: db, limits: limits}
 }
 
+// Limits returns the normalized hard limits the store enforces. The browser
+// workflow sizes its free-space check and response deadline from them.
+func (s *ExportStore) Limits() ExportLimits {
+	if s == nil {
+		return ExportLimits{
+			MaxRows: DefaultExportRows, MaxBytes: DefaultExportBytes,
+			Timeout: DefaultExportTimeout,
+		}
+	}
+	return s.limits
+}
+
 // Export streams the complete matching range in canonical History order.
 // Pagination cursor, direction, and page size never narrow the export.
 func (s *ExportStore) Export(

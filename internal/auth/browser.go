@@ -46,33 +46,38 @@ type BrowserConfig struct {
 	LiveHeartbeat     time.Duration
 	LiveSessionCheck  time.Duration
 	LiveWriteTimeout  time.Duration
-	GuideTester       *ingest.GuideTester
+	// ExportWriteTimeout bounds each History export response chunk and the
+	// export error page written after staging. Defaults to 30 seconds.
+	ExportWriteTimeout time.Duration
+	GuideTester        *ingest.GuideTester
 }
 
 type Browser struct {
-	administrators   *Store
-	sessions         *sessions.Store
-	publicURL        string
-	ingestPublicURL  string
-	proxies          proxyTrust
-	throttle         *loginThrottle
-	ui               *webui.Renderer
-	history          *logs.Store
-	sources          *sources.Store
-	retention        *retention.Store
-	status           *statusstate.Store
-	audit            *audit.Store
-	backups          *backup.Manager
-	exports          *logs.ExportStore
-	exportDataDir    string
-	exportSlot       chan struct{}
-	databaseChecker  *database.ActiveChecker
-	live             *logs.LiveBroker
-	liveHeartbeat    time.Duration
-	liveSessionCheck time.Duration
-	liveWriteTimeout time.Duration
-	guideTester      *ingest.GuideTester
-	now              func() time.Time
+	administrators     *Store
+	sessions           *sessions.Store
+	publicURL          string
+	ingestPublicURL    string
+	proxies            proxyTrust
+	throttle           *loginThrottle
+	ui                 *webui.Renderer
+	history            *logs.Store
+	sources            *sources.Store
+	retention          *retention.Store
+	status             *statusstate.Store
+	audit              *audit.Store
+	backups            *backup.Manager
+	exports            *logs.ExportStore
+	exportDataDir      string
+	exportSlot         chan struct{}
+	exportSpace        func(string) (uint64, error)
+	exportWriteTimeout time.Duration
+	databaseChecker    *database.ActiveChecker
+	live               *logs.LiveBroker
+	liveHeartbeat      time.Duration
+	liveSessionCheck   time.Duration
+	liveWriteTimeout   time.Duration
+	guideTester        *ingest.GuideTester
+	now                func() time.Time
 }
 
 func NewBrowser(administrators *Store, sessionStore *sessions.Store, config BrowserConfig) *Browser {
@@ -85,30 +90,35 @@ func NewBrowser(administrators *Store, sessionStore *sessions.Store, config Brow
 	if config.LiveWriteTimeout <= 0 {
 		config.LiveWriteTimeout = 5 * time.Second
 	}
+	if config.ExportWriteTimeout <= 0 {
+		config.ExportWriteTimeout = 30 * time.Second
+	}
 	return &Browser{
-		administrators:   administrators,
-		sessions:         sessionStore,
-		publicURL:        strings.TrimSuffix(config.PublicURL, "/"),
-		ingestPublicURL:  config.IngestPublicURL,
-		proxies:          newProxyTrust(config.TrustedProxyCIDRs),
-		throttle:         newLoginThrottle(),
-		ui:               webui.New(),
-		history:          config.HistoryStore,
-		sources:          config.SourceStore,
-		retention:        config.RetentionStore,
-		status:           config.StatusStore,
-		audit:            config.AuditStore,
-		backups:          config.BackupManager,
-		exports:          config.ExportStore,
-		exportDataDir:    config.ExportDataDir,
-		exportSlot:       make(chan struct{}, 1),
-		databaseChecker:  config.DatabaseChecker,
-		live:             config.LiveBroker,
-		liveHeartbeat:    config.LiveHeartbeat,
-		liveSessionCheck: config.LiveSessionCheck,
-		liveWriteTimeout: config.LiveWriteTimeout,
-		guideTester:      config.GuideTester,
-		now:              time.Now,
+		administrators:     administrators,
+		sessions:           sessionStore,
+		publicURL:          strings.TrimSuffix(config.PublicURL, "/"),
+		ingestPublicURL:    config.IngestPublicURL,
+		proxies:            newProxyTrust(config.TrustedProxyCIDRs),
+		throttle:           newLoginThrottle(),
+		ui:                 webui.New(),
+		history:            config.HistoryStore,
+		sources:            config.SourceStore,
+		retention:          config.RetentionStore,
+		status:             config.StatusStore,
+		audit:              config.AuditStore,
+		backups:            config.BackupManager,
+		exports:            config.ExportStore,
+		exportDataDir:      config.ExportDataDir,
+		exportSlot:         make(chan struct{}, 1),
+		exportSpace:        filesystemAvailableBytes,
+		exportWriteTimeout: config.ExportWriteTimeout,
+		databaseChecker:    config.DatabaseChecker,
+		live:               config.LiveBroker,
+		liveHeartbeat:      config.LiveHeartbeat,
+		liveSessionCheck:   config.LiveSessionCheck,
+		liveWriteTimeout:   config.LiveWriteTimeout,
+		guideTester:        config.GuideTester,
+		now:                time.Now,
 	}
 }
 

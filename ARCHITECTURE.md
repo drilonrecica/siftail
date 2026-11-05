@@ -479,6 +479,12 @@ Use:
   audit, session cleanup, and other mutations;
 - one dedicated writer connection or a `*sql.DB` constrained to one writer connection;
 - a read connection pool capped at four connections by default;
+- a separate read-only pool of two connections used only for ingestion-token
+  verification, so exports, History searches, and the active `quick_check`
+  can hold every ordinary reader without delaying ingestion authentication
+  (audit DAT-08). Token create, revoke, and rotation still commit through the
+  coordinator, and each lookup reads committed WAL state, so a revocation
+  applies to the next request without any cache to invalidate;
 - a dedicated read connection for `VACUUM INTO` snapshot backups (§25.1);
 - short-lived migration connection during startup where appropriate.
 
@@ -1188,6 +1194,26 @@ A small internal SQL-clause builder is acceptable if:
 
 Apply request contexts and reasonable server timeouts. Broad expensive queries should fail clearly rather than monopolize the database indefinitely.
 
+Every interactive History read (one page, one event detail, the source
+catalog, and the Live source choices) runs under
+`logs.DefaultHistoryQueryTimeout`, ten seconds, in addition to the request
+context. SQLite interrupts the running statement when the context expires,
+which releases its read snapshot and reader connection. The handler renders
+the History shell error state ("The search took too long and was stopped…")
+with the request ID, well inside the 30-second UI response deadline.
+
+Read snapshots on the ordinary pool are therefore bounded:
+
+| Reader | Maximum snapshot duration |
+|---|---|
+| History page, event, catalog, Live sources | 10 seconds |
+| History export generation | 2 minutes (store timeout) |
+| Active database check (`quick_check`) | the operator's request; proportional to database size |
+| `VACUUM INTO` backup | its own dedicated connection (§25.1) |
+
+An open snapshot holds back WAL checkpoints until it ends, so these bounds also
+bound WAL growth caused by UI reads.
+
 ### 16.6 Exports
 
 The export store normalizes a typed `HistoryQuery`, then shares the exact
@@ -1205,16 +1231,35 @@ payload and validated JSON attributes. Synchronous writer calls provide
 backpressure; caller cancellation and an internal maximum two-minute context
 stop SQLite iteration between writes.
 
-One synchronous export workflow may run at a time. The authenticated browser
-handler writes store output to a random mode-0600 staging file under `/data`,
-synchronizes it, verifies the final row and byte limits, commits a sanitized
-success audit, seeks to the beginning, and only then sends attachment headers
-and the completed artifact. The streaming store can have written an invalid
-partial staging artifact when it returns a limit/cancellation/write error; the
-handler deletes it and never sends it as a successful response. The completed
-staging artifact is also deleted after delivery. A failed response write adds
-a sanitized canceled-delivery audit without changing the earlier mandatory
-success audit.
+One synchronous export workflow may run at a time. Before staging, the
+handler checks that the data volume has at least the configured byte limit
+(256 MiB) plus a 64 MiB reserve free, so a maximal export never takes the last
+space SQLite needs; otherwise it refuses with `507` and a failed
+`insufficient_space` audit. The authenticated browser handler writes store
+output to a random mode-0600 staging file under `/data`, synchronizes it,
+verifies the final row and byte limits, commits a sanitized success audit,
+seeks to the beginning, and only then sends attachment headers and the
+completed artifact. The streaming store can have written an invalid partial
+staging artifact when it returns a limit/cancellation/write error; the handler
+deletes it and never sends it as a successful response. The completed staging
+artifact is also deleted after delivery.
+
+The UI server's 30-second `WriteTimeout` is armed when the request is read,
+so the export handler owns its response deadline through
+`http.ResponseController`: before staging it extends the deadline by the store
+timeout plus one response-write allowance, and during delivery it copies the
+artifact in 64 KiB chunks, setting a fresh 30-second write deadline before each
+chunk and before the final flush. A large export on a slow link completes; a
+stalled client fails within one chunk deadline. A store timeout renders the
+History shell error state with a failed `timeout` audit and no file.
+
+The audit order is fixed: the mandatory success record commits before any
+header, and any delivery failure (write error, expired chunk deadline, short
+artifact read, or failed final flush) appends a separate canceled
+`delivery_interrupted` record, so a truncated response never stands as a
+success alone. A failed interruption audit write is retried once; if it still
+fails, a sanitized `export/export_delivery_audit_failed` Status diagnostic is
+recorded instead of the error being ignored.
 
 A hard process or host interruption may prevent the handler defer from
 running. While holding the owner-private maintenance lock and before SQLite is

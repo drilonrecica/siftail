@@ -967,6 +967,9 @@ No decorative illustration anywhere.
 - Unexpected errors are generic and show `Request ID: 01…`.
 - Database unavailable during History: "Logs could not be read because the
   database is temporarily unavailable. Existing filters were preserved."
+- History read exceeding its bounded query time: "The search took too long
+  and was stopped. Narrow the time range or filters. Existing filters were
+  preserved." with the request ID.
 - Session expiry redirects to login with "Your session expired. Sign in
   again to continue." and a safe return path.
 

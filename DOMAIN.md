@@ -1343,8 +1343,10 @@ CSRF-protected POST and an explicit confirmation after showing the absolute
 range, source scope, active filters, selected format, and hard limits. GET
 never initiates an export.
 
-Only one export workflow runs at a time. It creates a private mode-0600 staging
-file on the persistent local volume and does not send response headers until
+Only one export workflow runs at a time. It refuses to start unless the
+persistent local volume has the export byte limit plus a fixed reserve free.
+It creates a private mode-0600 staging file on that volume and does not send
+response headers until
 generation, synchronization, validation, and the mandatory success audit
 commit have completed. Limit, cancellation, deadline, storage, and audit
 failure delete the staging file and never expose a partial artifact. The
@@ -1358,9 +1360,10 @@ inspection instead of being followed or silently removed.
 Audit records contain only the closed result category, format, emitted event
 count when applicable, optional trusted Server ID, administrator attribution,
 and request ID. Source labels, message filters, other query text, payload,
-attributes, filesystem path, and filename are excluded. A client disconnect
-during delivery records a separate canceled outcome after the already-durable
-pre-delivery success record.
+attributes, filesystem path, and filename are excluded. A client disconnect,
+stalled client, or other delivery failure records a separate canceled outcome
+after the already-durable pre-delivery success record; if that record cannot be
+written, Status shows a sanitized diagnostic.
 
 Every attempt produces bounded safe operation metadata: requested format,
 Server ID when scoped, absolute range, configured row/byte maxima, emitted

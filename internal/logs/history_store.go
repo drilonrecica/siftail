@@ -12,6 +12,14 @@ import (
 
 const MaxCatalogOptions = 10_000
 
+// DefaultHistoryQueryTimeout bounds every interactive History read: one page,
+// one event detail, the source catalog, and the Live source choices. Indexed
+// pages finish in milliseconds; a broad literal search that would scan for
+// longer is interrupted, releases its read snapshot and reader connection,
+// and renders the shell error state well inside the 30-second UI response
+// deadline (audit DAT-07).
+const DefaultHistoryQueryTimeout = 10 * time.Second
+
 var ErrCatalogTooLarge = errors.New("historical source catalog exceeds its bounded limit")
 
 type HistoryEvent struct {
@@ -133,7 +141,31 @@ const historyPageColumns = `SELECT
 // store. The ordinary NewStore constructor remains suitable for bounded
 // cursor-free verification reads.
 func NewHistoryStore(db *sql.DB, codec *CursorCodec) *Store {
-	return &Store{db: db, cursorCodec: codec}
+	return &Store{
+		db: db, cursorCodec: codec, queryTimeout: DefaultHistoryQueryTimeout,
+	}
+}
+
+// WithQueryTimeout replaces the interactive read bound. Nonpositive values and
+// values above the default keep the default, so callers can only tighten it.
+func (s *Store) WithQueryTimeout(timeout time.Duration) *Store {
+	if s == nil {
+		return nil
+	}
+	if timeout <= 0 || timeout > DefaultHistoryQueryTimeout {
+		timeout = DefaultHistoryQueryTimeout
+	}
+	s.queryTimeout = timeout
+	return s
+}
+
+// boundedRead derives the context for one interactive read. A store built by
+// NewStore has no bound of its own and keeps the caller's context.
+func (s *Store) boundedRead(ctx context.Context) (context.Context, context.CancelFunc) {
+	if s.queryTimeout <= 0 {
+		return ctx, func() {}
+	}
+	return context.WithTimeout(ctx, s.queryTimeout)
 }
 
 // History returns one bounded page in canonical descending order. It fetches
@@ -160,6 +192,8 @@ func (s *Store) History(ctx context.Context, query HistoryQuery) (HistoryPage, e
 		cursor = &decoded
 	}
 	statement, arguments := buildHistorySQL(query, cursor)
+	ctx, cancel := s.boundedRead(ctx)
+	defer cancel()
 	rows, err := s.db.QueryContext(ctx, statement, arguments...)
 	if err != nil {
 		return HistoryPage{}, historyReadError(ctx, "query historical events", err)
@@ -384,6 +418,8 @@ func (s *Store) Event(ctx context.Context, id int64) (HistoryEvent, error) {
 	if s == nil || s.db == nil || id <= 0 {
 		return HistoryEvent{}, sql.ErrNoRows
 	}
+	ctx, cancel := s.boundedRead(ctx)
+	defer cancel()
 	event, err := scanHistoryEvent(s.db.QueryRowContext(ctx,
 		historyEventColumns+"\nWHERE e.id = ?", id,
 	))
@@ -415,6 +451,8 @@ func (s *Store) Catalog(ctx context.Context, scope SourceScope) (SourceCatalog, 
 		}
 	}
 
+	ctx, cancel := s.boundedRead(ctx)
+	defer cancel()
 	var catalog SourceCatalog
 	serverRows, err := s.db.QueryContext(ctx, `SELECT id, name
 		FROM servers
@@ -463,6 +501,8 @@ func (s *Store) LiveSources(ctx context.Context) ([]LiveSourceOption, error) {
 	if s == nil || s.db == nil {
 		return nil, errors.New("history store is unavailable")
 	}
+	ctx, cancel := s.boundedRead(ctx)
+	defer cancel()
 	sourceRows, err := s.db.QueryContext(ctx, `SELECT s.id,
 		CASE WHEN s.alias IS NOT NULL
 			THEN s.alias || ' · ' || server.name

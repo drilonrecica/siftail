@@ -10,10 +10,13 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/drilonrecica/siftail/internal/audit"
 	"github.com/drilonrecica/siftail/internal/logs"
+	statusstate "github.com/drilonrecica/siftail/internal/status"
+	"github.com/drilonrecica/siftail/internal/web"
 )
 
 const historyExportConfirmation = "export matching history"
@@ -56,6 +59,23 @@ func (b *Browser) historyExport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	limits := b.exports.Limits()
+	controller := http.NewResponseController(w)
+	// The server-wide 30-second WriteTimeout starts when the request is read.
+	// Staging may legitimately run for the store's full bounded duration, so
+	// the deadline covers it plus one response write; delivery then extends
+	// it per chunk (audit DAT-07, SEC-12). A writer without deadline support
+	// (tests, wrappers) simply keeps its own behavior.
+	_ = controller.SetWriteDeadline(
+		b.now().Add(limits.Timeout + b.exportWriteTimeout),
+	)
+	if err := b.checkHistoryExportSpace(limits.MaxBytes); err != nil {
+		b.failHistoryExportStatus(w, r, session.CSRFToken, query, format,
+			"insufficient_space", http.StatusInsufficientStorage,
+			"The data volume does not have enough free space to stage this export. No file was sent.")
+		return
+	}
+
 	artifact, err := os.CreateTemp(
 		b.exportDataDir, historyExportStagingPrefix+"*",
 	)
@@ -84,6 +104,7 @@ func (b *Browser) historyExport(w http.ResponseWriter, r *http.Request) {
 	if err == nil {
 		_, err = artifact.Seek(0, io.SeekStart)
 	}
+	_ = controller.SetWriteDeadline(b.now().Add(b.exportWriteTimeout))
 	if err != nil {
 		category := logs.ExportFailureCategory(err)
 		outcome := audit.OutcomeFailed
@@ -92,6 +113,8 @@ func (b *Browser) historyExport(w http.ResponseWriter, r *http.Request) {
 		switch category {
 		case "canceled":
 			outcome = audit.OutcomeCanceled
+		case "timeout":
+			message = "The export took longer than its time limit. Narrow the filters or time range. No partial file was sent."
 		case "row_limit", "byte_limit":
 			outcome = audit.OutcomeRejected
 			status = http.StatusUnprocessableEntity
@@ -110,6 +133,10 @@ func (b *Browser) historyExport(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	// The mandatory success audit commits before any header leaves
+	// (DOMAIN.md export rules). Every failure after this point appends the
+	// separate canceled delivery_interrupted record, so a truncated response
+	// is never left with only the success row.
 	if err := b.recordHistoryExport(
 		r.Context(), query, format, audit.OutcomeSucceeded, "complete", result.Rows,
 	); err != nil {
@@ -125,12 +152,98 @@ func (b *Browser) historyExport(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Length", strconv.FormatInt(result.Bytes, 10))
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
-	if _, err := io.CopyN(w, artifact, result.Bytes); err != nil {
-		_, _ = b.audit.Record(context.WithoutCancel(r.Context()),
-			historyExportAuditInput(
-				context.WithoutCancel(r.Context()), query, format,
-				audit.OutcomeCanceled, "delivery_interrupted", result.Rows,
-			))
+	if err := b.deliverHistoryExport(w, controller, artifact, result.Bytes); err != nil {
+		b.recordHistoryExportInterrupted(r, query, format, result.Rows)
+	}
+}
+
+// historyExportChunkBytes is the delivery unit. Each chunk gets a fresh write
+// deadline, so a large artifact on a slow link completes while a stalled
+// client still fails within one deadline.
+const historyExportChunkBytes = 64 << 10
+
+// historyExportSpaceReserve is kept free on the data volume beyond the
+// largest possible artifact, so a maximal export never consumes the final
+// space SQLite needs for ingestion commits and WAL growth.
+const historyExportSpaceReserve = 64 << 20
+
+func (b *Browser) checkHistoryExportSpace(maximum int64) error {
+	available, err := b.exportSpace(b.exportDataDir)
+	if err != nil {
+		return errors.New("inspect export staging capacity")
+	}
+	if maximum < 0 || available < uint64(maximum)+historyExportSpaceReserve {
+		return errors.New("export staging has insufficient space")
+	}
+	return nil
+}
+
+func filesystemAvailableBytes(directory string) (uint64, error) {
+	var stats syscall.Statfs_t
+	if err := syscall.Statfs(directory, &stats); err != nil {
+		return 0, err
+	}
+	return uint64(stats.Bavail) * uint64(stats.Bsize), nil
+}
+
+// deliverHistoryExport copies exactly size bytes in bounded chunks, extending
+// the write deadline before each one, then flushes so a buffered tail that
+// cannot reach the client is reported rather than lost at handler return.
+func (b *Browser) deliverHistoryExport(
+	w http.ResponseWriter,
+	controller *http.ResponseController,
+	artifact io.Reader,
+	size int64,
+) error {
+	buffer := make([]byte, historyExportChunkBytes)
+	remaining := size
+	for remaining > 0 {
+		chunk := buffer
+		if remaining < int64(len(chunk)) {
+			chunk = chunk[:remaining]
+		}
+		if _, err := io.ReadFull(artifact, chunk); err != nil {
+			return errors.New("read export artifact")
+		}
+		_ = controller.SetWriteDeadline(b.now().Add(b.exportWriteTimeout))
+		written, err := w.Write(chunk)
+		if err != nil || written != len(chunk) {
+			return errors.New("write export response")
+		}
+		remaining -= int64(written)
+	}
+	_ = controller.SetWriteDeadline(b.now().Add(b.exportWriteTimeout))
+	if err := controller.Flush(); err != nil &&
+		!errors.Is(err, http.ErrNotSupported) {
+		return errors.New("flush export response")
+	}
+	return nil
+}
+
+// recordHistoryExportInterrupted appends the canceled delivery record. A
+// failed audit write is retried once; if it still fails, a sanitized Status
+// diagnostic tells the operator that the audit trail shows a success for an
+// export whose delivery did not complete.
+func (b *Browser) recordHistoryExportInterrupted(
+	r *http.Request,
+	query logs.HistoryQuery,
+	format string,
+	rows int,
+) {
+	for attempt := 0; attempt < 2; attempt++ {
+		if b.recordHistoryExport(
+			r.Context(), query, format, audit.OutcomeCanceled,
+			"delivery_interrupted", rows,
+		) == nil {
+			return
+		}
+	}
+	if b.status != nil {
+		_ = b.status.RecordDiagnostic(statusstate.DiagnosticInput{
+			At: b.now(), Component: "export",
+			Category:  "export_delivery_audit_failed",
+			RequestID: web.RequestIDFromContext(r.Context()),
+		})
 	}
 }
 
@@ -183,17 +296,30 @@ func (b *Browser) failHistoryExport(
 	query logs.HistoryQuery,
 	format, category string,
 ) {
+	b.failHistoryExportStatus(w, r, csrfToken, query, format, category,
+		http.StatusServiceUnavailable,
+		"The export could not be completed. No partial file was sent.")
+}
+
+func (b *Browser) failHistoryExportStatus(
+	w http.ResponseWriter,
+	r *http.Request,
+	csrfToken string,
+	query logs.HistoryQuery,
+	format, category string,
+	status int,
+	message string,
+) {
 	if format != logs.ExportFormatText && format != logs.ExportFormatNDJSON {
 		format = logs.ExportFormatText
 	}
-	message := "The export could not be completed. No partial file was sent."
 	if b.audit == nil || b.recordHistoryExport(
 		r.Context(), query, format, audit.OutcomeFailed, category, 0,
 	) != nil {
+		status = http.StatusServiceUnavailable
 		message = "The export audit could not be recorded. No file was sent."
 	}
-	b.renderHistoryExportError(w, r, csrfToken, query,
-		http.StatusServiceUnavailable, message)
+	b.renderHistoryExportError(w, r, csrfToken, query, status, message)
 }
 
 func (b *Browser) recordHistoryExport(

@@ -19,6 +19,11 @@ import (
 const (
 	MaxSchemaVersion = 8
 	readConnections  = 4
+	// authConnections is the dedicated read-only pool for ingestion-token
+	// verification (audit DAT-08). Exports, History searches, and active
+	// quick_check runs share the ordinary reader pool and can hold every one
+	// of its connections; authentication must never queue behind them.
+	authConnections  = 2
 	writerDriverName = "siftail-sqlite-writer"
 	readerDriverName = "siftail-sqlite-reader"
 )
@@ -49,10 +54,12 @@ func configuredDriver(readOnly bool) *sqlite3.SQLiteDriver {
 	}}
 }
 
-// DB owns the single writer connection and the bounded ordinary read pool.
+// DB owns the single writer connection, the bounded ordinary read pool, and
+// the small dedicated ingestion-authentication read pool.
 type DB struct {
 	writer *sql.DB
 	reader *sql.DB
+	auth   *sql.DB
 	once   sync.Once
 	err    error
 }
@@ -113,6 +120,18 @@ func Open(ctx context.Context, path string) (*DB, error) {
 		return fail(classify("connect reader", err))
 	}
 	db.reader = reader
+
+	authReader, err := sql.Open(readerDriverName, dsn(path, true))
+	if err != nil {
+		return fail(classify("open authentication reader", err))
+	}
+	authReader.SetMaxOpenConns(authConnections)
+	authReader.SetMaxIdleConns(authConnections)
+	if err := authReader.PingContext(ctx); err != nil {
+		_ = authReader.Close()
+		return fail(classify("connect authentication reader", err))
+	}
+	db.auth = authReader
 	return db, nil
 }
 
@@ -244,6 +263,11 @@ func (d *DB) Writer() *sql.DB { return d.writer }
 // Reader returns the read-only pool, capped at four connections.
 func (d *DB) Reader() *sql.DB { return d.reader }
 
+// AuthReader returns the read-only pool reserved for ingestion-token
+// verification, capped at two connections. It reads the same committed WAL
+// state as Reader, so a committed revocation is visible to the next lookup.
+func (d *DB) AuthReader() *sql.DB { return d.auth }
+
 // Checkpoint requests a passive WAL checkpoint.
 func (d *DB) Checkpoint(ctx context.Context) error {
 	var busy, logFrames, checkpointed int
@@ -304,7 +328,7 @@ func integrityCheck(ctx context.Context, db *sql.DB, query string) error {
 	return nil
 }
 
-// Close performs a passive checkpoint and closes both pools exactly once.
+// Close performs a passive checkpoint and closes every pool exactly once.
 func (d *DB) Close() error {
 	d.once.Do(func() {
 		var errs []error
@@ -312,6 +336,9 @@ func (d *DB) Close() error {
 			if err := d.Checkpoint(context.Background()); err != nil && !errors.Is(err, sql.ErrConnDone) {
 				errs = append(errs, err)
 			}
+		}
+		if d.auth != nil {
+			errs = append(errs, d.auth.Close())
 		}
 		if d.reader != nil {
 			errs = append(errs, d.reader.Close())

@@ -1,7 +1,7 @@
 # History export format and store contract
 
-**Reviewed:** 2026-07-28
-**Scope:** SFT-045/SFT-046 version-one formats, limits, and browser workflow
+**Reviewed:** 2026-11-05
+**Scope:** SFT-045/SFT-046 version-one formats, limits, and browser workflow; SFT-096 delivery deadlines and space check
 
 SFT-045 defines the internal streaming store and stable payload formats.
 SFT-046 exposes them only through the authenticated administrator History
@@ -17,11 +17,23 @@ an expensive pre-export total count.
 
 Initiation is a same-origin, CSRF-protected POST under the current opaque
 administrator session. GET does not generate an artifact. One workflow runs
-at a time. Siftail generates a random mode-0600 staging file under the
+at a time. Siftail first checks that the data volume has at least 320 MiB free
+(the 256 MiB byte limit plus a 64 MiB reserve for the database); otherwise it
+refuses with `507 Insufficient Storage` and audits `insufficient_space`. It
+then generates a random mode-0600 staging file under the
 configured data directory, synchronizes and validates it, and durably records
 the sanitized success audit before sending download headers. It deletes the
 staging file after delivery or any limit, cancellation, deadline, storage,
 audit, or response-write failure. No partial artifact is offered.
+
+Delivery is not cut off by the UI server's 30-second response timeout: the
+download is written in 64 KiB chunks, each with its own 30-second write
+deadline, so a large export over a slow link completes while a stalled client
+fails within 30 seconds. Any delivery failure adds a canceled
+`delivery_interrupted` audit record after the success record; if that record
+cannot be written, Status shows an `export_delivery_audit_failed` diagnostic.
+A browser that loses the connection discards the download because the received
+length does not match `Content-Length`.
 
 The fixed attachment name contains only `siftail-history`, the absolute UTC
 range, and `.txt` or `.ndjson`. Responses are `text/plain; charset=utf-8` or
@@ -46,7 +58,9 @@ size are removed, and matching events are read in
 `event_at_us DESC, id DESC` order.
 
 Hard defaults are 100,000 events, 256 MiB encoded output, a 31-day range, and a
-two-minute store operation. The query requests one extra row to detect count
+two-minute store operation. The two-minute bound is also the longest read
+snapshot an export holds; exceeding it shows the History error state and
+audits `timeout`. The query requests one extra row to detect count
 overflow without `COUNT(*)`. The encoder buffers one bounded event/encoded row,
 then synchronously writes it. A row limit, byte limit, cancellation, deadline,
 SQLite failure, or writer failure makes the staging artifact invalid; the

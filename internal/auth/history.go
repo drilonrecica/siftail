@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -355,9 +356,19 @@ func (b *Browser) renderHistoryShellError(
 	}
 }
 
+// historyTimeoutMessage is the History shell error when a read exceeds
+// logs.DefaultHistoryQueryTimeout (DESIGN.md §25).
+const historyTimeoutMessage = "The search took too long and was stopped. " +
+	"Narrow the time range or filters. Existing filters were preserved."
+
 func historyHTTPError(r *http.Request, err error) (int, string, string) {
 	if errors.Is(err, logs.ErrInvalidHistoryCursor) {
 		return http.StatusBadRequest, "The page cursor is invalid for these filters.", ""
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return http.StatusServiceUnavailable,
+			historyTimeoutMessage,
+			web.RequestIDFromContext(r.Context())
 	}
 	return http.StatusServiceUnavailable,
 		"Logs could not be read because the database is temporarily unavailable. Existing filters were preserved.",
