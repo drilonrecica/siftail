@@ -386,3 +386,41 @@ func TestStateLateEventCountersAreBounded(t *testing.T) {
 		t.Fatalf("oldest retained Server = %d, want 4", last.ServerID)
 	}
 }
+
+func TestDegradedConditionNamesTheGlobalBannerCause(t *testing.T) {
+	var missing *State
+	if missing.DegradedCondition() != "" {
+		t.Fatal("nil state reported a condition")
+	}
+	at := time.Unix(2_000, 0).UTC()
+	state := NewState(at)
+	state.SetWriterReady(true)
+	if got := state.DegradedCondition(); got != "" {
+		t.Fatalf("healthy condition = %q", got)
+	}
+	state.RecordCleanup(retention.CleanupResult{SizeTriggered: true, EventsExhausted: true}, at)
+	if got := state.DegradedCondition(); got != ConditionRetentionTargetUnmet {
+		t.Fatalf("retention condition = %q", got)
+	}
+	state.RecordIngestRejected(ingest.CategoryUnavailable, true, at)
+	if got := state.DegradedCondition(); got != ConditionDatabaseUnavailable {
+		t.Fatalf("database condition = %q", got)
+	}
+	state.RecordIngestRejected(ingest.CategoryStorageFull, true, at)
+	if got := state.DegradedCondition(); got != ConditionStorageFull {
+		t.Fatalf("storage-full condition = %q", got)
+	}
+	// Batch-scoped failures never raise the global banner.
+	fresh := NewState(at)
+	fresh.SetWriterReady(true)
+	fresh.RecordIngestRejected(ingest.CategoryInternal, false, at)
+	fresh.RecordIngestRejected(ingest.CategoryUnavailable, false, at)
+	if got := fresh.DegradedCondition(); got != "" {
+		t.Fatalf("batch-scoped condition = %q", got)
+	}
+	state.RecordDatabaseRecovered(at)
+	state.RecordCleanup(retention.CleanupResult{SizeTargetReached: true}, at)
+	if got := state.DegradedCondition(); got != "" {
+		t.Fatalf("recovered condition = %q", got)
+	}
+}

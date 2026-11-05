@@ -160,6 +160,9 @@ func (b *Browser) historyView(
 		return webui.HistoryView{}, err
 	}
 	view := buildHistoryView(query, page, catalog, b.now(), requestZone(r), highlight)
+	if session, ok := BrowserSessionFromContext(r.Context()); ok {
+		view.CSRFToken = session.CSRFToken
+	}
 	if appendPage {
 		noun := "events"
 		if len(view.Rows) == 1 {

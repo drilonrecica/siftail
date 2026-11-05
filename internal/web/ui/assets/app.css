@@ -353,6 +353,42 @@ code {
   background: var(--status-warning);
 }
 
+/* Any state but Healthy carries its word beside the dot (DESIGN.md §6.1). */
+.health-indicator:has(.health-label) {
+  gap: var(--space-2);
+}
+
+.health-label {
+  color: var(--status-error);
+  font-size: 0.85rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.health-indicator[data-health="Attention"] .health-label {
+  color: var(--status-warning);
+}
+
+/* The global degraded banner (DESIGN.md §6.3): below the header on every
+   authenticated page, persistent, never dismissible. */
+.degraded-banner {
+  padding: var(--space-3) var(--space-6);
+  border-bottom: 1px solid var(--status-error);
+  border-left: 0.25rem solid var(--status-error);
+  background: color-mix(in srgb, var(--status-error) 10%, var(--surface-raised));
+  color: var(--text-primary);
+}
+
+.degraded-banner p {
+  width: min(100%, 112rem);
+  margin: 0 auto;
+}
+
+.degraded-banner a {
+  color: inherit;
+  font-weight: 700;
+}
+
 .palette-button {
   min-height: 2rem;
   flex-shrink: 0;
@@ -1029,6 +1065,15 @@ code {
   padding: var(--space-6);
 }
 
+/* Without JavaScript the export link targets the dialog, which then shows
+   in place as an ordinary form (DESIGN.md §33.5); script opens it modally
+   instead. */
+.export-dialog:target:not([open]) {
+  position: static;
+  display: block;
+  margin: var(--space-3);
+}
+
 .export-dialog::backdrop {
   background: rgb(0 0 0 / 68%);
 }
@@ -1091,6 +1136,10 @@ code {
 
 .live-text-filter {
   grid-column: span 2;
+}
+
+.live-noscript {
+  margin: var(--space-3);
 }
 
 .live-toolbar {
@@ -2119,6 +2168,10 @@ kbd {
   }
 
   .workspace {
+    padding: var(--space-3);
+  }
+
+  .degraded-banner {
     padding: var(--space-3);
   }
 

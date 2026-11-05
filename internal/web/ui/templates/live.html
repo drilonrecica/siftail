@@ -1,7 +1,27 @@
 {{define "live-region.html"}}
+{{if .Error}}
+<section id="live-region" class="workspace-panel live-region" aria-label="Live">
+  {{template "mode-switch.html" .ModeSwitch}}
+  <div class="history-error" role="alert">
+    <h2>Live could not be started</h2>
+    <p>{{.Error}}</p>
+    {{if .ErrorRequestID}}<p>Request ID: <code>{{.ErrorRequestID}}</code></p>{{end}}
+    <p><a href="{{.CanonicalURL}}">Try Live again</a> or <a href="{{.HistoryURL}}">open History</a>.</p>
+  </div>
+</section>
+{{else}}
 <section id="live-region" class="workspace-panel live-region" aria-label="Live"
          data-live-workspace data-stream-url="{{.StreamURL}}">
   {{template "mode-switch.html" .ModeSwitch}}
+  {{/* Live streaming is genuinely JavaScript-only, so its absence is
+       stated (DESIGN.md §33.5); the controls that only work with the
+       stream stay hidden until live.js starts. */}}
+  <noscript>
+    <div class="notice notice-warning live-noscript">
+      <h2>Live needs JavaScript</h2>
+      <p>Live streaming runs in the browser and cannot start with JavaScript turned off. <a href="{{.HistoryURL}}">Open History</a> to read committed logs for these filters; it works without JavaScript.</p>
+    </div>
+  </noscript>
   <details class="history-filter-disclosure" open>
     <summary>Filters</summary>
     <form id="live-filter-form" class="history-form live-form" method="get" action="/logs" data-live-filters>
@@ -71,7 +91,7 @@
       <button class="button button-primary apply-filters" type="submit">Apply filters</button>
     </form>
   </details>
-  <div class="live-toolbar">
+  <div class="live-toolbar" data-live-script-only hidden>
     <button class="button button-quiet" type="button" data-live-pause>Pause</button>
     <button class="button button-quiet" type="button" data-live-newest>Jump to newest</button>
     <button class="button button-quiet" type="button" data-live-clear>Clear view</button>
@@ -79,7 +99,7 @@
   </div>
   <div class="live-notices" aria-live="polite" data-live-notices></div>
   <div class="live-list-wrap" data-live-scroll>
-    <div class="empty-state" data-live-empty>
+    <div class="empty-state" data-live-empty data-live-script-only hidden>
       <h2>Waiting for new events from this source</h2>
       <p>Live events will appear here after they are committed.</p>
     </div>
@@ -88,7 +108,7 @@
   <div class="tail-line live-tail">
     <span class="tail-zone">Times in {{.Zone}}</span>
     <span class="tail-line-rule" aria-hidden="true"></span>
-    <span class="live-status" role="status" aria-live="polite">
+    <span class="live-status" role="status" aria-live="polite" data-live-script-only hidden>
       <span class="live-status-dot" aria-hidden="true"></span>
       <span data-live-status>Connecting</span>
     </span>
@@ -97,4 +117,5 @@
   <button class="button live-new-events" type="button" data-live-pending hidden>↓ 0 new events</button>
   <p class="visually-hidden" role="status" aria-live="polite" data-live-announcement></p>
 </section>
+{{end}}
 {{end}}

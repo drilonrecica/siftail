@@ -98,6 +98,15 @@ func (s *Store) HealthSeverity() string {
 	return s.state.HealthSeverity()
 }
 
+// DegradedCondition exposes the in-memory global degraded condition without
+// touching the database; it returns "" when state is unavailable.
+func (s *Store) DegradedCondition() string {
+	if s == nil || s.state == nil {
+		return ""
+	}
+	return s.state.DegradedCondition()
+}
+
 func (s *Store) RecordDiagnostic(input DiagnosticInput) error {
 	if s == nil || s.state == nil {
 		return errors.New("status storage is unavailable")

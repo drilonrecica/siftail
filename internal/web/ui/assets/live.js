@@ -37,6 +37,12 @@
     return;
   }
 
+  // The toolbar, waiting state, and connection status describe a stream
+  // only this module can run; without it the <noscript> notice speaks.
+  workspace.querySelectorAll("[data-live-script-only]").forEach((element) => {
+    element.hidden = false;
+  });
+
   let eventSource = null;
   let generation = 0;
   let paused = false;

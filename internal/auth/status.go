@@ -265,3 +265,32 @@ func formatUptime(duration time.Duration) string {
 	}
 	return duration.String()
 }
+
+// degradedBanner is the copy of the global degraded banner (DESIGN.md §6.3)
+// for a condition from statusstate.DegradedCondition. Each names what
+// stopped, what still works, and the operator's next step; the shell adds
+// the Status link.
+func degradedBanner(condition string) webui.DegradedBannerView {
+	switch condition {
+	case statusstate.ConditionStorageFull:
+		return webui.DegradedBannerView{
+			Title: "Ingestion unavailable",
+			Detail: "the database cannot write because storage is full. " +
+				"Existing logs remain available. Free disk space or reduce retention.",
+		}
+	case statusstate.ConditionRetentionTargetUnmet:
+		return webui.DegradedBannerView{
+			Title: "Ingestion unavailable",
+			Detail: "the database is over its configured size limit and retention " +
+				"cannot free enough space. Existing logs remain available. " +
+				"Increase the limit or reduce retention.",
+		}
+	case statusstate.ConditionDatabaseUnavailable:
+		return webui.DegradedBannerView{
+			Title: "Ingestion unavailable",
+			Detail: "the database cannot write. Siftail tests recovery " +
+				"automatically; Status shows the last database error.",
+		}
+	}
+	return webui.DegradedBannerView{}
+}

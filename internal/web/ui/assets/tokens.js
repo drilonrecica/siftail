@@ -100,8 +100,20 @@
           credentials: "same-origin",
           redirect: "follow",
         });
+        // Only an expired session leaves the page, for sign-in. Any other
+        // non-JSON answer keeps the one-time token page and says so: the
+        // test URL is POST-only, so following response.url would strand
+        // the operator on a 405 with the token gone (audit UX-25).
+        const landed = response.redirected ? new URL(response.url, window.location.href) : null;
+        if (landed && landed.origin === window.location.origin && landed.pathname === "/login") {
+          window.location.assign(landed.pathname + landed.search);
+          return;
+        }
         if (response.redirected || !response.headers.get("Content-Type")?.startsWith("application/json")) {
-          window.location.assign(response.url || "/login?expired=1");
+          setStage("delivery", "failed");
+          testResult.textContent = response.ok
+            ? "The guided test could not complete: Siftail sent an unexpected answer. The token is still shown here; try again."
+            : `The guided test could not complete (HTTP ${response.status}). The token is still shown here; check the browser session and try again.`;
           return;
         }
         const result = await response.json();

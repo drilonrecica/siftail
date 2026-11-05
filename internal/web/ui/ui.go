@@ -55,12 +55,21 @@ type FlashView struct {
 	Text string
 }
 
+// DegradedBannerView is the persistent global banner for a critical
+// unresolved condition (DESIGN.md §6.3). It has a Status link and no dismiss
+// control; an empty Title renders no banner.
+type DegradedBannerView struct {
+	Title  string
+	Detail string
+}
+
 type ShellView struct {
 	CSRFToken string
 	Mode      string
 	Path      string
 	Prefs     PrefsView
 	Health    string
+	Degraded  DegradedBannerView
 	Flash     FlashView
 	History   HistoryView
 	Live      LiveView
@@ -234,6 +243,9 @@ type ModeSwitchView struct {
 type HistoryView struct {
 	CanonicalURL string
 	ExportURL    string
+	// CSRFToken is the export form's own token, so the export works as a
+	// plain form submission without JavaScript (DESIGN.md §33.5).
+	CSRFToken string
 	// From and To are UTC RFC3339: the URL, form, and <time datetime> value.
 	// FromText and ToText render them in the display zone, Zone names it,
 	// and ShowDate widens rows to carry the day when the range spans more
@@ -324,6 +336,10 @@ type LiveView struct {
 	LevelsValue  string
 	StreamsValue string
 	Contains     string
+	// Error replaces the Live workspace with a shell error, as History's
+	// does; ErrorRequestID is set for unexpected failures (AGENTS.md §11.4).
+	Error          string
+	ErrorRequestID string
 }
 
 func (v LiveView) ModeSwitch() ModeSwitchView {

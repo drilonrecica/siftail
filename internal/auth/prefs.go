@@ -79,6 +79,7 @@ func (b *Browser) shellBase(w http.ResponseWriter, r *http.Request, mode string)
 		Path:      path,
 		Prefs:     preferences(r),
 		Health:    b.status.HealthSeverity(),
+		Degraded:  degradedBanner(b.status.DegradedCondition()),
 		Flash:     b.takeFlash(w, r),
 	}
 }

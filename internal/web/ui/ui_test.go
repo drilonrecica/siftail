@@ -119,6 +119,7 @@ func TestHistoryExportDialogIsExplicitBoundedAndEscaped(t *testing.T) {
 		History: HistoryView{
 			CanonicalURL:  "/logs?from=from&amp;to=to",
 			ExportURL:     `/logs/export?contains=%3Cscript%3E`,
+			CSRFToken:     "shell-csrf",
 			From:          "2026-07-28T00:00:00Z",
 			To:            "2026-07-28T01:00:00Z",
 			RangeSummary:  "one hour",
@@ -150,11 +151,12 @@ func TestHistoryExportDialogIsExplicitBoundedAndEscaped(t *testing.T) {
 			t.Errorf("History export dialog missing %q", want)
 		}
 	}
-	// The shell owns exactly two server-rendered CSRF tokens (preferences and
-	// sign-out); the export dialog itself must not embed one.
+	// The full page owns exactly three server-rendered CSRF tokens
+	// (preferences, sign-out, and the export form's own, so the export works
+	// without JavaScript); filter fragments carry none (SFT-046).
 	if strings.Contains(body, `<script>source`) ||
 		strings.Contains(body, `<script>payload`) ||
-		strings.Count(body, `name="csrf_token"`) != 2 {
+		strings.Count(body, `name="csrf_token" value="shell-csrf"`) != 3 {
 		t.Fatalf("History export dialog exposed unsafe content or fragment CSRF: %s", body)
 	}
 }

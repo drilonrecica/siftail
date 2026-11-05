@@ -10,22 +10,30 @@ import (
 	"unicode/utf8"
 
 	"github.com/drilonrecica/siftail/internal/logs"
+	"github.com/drilonrecica/siftail/internal/web"
 	webui "github.com/drilonrecica/siftail/internal/web/ui"
 )
 
 func (b *Browser) livePage(w http.ResponseWriter, r *http.Request) {
 	filter, err := parseLivePageQuery(r.URL.Query())
 	if err != nil {
-		http.Error(w, "Check the Live filters.", http.StatusBadRequest)
+		b.renderLiveShellError(w, r, http.StatusBadRequest, webui.LiveView{
+			CanonicalURL: logFilter{}.liveURL(), HistoryURL: logFilter{}.historyURL(),
+			Error: "Check the Live filters.",
+		})
 		return
 	}
-	if b.history == nil {
-		http.Error(w, "Logs are temporarily unavailable.", http.StatusServiceUnavailable)
-		return
+	var catalog logs.SourceCatalog
+	if b.history != nil {
+		catalog, err = b.history.Catalog(r.Context(), filter.Scope)
 	}
-	catalog, err := b.history.Catalog(r.Context(), filter.Scope)
-	if err != nil {
-		http.Error(w, "Logs are temporarily unavailable.", http.StatusServiceUnavailable)
+	if b.history == nil || err != nil {
+		b.renderLiveShellError(w, r, http.StatusServiceUnavailable, webui.LiveView{
+			CanonicalURL: filter.liveURL(), HistoryURL: filter.historyURL(),
+			Error: "Live could not start because the database is temporarily " +
+				"unavailable. Existing filters were preserved.",
+			ErrorRequestID: web.RequestIDFromContext(r.Context()),
+		})
 		return
 	}
 	shell := b.shellBase(w, r, "live")
@@ -33,6 +41,25 @@ func (b *Browser) livePage(w http.ResponseWriter, r *http.Request) {
 	shell.Live.Zone = shell.Prefs.Timezone
 	if err := b.ui.Shell(w, http.StatusOK, shell); err != nil {
 		http.Error(w, "Logs are temporarily unavailable.", http.StatusInternalServerError)
+	}
+}
+
+// renderLiveShellError renders a Live failure inside the application shell,
+// like History's shell error, so navigation and the mode switch remain
+// (audit UX-21). The plain-text response is only the fallback when the shell
+// itself cannot render.
+func (b *Browser) renderLiveShellError(
+	w http.ResponseWriter,
+	r *http.Request,
+	status int,
+	view webui.LiveView,
+) {
+	view.SourceSummary = "Live"
+	shell := b.shellBase(w, r, "live")
+	view.Zone = shell.Prefs.Timezone
+	shell.Live = view
+	if err := b.ui.Shell(w, status, shell); err != nil {
+		http.Error(w, view.Error, status)
 	}
 }
 

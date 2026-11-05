@@ -249,6 +249,34 @@ func (s *State) HealthSeverity() string {
 	return "Healthy"
 }
 
+// Degraded conditions the global banner reports (DESIGN.md §6.3).
+const (
+	ConditionStorageFull          = "storage_full"
+	ConditionDatabaseUnavailable  = "database_unavailable"
+	ConditionRetentionTargetUnmet = "retention_target_unmet"
+)
+
+// DegradedCondition names the critical unresolved condition that stops
+// ingestion globally, or "" when there is none. It reads only in-memory
+// state, so every authenticated page can afford it. A database failure wins
+// over the retention target because it is the more immediate cause.
+func (s *State) DegradedCondition() string {
+	if s == nil {
+		return ""
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	switch {
+	case s.databaseCategory == string(ingest.CategoryStorageFull):
+		return ConditionStorageFull
+	case s.databaseCategory != "" || !s.databaseWritable:
+		return ConditionDatabaseUnavailable
+	case s.retentionDegraded:
+		return ConditionRetentionTargetUnmet
+	}
+	return ""
+}
+
 func (s *State) DatabaseWritable() bool {
 	if s == nil {
 		return false

@@ -263,11 +263,15 @@
   }, { capture: true });
 
   document.addEventListener("click", (event) => {
+    // Both export controls are links so the export works without
+    // JavaScript; here they open and close the dialog modally instead of
+    // following the fragment.
     const openExport = event.target.closest("[data-open-export]");
     if (openExport) {
       const dialog = document.querySelector("[data-export-dialog]");
       if (dialog instanceof HTMLDialogElement) {
-        dialog.showModal();
+        event.preventDefault();
+        if (!dialog.open) dialog.showModal();
         dialog.querySelector("select")?.focus();
       }
       return;
@@ -276,6 +280,7 @@
     if (closeExport) {
       const dialog = closeExport.closest("dialog");
       if (dialog instanceof HTMLDialogElement) {
+        event.preventDefault();
         dialog.close();
         document.querySelector("[data-open-export]")?.focus();
       }
@@ -357,19 +362,6 @@
     const form = event.target;
     if (!(form instanceof HTMLFormElement) || !form.matches("[data-export-form]")) {
       return;
-    }
-    const csrfSource = document.querySelector(
-      '.header-actions form[action="/session/logout"] input[name="csrf_token"]',
-    );
-    if (csrfSource instanceof HTMLInputElement) {
-      let csrfInput = form.querySelector('input[name="csrf_token"]');
-      if (!(csrfInput instanceof HTMLInputElement)) {
-        csrfInput = document.createElement("input");
-        csrfInput.type = "hidden";
-        csrfInput.name = "csrf_token";
-        form.append(csrfInput);
-      }
-      csrfInput.value = csrfSource.value;
     }
     const status = document.querySelector("#history-export-status");
     if (status) {

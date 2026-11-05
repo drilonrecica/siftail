@@ -6,6 +6,9 @@
 <body hx-history="false">
   <a class="skip-link" href="#main-content">Skip to main content</a>
   {{template "topbar.html" .}}
+  {{if .Degraded.Title}}<div class="degraded-banner" role="alert" data-degraded-banner>
+    <p><strong>{{.Degraded.Title}}:</strong> {{.Degraded.Detail}} <a href="/status">Open Status</a></p>
+  </div>{{end}}
   {{if .Flash.Text}}<div class="flash-region">
     <p class="notice notice-{{.Flash.Kind}}" role="status" data-flash{{if eq .Flash.Kind "success"}} data-flash-dismiss{{end}}>{{.Flash.Text}}</p>
   </div>{{end}}

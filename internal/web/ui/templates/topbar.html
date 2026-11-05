@@ -9,9 +9,12 @@
       <a href="/servers"{{if eq $p.NavSection "servers"}} aria-current="page"{{end}}>Servers</a>
     </nav>
     <div class="header-actions">
+      {{/* Healthy is the quiet dot alone; any other severity shows its
+           word beside the dot, so the state is never colour-only
+           (DESIGN.md §6.1, WCAG 1.4.1). */}}
       {{if .Health}}<a class="health-indicator" href="/status" data-health="{{.Health}}">
         <span class="health-dot" aria-hidden="true"></span>
-        <span class="visually-hidden">Status: {{.Health}}</span>
+        <span class="visually-hidden">System health: </span>{{if eq .Health "Healthy"}}<span class="visually-hidden">Healthy</span>{{else}}<span class="health-label">{{.Health}}</span>{{end}}
       </a>{{end}}
       <button class="button button-quiet palette-button" type="button" data-palette-open hidden>
         <span aria-hidden="true" data-chord-key="K">Ctrl K</span>

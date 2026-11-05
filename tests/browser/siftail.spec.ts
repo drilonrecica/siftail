@@ -268,7 +268,7 @@ test("confirmed History export preserves filters, focus, themes, mobile, and exp
   await login(page);
   await page.locator("#contains-filter").fill("needle-hostile");
   await expect(page).toHaveURL(/contains=needle-hostile/);
-  const open = page.getByRole("button", { name: "Export matching History" });
+  const open = page.getByRole("link", { name: "Export matching History" });
   await open.focus();
   await open.press("Enter");
   const dialog = page.getByRole("dialog", { name: "Export matching History" });
@@ -276,8 +276,10 @@ test("confirmed History export preserves filters, focus, themes, mobile, and exp
   await expect(dialog.getByText("needle-hostile", { exact: true })).toBeVisible();
   await expect(dialog.getByText(/100,000 events/)).toBeVisible();
   await expect(dialog.locator("select[name='format']")).toBeFocused();
-  await dialog.getByRole("button", { name: "Cancel" }).click();
+  expect(new URL(page.url()).hash).toBe("");
+  await dialog.getByRole("link", { name: "Cancel" }).click();
   await expect(open).toBeFocused();
+  await expect(dialog).toBeHidden();
 
   await setTheme(page, "dark");
   await open.click();
@@ -304,7 +306,7 @@ test("confirmed History export preserves filters, focus, themes, mobile, and exp
     .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"])
     .analyze();
   expect(results.violations.map((violation) => violation.id)).toEqual([]);
-  await dialog.getByRole("button", { name: "Cancel" }).click();
+  await dialog.getByRole("link", { name: "Cancel" }).click();
 
   const state = readState();
   execFileSync(state.binary, ["sessions", "revoke-all"], {
@@ -355,6 +357,85 @@ test("History filtering and pagination work without JavaScript", async ({ browse
   await expect(page.locator(".log-row")).toHaveCount(1);
   await expect(page.locator(".row-message")).toContainText("needle-hostile");
   await context.close();
+});
+
+async function loginWithoutJavaScript(page: Page): Promise<void> {
+  await page.goto("/login");
+  await page.locator("#username").fill(administratorUsername);
+  await page.locator("#password").fill(administratorPassword);
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await expect(page).toHaveURL(/\/logs\?.*mode=history/);
+}
+
+test("Live states its JavaScript need and export submits as a plain form without JavaScript", async ({
+  browser,
+}) => {
+  const context = await browser.newContext({ javaScriptEnabled: false, acceptDownloads: true });
+  const page = await context.newPage();
+  await loginWithoutJavaScript(page);
+
+  // Export: the link opens the dialog in place and the form posts its own
+  // CSRF token (audit UX-23).
+  await page.locator("#contains-filter").fill("needle-hostile");
+  await page.getByRole("button", { name: "Apply filters" }).click();
+  await expect(page.locator(".log-row")).toHaveCount(1);
+  const exportForm = page.locator("[data-export-form]");
+  await expect(exportForm).toBeHidden();
+  await page.getByRole("link", { name: "Export matching History" }).click();
+  await expect(page).toHaveURL(/#history-export-dialog$/);
+  await expect(exportForm).toBeVisible();
+  await expect(exportForm.getByText("needle-hostile", { exact: true })).toBeVisible();
+  await exportForm.locator("select[name='format']").selectOption("ndjson");
+  await exportForm.getByRole("checkbox").check();
+  const downloadPromise = page.waitForEvent("download");
+  await exportForm.getByRole("button", { name: "Create download" }).click();
+  const download = await downloadPromise;
+  expect(download.suggestedFilename()).toMatch(/\.ndjson$/);
+  expect(await download.failure()).toBeNull();
+  const exported = fs.readFileSync(await download.path(), "utf8").trim().split("\n");
+  expect(exported).toHaveLength(1);
+  expect(exported[0]).toContain("needle-hostile");
+  await page.screenshot({ path: ".playwright-artifacts/nojs-export-desktop.png", fullPage: true });
+  await exportForm.getByRole("link", { name: "Cancel" }).click();
+  await expect(exportForm).toBeHidden();
+
+  // Live: the absence of streaming is stated, with History one link away;
+  // stream-only controls are not shown (DESIGN.md §33.5).
+  await page.goto("/logs?mode=live&application=api");
+  const notice = page.locator(".live-noscript");
+  await expect(notice).toBeVisible();
+  await expect(notice.getByRole("heading", { name: "Live needs JavaScript" })).toBeVisible();
+  await expect(page.locator("[data-live-status]")).toBeHidden();
+  await expect(page.getByRole("button", { name: "Pause" })).toBeHidden();
+  await expect(page.locator("[data-live-empty]")).toBeHidden();
+  for (const [width, height, scheme] of [
+    [1280, 800, "dark"], [390, 844, "light"],
+  ] as const) {
+    await page.setViewportSize({ width, height });
+    await page.emulateMedia({ colorScheme: scheme });
+    expect(await page.evaluate(
+      () => document.documentElement.scrollWidth > window.innerWidth,
+    )).toBe(false);
+    await page.screenshot({ path: `.playwright-artifacts/nojs-live-${width}-${scheme}.png` });
+  }
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await notice.getByRole("link", { name: "Open History" }).click();
+  await expect(page).toHaveURL(/\/logs\?.*application=api.*mode=history/);
+  await expect(page.locator(".log-row").first()).toBeVisible();
+  await context.close();
+});
+
+test("Live errors render in the application shell", async ({ page }) => {
+  await login(page);
+  const response = await page.goto("/logs?mode=live&levels=notice");
+  expect(response?.status()).toBe(400);
+  await expect(page.locator(".app-header")).toBeVisible();
+  const error = page.getByRole("alert");
+  await expect(error.getByRole("heading", { name: "Live could not be started" })).toBeVisible();
+  await expect(error).toContainText("Check the Live filters.");
+  await error.getByRole("link", { name: "Try Live again" }).click();
+  await expect(page).toHaveURL(/\/logs\?mode=live$/);
+  await expect(page.locator("[data-live-status]")).toBeVisible();
 });
 
 test("inline details remain hostile text and preserve focus and clipboard content", async ({
@@ -2164,6 +2245,29 @@ test("guided ingestion handles session expiry without retaining one-time materia
   expect(await page.content()).not.toContain(token);
 });
 
+test("a failed guided test stays on the one-time token page and shows the error", async ({
+  page,
+}) => {
+  await login(page);
+  await page.getByRole("link", { name: "Servers", exact: true }).click();
+  await page.getByRole("link", { name: "Browser managed" }).click();
+  await page.locator("#token-name").fill("failed-guide");
+  await page.getByRole("button", { name: "Create token" }).click();
+  const token = await page.locator("[data-token-secret]").inputValue();
+  // A non-JSON answer, such as the POST-only test URL's 405, once sent the
+  // browser to that URL and lost the token (audit UX-25).
+  await page.route((url) => url.pathname.endsWith("/test-ingestion"), (route) =>
+    route.fulfill({ status: 405, contentType: "text/plain", body: "Method Not Allowed" }));
+  await page.getByRole("button", { name: "Send guided test" }).click();
+  const result = page.locator("[data-guide-result]");
+  await expect(result).toContainText("The guided test could not complete (HTTP 405).");
+  expect(page.url()).not.toContain("test-ingestion");
+  await expect(page.locator("[data-token-secret]")).toHaveValue(token);
+  await expect(page.locator("[data-guide-stage='delivery'] span")).toHaveText("Failed");
+  await expect(page.getByRole("button", { name: "Send guided test" })).toBeEnabled();
+  await page.unroute((url) => url.pathname.endsWith("/test-ingestion"));
+});
+
 test("server-side session invalidation redirects the active browser", async ({ page }) => {
   await login(page);
   const state = readState();
@@ -2311,6 +2415,99 @@ test("login behind an https public URL uses a __Host- cookie, HSTS, and only tha
     expect(setCookies.some((value) => /^siftail_session=;.*Max-Age=0/.test(value))).toBe(true);
   } finally {
     await api.dispose();
+    server.kill("SIGTERM");
+    await exited;
+  }
+});
+
+test("a storage-full state shows the degraded banner and a visible health label", async ({
+  browser,
+}) => {
+  const state = readState();
+  const dataDirectory = path.join(state.runDirectory, "degraded-data");
+  fs.mkdirSync(dataDirectory, { mode: 0o700 });
+  const uiAddress = process.env.SIFTAIL_PLAYWRIGHT_DEGRADED_UI_ADDR ?? "127.0.0.1:19084";
+  const ingestAddress = process.env.SIFTAIL_PLAYWRIGHT_DEGRADED_INGEST_ADDR ?? "127.0.0.1:19085";
+  const env = siftailEnvironment({
+    SIFTAIL_DATA_DIR: dataDirectory,
+    SIFTAIL_UI_ADDR: uiAddress,
+    SIFTAIL_INGEST_ADDR: ingestAddress,
+    SIFTAIL_PUBLIC_URL: `http://${uiAddress}`,
+    SIFTAIL_INGEST_PUBLIC_URL: `http://${ingestAddress}/api/v1/ingest`,
+  });
+  execFileSync(state.binary, ["admin", "create", "--username", administratorUsername], {
+    env, input: `${administratorPassword}\n${administratorPassword}\n`, encoding: "utf8",
+  });
+  execFileSync(state.binary, ["server", "create", "--name", "Degraded"], { env, encoding: "utf8" });
+  const token = execFileSync(state.binary, ["token", "create", "--server", "1", "--name", "full"], {
+    env, encoding: "utf8",
+  }).match(/^token \(shown once\): (.+)$/m)?.[1];
+  expect(token).toBeTruthy();
+  // The injected storage-full state: a sparse 5 GiB WAL puts the measured
+  // footprint over the default 4 GiB limit with no events left to delete,
+  // so the startup retention pass reports its target unreachable and
+  // ingestion answers 507 storage_full. Sparse, it uses no real disk.
+  const wal = path.join(dataDirectory, "siftail.db-wal");
+  fs.closeSync(fs.openSync(wal, "a"));
+  fs.truncateSync(wal, 5 * 1024 ** 3);
+  const server = spawn(state.binary, ["serve"], { env, stdio: "ignore" });
+  const exited = new Promise((resolve) => server.once("exit", resolve));
+  const context = await browser.newContext({ baseURL: `http://${uiAddress}` });
+  try {
+    await expect.poll(async () => {
+      try {
+        return (await context.request.get("/health/ready")).status();
+      } catch {
+        return 0;
+      }
+    }, { timeout: 10_000 }).toBe(503);
+    const ingest = await context.request.post(`http://${ingestAddress}/api/v1/ingest`, {
+      headers: { Authorization: `Bearer ${token}` },
+      data: [{ project: "p", environment: "e", application: "a", service: "s", log: "x" }],
+    });
+    expect(ingest.status()).toBe(507);
+
+    const page = await context.newPage();
+    await page.goto("/login");
+    await page.locator("#username").fill(administratorUsername);
+    await page.locator("#password").fill(administratorPassword);
+    await page.getByRole("button", { name: "Sign in" }).click();
+    await expect(page).toHaveURL(/\/logs\?.*mode=history/);
+
+    const banner = page.locator("[data-degraded-banner]");
+    const health = page.locator(".health-indicator");
+    for (const target of ["/logs?mode=live", "/sources", "/settings", "/status"]) {
+      await page.goto(target);
+      await expect(banner).toBeVisible();
+      await expect(banner).toContainText("Ingestion unavailable:");
+      await expect(banner).toContainText("Existing logs remain available.");
+      await expect(banner.getByRole("button")).toHaveCount(0);
+      // The severity is a word, not only a colour (WCAG 1.4.1).
+      await expect(health.locator(".health-label")).toHaveText("Degraded");
+      await expect(health).toHaveAccessibleName("System health: Degraded");
+    }
+    await page.goto("/sources");
+    for (const [width, height] of [[1280, 800], [390, 844]] as const) {
+      await page.setViewportSize({ width, height });
+      for (const scheme of ["dark", "light"] as const) {
+        await page.emulateMedia({ colorScheme: scheme });
+        expect(await page.evaluate(
+          () => document.documentElement.scrollWidth > window.innerWidth,
+        )).toBe(false);
+        const healthBox = await health.boundingBox();
+        expect(healthBox!.height).toBeGreaterThanOrEqual(24);
+        await page.screenshot({ path: `.playwright-artifacts/degraded-banner-${width}-${scheme}.png` });
+        const results = await new AxeBuilder({ page })
+          .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"])
+          .analyze();
+        expect(results.violations.map((violation) => violation.id)).toEqual([]);
+      }
+    }
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await banner.getByRole("link", { name: "Open Status" }).click();
+    await expect(page).toHaveURL(/\/status$/);
+  } finally {
+    await context.close();
     server.kill("SIGTERM");
     await exited;
   }
