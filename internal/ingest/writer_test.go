@@ -66,8 +66,10 @@ func TestBatchWriterAtomicPersistenceOrderingAndIdempotency(t *testing.T) {
 	coordinator.Close()
 }
 
-func TestBatchWriterConflictRollsBackCompleteBatch(t *testing.T) {
+func TestBatchWriterDropsConflictingRecordAndCommitsRest(t *testing.T) {
 	db, _, writer := newWriterTest(t, WriterOptions{})
+	publisher := &recordingPublisher{}
+	writer.publisher = publisher
 	serverID := insertTestServer(t, db.Writer())
 	original := canonicalEvent(serverID, "stable", "original", 1)
 	if err := writer.Persist(context.Background(), &WriteBatch{
@@ -76,20 +78,143 @@ func TestBatchWriterConflictRollsBackCompleteBatch(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	newSource := canonicalEvent(serverID, "", "must roll back", 2)
+	newSource := canonicalEvent(serverID, "", "co-batched", 2)
 	newSource.Source.Service = "worker"
 	newSource.Source.ServiceLabel = "worker"
 	conflict := original
 	conflict.MessageText = "different"
 	conflict.MessageRaw = []byte("different")
-	err := writer.Persist(context.Background(), &WriteBatch{
+	result, err := writer.PersistWithResult(context.Background(), &WriteBatch{
 		Events: []logs.CanonicalEvent{newSource, conflict}, AuthenticatedServerID: serverID,
 	})
-	var ingestErr *Error
-	if !errors.As(err, &ingestErr) || ingestErr.Category != CategoryConflict {
-		t.Fatalf("conflict error = %#v", err)
+	if err != nil || result.ConflictsDropped != 1 {
+		t.Fatalf("conflict result = %#v, %v", result, err)
+	}
+	assertCounts(t, db.Reader(), 2, 2, 2)
+	var stored string
+	if err := db.Reader().QueryRow(
+		"SELECT message_text FROM log_events WHERE source_event_id='stable'",
+	).Scan(&stored); err != nil || stored != "original" {
+		t.Fatalf("authoritative content = %q, err=%v", stored, err)
+	}
+	if len(publisher.events) != 2 || publisher.events[1].Event.MessageText != "co-batched" {
+		t.Fatalf("published events = %#v", publisher.events)
+	}
+
+	// A batch whose only record conflicts still commits as a no-op.
+	result, err = writer.PersistWithResult(context.Background(), &WriteBatch{
+		Events: []logs.CanonicalEvent{conflict}, AuthenticatedServerID: serverID,
+	})
+	if err != nil || result.ConflictsDropped != 1 {
+		t.Fatalf("all-conflict result = %#v, %v", result, err)
+	}
+	assertCounts(t, db.Reader(), 2, 2, 2)
+	if len(publisher.events) != 2 {
+		t.Fatalf("dropped record was published: %#v", publisher.events)
+	}
+}
+
+func TestBatchWriterDefaultedEventTimeIsPersistedAndIgnoredByDeduplication(t *testing.T) {
+	db, _, writer := newWriterTest(t, WriterOptions{})
+	serverID := insertTestServer(t, db.Writer())
+	first := canonicalEvent(serverID, "no-time", "defaulted", 0)
+	first.EventAtUS, first.ReceivedAtUS, first.EventAtDefaulted = 1_000, 1_000, true
+	if err := writer.Persist(context.Background(), &WriteBatch{
+		Events: []logs.CanonicalEvent{first}, AuthenticatedServerID: serverID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var defaulted bool
+	if err := db.Reader().QueryRow(
+		"SELECT event_at_defaulted FROM log_events WHERE source_event_id='no-time'",
+	).Scan(&defaulted); err != nil || !defaulted {
+		t.Fatalf("persisted defaulted flag = %v, err=%v", defaulted, err)
+	}
+
+	retry := first
+	retry.EventAtUS, retry.ReceivedAtUS = 5_000_000, 5_000_000
+	result, err := writer.PersistWithResult(context.Background(), &WriteBatch{
+		Events: []logs.CanonicalEvent{retry}, AuthenticatedServerID: serverID,
+	})
+	if err != nil || result.ConflictsDropped != 0 {
+		t.Fatalf("defaulted retry = %#v, %v", result, err)
 	}
 	assertCounts(t, db.Reader(), 1, 1, 1)
+
+	// A supplied time never set the flag and stays part of equality.
+	supplied := canonicalEvent(serverID, "with-time", "supplied", 10)
+	if err := writer.Persist(context.Background(), &WriteBatch{
+		Events: []logs.CanonicalEvent{supplied}, AuthenticatedServerID: serverID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	moved := supplied
+	moved.EventAtUS++
+	result, err = writer.PersistWithResult(context.Background(), &WriteBatch{
+		Events: []logs.CanonicalEvent{moved}, AuthenticatedServerID: serverID,
+	})
+	if err != nil || result.ConflictsDropped != 1 {
+		t.Fatalf("supplied-time conflict = %#v, %v", result, err)
+	}
+}
+
+func TestBatchWriterContainerRenameBetweenAttemptsIsNotAConflict(t *testing.T) {
+	db, _, writer := newWriterTest(t, WriterOptions{})
+	serverID := insertTestServer(t, db.Writer())
+	first := canonicalEvent(serverID, "renamed", "same content", 10)
+	if err := writer.Persist(context.Background(), &WriteBatch{
+		Events: []logs.CanonicalEvent{first}, AuthenticatedServerID: serverID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// Another event renames the container instance, then the first record is
+	// retried carrying the new name (ADR 0006: the name is a mutable label).
+	retry := first
+	retry.Container = &logs.ContainerIdentity{ID: "container-1", Name: "app-1-renamed"}
+	retry.ReceivedAtUS += 1_000_000
+	result, err := writer.PersistWithResult(context.Background(), &WriteBatch{
+		Events: []logs.CanonicalEvent{retry}, AuthenticatedServerID: serverID,
+	})
+	if err != nil || result.ConflictsDropped != 0 {
+		t.Fatalf("renamed retry = %#v, %v", result, err)
+	}
+	assertCounts(t, db.Reader(), 1, 1, 1)
+
+	recreated := first
+	recreated.Container = &logs.ContainerIdentity{ID: "container-2", Name: "app-1-renamed"}
+	result, err = writer.PersistWithResult(context.Background(), &WriteBatch{
+		Events: []logs.CanonicalEvent{recreated}, AuthenticatedServerID: serverID,
+	})
+	if err != nil || result.ConflictsDropped != 1 {
+		t.Fatalf("different container ID = %#v, %v", result, err)
+	}
+}
+
+func TestBatchWriterTreatsMigratedDefaultedRowAsDefaulted(t *testing.T) {
+	db, _, writer := newWriterTest(t, WriterOptions{})
+	serverID := insertTestServer(t, db.Writer())
+	// The row as migration 0006 leaves a pre-ADR-0007 timestamp-less event:
+	// equal times, flagged defaulted, no container.
+	if _, err := db.Writer().Exec(`INSERT INTO sources(id,server_id,project_key,environment_key,
+		application_key,service_key,project_label,environment_label,application_label,service_label,
+		first_seen_at_us,last_seen_at_us) VALUES(1,?,'project','production','app','api',
+		'project','production','app','api',1,1);
+		INSERT INTO log_events(event_at_us,event_at_defaulted,received_at_us,source_id,stream,
+		level_normalized,message_raw,message_text,attributes_json,source_event_id)
+		VALUES(700,1,700,1,'stdout','info',x'6d69677261746564','migrated','{"key":"value"}','legacy')`,
+		serverID); err != nil {
+		t.Fatal(err)
+	}
+	retry := canonicalEvent(serverID, "legacy", "migrated", 0)
+	retry.Container = nil
+	retry.EventAtUS, retry.ReceivedAtUS, retry.EventAtDefaulted = 9_000, 9_000, true
+	result, err := writer.PersistWithResult(context.Background(), &WriteBatch{
+		Events: []logs.CanonicalEvent{retry}, AuthenticatedServerID: serverID,
+	})
+	if err != nil || result.ConflictsDropped != 0 {
+		t.Fatalf("retry of migrated row = %#v, %v", result, err)
+	}
+	assertCounts(t, db.Reader(), 1, 0, 1)
 }
 
 func TestBatchWriterEnforcesServerTrustAndDiscoveryQuotas(t *testing.T) {
@@ -356,7 +481,6 @@ func TestPersistenceErrorClassification(t *testing.T) {
 		{&database.CategoryError{Category: database.CategoryInternal}, CategoryInternal},
 		{errors.New("unclassified"), CategoryInternal},
 		{database.ErrCoordinatorClosed, CategoryUnavailable},
-		{errCanonicalConflict, CategoryConflict},
 	}
 	for _, test := range tests {
 		classified := persistenceError(test.err)
@@ -364,7 +488,6 @@ func TestPersistenceErrorClassification(t *testing.T) {
 		if got, want := statusFor(classified), map[ErrorCategory]int{
 			CategoryUnavailable: 503,
 			CategoryStorageFull: 507,
-			CategoryConflict:    409,
 			CategoryBadRequest:  400,
 			CategoryInternal:    500,
 		}[test.category]; got != want {

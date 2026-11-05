@@ -248,3 +248,74 @@ func TestStateBatchScopedIngestFailuresNeverDegrade(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestStateCountsConflictsPerServerWithRateLimitedDiagnostic(t *testing.T) {
+	started := time.Unix(10_000, 0).UTC()
+	state := NewState(started)
+	state.RecordIngestConflicts(7, 2, started)
+	state.RecordIngestConflicts(7, 1, started.Add(30*time.Second))
+	state.RecordIngestConflicts(8, 4, started.Add(40*time.Second))
+	state.RecordIngestConflicts(7, 1, started.Add(61*time.Second))
+	state.RecordIngestConflicts(7, 0, started.Add(62*time.Second))
+	state.RecordIngestConflicts(0, 5, started.Add(63*time.Second))
+
+	snapshot := state.Snapshot(started.Add(70 * time.Second))
+	if snapshot.ConflictsDropped != 8 {
+		t.Fatalf("total conflicts = %d, want 8", snapshot.ConflictsDropped)
+	}
+	want := []ServerConflicts{
+		{ServerID: 7, Dropped: 4, LastAt: started.Add(61 * time.Second)},
+		{ServerID: 8, Dropped: 4, LastAt: started.Add(40 * time.Second)},
+	}
+	if len(snapshot.Conflicts) != len(want) {
+		t.Fatalf("per-Server conflicts = %#v", snapshot.Conflicts)
+	}
+	for index := range want {
+		if snapshot.Conflicts[index] != want[index] {
+			t.Fatalf("per-Server conflicts = %#v, want %#v", snapshot.Conflicts, want)
+		}
+	}
+	// Server 7: one at 0s, suppressed at 30s, another at 61s; Server 8: one.
+	diagnostics := 0
+	for _, diagnostic := range snapshot.Diagnostics {
+		if diagnostic.Component != "ingestion" || diagnostic.Category != "conflicting_duplicate" {
+			t.Fatalf("unexpected diagnostic %#v", diagnostic)
+		}
+		if err := diagnostic.Validate(); err != nil {
+			t.Fatalf("conflict diagnostic is not in the closed table: %v", err)
+		}
+		if diagnostic.RequestID != "" || strings.Contains(diagnostic.Summary, "7") {
+			t.Fatalf("conflict diagnostic carries attribution: %#v", diagnostic)
+		}
+		diagnostics++
+	}
+	if diagnostics != 3 {
+		t.Fatalf("conflict diagnostics = %d, want 3", diagnostics)
+	}
+	// Conflicts are batch-scoped outcomes of committed requests.
+	state.SetWriterReady(true)
+	if !state.Ready(false) || state.HealthSeverity() != "Healthy" {
+		t.Fatal("conflicts changed readiness or health")
+	}
+}
+
+func TestStateConflictCountersAreBounded(t *testing.T) {
+	started := time.Unix(20_000, 0).UTC()
+	state := NewState(started)
+	for server := int64(1); server <= conflictServerCapacity+5; server++ {
+		state.RecordIngestConflicts(server, 1, started.Add(time.Duration(server)*time.Second))
+	}
+	snapshot := state.Snapshot(started)
+	if len(snapshot.Conflicts) != conflictServerCapacity ||
+		snapshot.ConflictsDropped != conflictServerCapacity+5 {
+		t.Fatalf("bounded conflicts = %d rows, %d total",
+			len(snapshot.Conflicts), snapshot.ConflictsDropped)
+	}
+	// The servers with the oldest occurrences were evicted.
+	if last := snapshot.Conflicts[len(snapshot.Conflicts)-1]; last.ServerID != 6 {
+		t.Fatalf("oldest retained Server = %d, want 6", last.ServerID)
+	}
+	if first := snapshot.Conflicts[0]; first.ServerID != conflictServerCapacity+5 {
+		t.Fatalf("newest Server = %d", first.ServerID)
+	}
+}

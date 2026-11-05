@@ -37,6 +37,7 @@ type recordingIngestObserver struct {
 	acceptedEvents  int
 	rejectedBatches int
 	databaseFailure bool
+	conflicts       map[int64]int
 }
 
 func (o *recordingIngestObserver) RecordIngestAccepted(events int, _ time.Time) {
@@ -55,6 +56,21 @@ func (o *recordingIngestObserver) RecordIngestRejected(
 	o.rejectedBatches++
 	o.databaseFailure = o.databaseFailure || databaseFailure
 	o.mu.Unlock()
+}
+
+func (o *recordingIngestObserver) RecordIngestConflicts(serverID int64, dropped int, _ time.Time) {
+	o.mu.Lock()
+	if o.conflicts == nil {
+		o.conflicts = make(map[int64]int)
+	}
+	o.conflicts[serverID] += dropped
+	o.mu.Unlock()
+}
+
+func (o *recordingIngestObserver) conflictsFor(serverID int64) int {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.conflicts[serverID]
 }
 
 func newIngestionIntegration(t *testing.T, queueEvents, queueBytes int64) *ingestionIntegration {
@@ -193,7 +209,7 @@ func TestIngestionPublishesOnlyAfterCommit(t *testing.T) {
 	}
 }
 
-func TestIngestionDoesNotPublishRolledBackBatch(t *testing.T) {
+func TestIngestionDropsConflictingRecordWithoutPublishingIt(t *testing.T) {
 	broker := logs.NewLiveBroker(logs.LiveBrokerOptions{})
 	brokerDone := make(chan error, 1)
 	go func() { brokerDone <- broker.Run(context.Background()) }()
@@ -215,24 +231,33 @@ func TestIngestionDoesNotPublishRolledBackBatch(t *testing.T) {
 	}
 	_ = nextIntegrationLive(t, subscription)
 
-	body := `[` + testEventJSON("new-live", "must roll back") + `,` +
+	// ADR 0007: the conflicting record is dropped and counted; its
+	// co-batched record commits and the request succeeds.
+	body := `[` + testEventJSON("new-live", "co-batched") + `,` +
 		testEventJSON("stable-live", "conflict") + `]`
 	response, requestDone := fixture.request(context.Background(), body)
 	<-requestDone
-	if response.Code != http.StatusConflict {
+	if response.Code != http.StatusNoContent {
 		t.Fatalf("status = %d, body=%q", response.Code, response.Body.String())
+	}
+	message := nextIntegrationLive(t, subscription)
+	if message.Event.Event.MessageText != "co-batched" {
+		t.Fatalf("published event = %#v", message.Event)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 	defer cancel()
-	if _, err := subscription.Next(ctx); !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("rolled-back event was published: %v", err)
+	if extra, err := subscription.Next(ctx); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("dropped conflicting record was published: %#v %v", extra, err)
 	}
-	assertEventCount(t, fixture.db.Reader(), 1)
-	var lastUsed sql.NullInt64
+	assertEventCount(t, fixture.db.Reader(), 2)
+	var stored string
 	if err := fixture.db.Reader().QueryRow(
-		`SELECT last_used_at_us FROM ingestion_tokens WHERE name='test'`,
-	).Scan(&lastUsed); err != nil || !lastUsed.Valid {
-		t.Fatalf("committed token last use = %#v, err=%v", lastUsed, err)
+		`SELECT message_text FROM log_events WHERE source_event_id='stable-live'`,
+	).Scan(&stored); err != nil || stored != "original" {
+		t.Fatalf("authoritative content = %q, err=%v", stored, err)
+	}
+	if got := fixture.observer.conflictsFor(fixture.serverID(t)); got != 1 {
+		t.Fatalf("conflicts recorded = %d, want 1", got)
 	}
 }
 
@@ -293,21 +318,64 @@ func TestIngestionAcknowledgesOnlyAfterCommit(t *testing.T) {
 	}
 }
 
-func TestIngestionLastRecordConflictRollsBackRequest(t *testing.T) {
+func TestIngestionRetryWithoutTimestampIsIdempotent(t *testing.T) {
 	fixture := newIngestionIntegration(t, 10, 1<<20)
-	first, done := fixture.request(context.Background(), testEventJSON("stable", "original"))
+	received := time.Date(2026, 11, 5, 10, 0, 0, 0, time.UTC)
+	fixture.handler.now = func() time.Time { return received }
+	body := testEventJSONWithoutTimestamp("no-time", "retried")
+	first, done := fixture.request(context.Background(), body)
 	<-done
 	if first.Code != http.StatusNoContent {
-		t.Fatalf("initial status = %d", first.Code)
+		t.Fatalf("initial status = %d, body=%q", first.Code, first.Body.String())
 	}
 
-	body := `[` + testEventJSON("new", "must roll back") + `,` + testEventJSON("stable", "conflict") + `]`
-	response, done := fixture.request(context.Background(), body)
+	// Fluent Bit resends the same chunk later: the defaulted event time
+	// differs, which is not a conflict (audit DAT-11, ADR 0007).
+	received = received.Add(90 * time.Second)
+	retry, done := fixture.request(context.Background(), body)
 	<-done
-	if response.Code != http.StatusConflict {
-		t.Fatalf("status = %d, body=%q", response.Code, response.Body.String())
+	if retry.Code != http.StatusNoContent {
+		t.Fatalf("retry status = %d, body=%q", retry.Code, retry.Body.String())
 	}
 	assertEventCount(t, fixture.db.Reader(), 1)
+	var eventAt, receivedAt int64
+	var defaulted bool
+	if err := fixture.db.Reader().QueryRow(`SELECT event_at_us, received_at_us,
+		event_at_defaulted FROM log_events WHERE source_event_id='no-time'`).
+		Scan(&eventAt, &receivedAt, &defaulted); err != nil {
+		t.Fatal(err)
+	}
+	want := time.Date(2026, 11, 5, 10, 0, 0, 0, time.UTC).UnixMicro()
+	if !defaulted || eventAt != want || receivedAt != want {
+		t.Fatalf("stored event = at:%d received:%d defaulted:%v", eventAt, receivedAt, defaulted)
+	}
+	if got := fixture.observer.conflictsFor(fixture.serverID(t)); got != 0 {
+		t.Fatalf("idempotent retry counted as %d conflicts", got)
+	}
+}
+
+func TestIngestionConflictWithinOneRequestKeepsEarliestRecord(t *testing.T) {
+	fixture := newIngestionIntegration(t, 10, 1<<20)
+	body := `[` + testEventJSON("dup", "earliest") + `,` +
+		testEventJSON("", "unrelated") + `,` +
+		testEventJSON("dup", "later conflict") + `,` +
+		testEventJSON("dup", "earliest") + `]`
+	response, done := fixture.request(context.Background(), body)
+	<-done
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, body=%q", response.Code, response.Body.String())
+	}
+	assertEventCount(t, fixture.db.Reader(), 2)
+	var stored string
+	if err := fixture.db.Reader().QueryRow(
+		`SELECT message_text FROM log_events WHERE source_event_id='dup'`,
+	).Scan(&stored); err != nil || stored != "earliest" {
+		t.Fatalf("authoritative content = %q, err=%v", stored, err)
+	}
+	// The identical repeat is a silent no-op, not a conflict.
+	if got := fixture.observer.conflictsFor(fixture.serverID(t)); got != 1 {
+		t.Fatalf("conflicts recorded = %d, want 1", got)
+	}
 }
 
 func TestIngestionCancellationAfterAdmissionStillCommits(t *testing.T) {
@@ -465,6 +533,21 @@ func testEventJSON(sourceEventID, message string) string {
 	return `{"timestamp":"2026-07-28T00:00:00Z","project":"p","environment":"e",` +
 		`"application":"a","service":"api","container_id":"container-1",` +
 		`"stream":"stdout","level":"info","log":"` + message + `"` + id + `}`
+}
+
+func testEventJSONWithoutTimestamp(sourceEventID, message string) string {
+	return `{"project":"p","environment":"e","application":"a","service":"api",` +
+		`"container_id":"container-1","stream":"stdout","level":"info",` +
+		`"log":"` + message + `","source_event_id":"` + sourceEventID + `"}`
+}
+
+func (f *ingestionIntegration) serverID(t *testing.T) int64 {
+	t.Helper()
+	var id int64
+	if err := f.db.Reader().QueryRow(`SELECT id FROM servers WHERE name='Integration'`).Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	return id
 }
 
 func assertEventCount(t *testing.T, db *sql.DB, want int) {

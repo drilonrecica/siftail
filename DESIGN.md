@@ -762,7 +762,11 @@ database-check result and a `Run safe database check` action that preserves
 the page and never exposes paths or raw SQLite errors.
 
 **Ingestion:** events accepted today; recent rate; queued events/bytes;
-rejected batches; last successful ingest; last database error.
+rejected batches; conflicting duplicates dropped; last successful ingest; last
+database error. When records were dropped as conflicting duplicates (ADR 0007),
+a "Conflicting duplicates by Server" definition list follows: Server name,
+dropped count, and last occurrence for the 20 most recent Servers, a removed
+Server as `Removed Server #<id>`, and one line counting any Servers not shown.
 
 **Diagnostics:** latest sanitized operational events with time, textual
 severity, component, category, fixed safe summary, optional request ID.

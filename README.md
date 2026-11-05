@@ -185,8 +185,14 @@ Malformed final records, duplicate keys, trailing data, and non-object records
 reject the complete request. A `204 No Content` response means the complete
 request committed durably to SQLite and includes
 `X-Siftail-Ingest-Outcome: committed`. Capacity and temporary database failures
-return `503`; storage-full failures return `507`; a conflicting reuse of a
-stable source event ID returns `409`.
+return `503`; storage-full failures return `507`. Ingestion never returns
+`409`: a record that repeats a stable `source_event_id` with identical content
+is an idempotent no-op, and one that reuses the ID for different content is
+dropped while the rest of the request commits. The first stored content stays
+authoritative; Status shows a per-Server “conflicting duplicates dropped” count
+since process start, with a rate-limited diagnostic. An event time Siftail
+defaulted to receive time, because the record carried no timestamp, is not
+compared, so retrying such a batch is idempotent (ADR 0007).
 
 The date-stamped fixtures pin Coolify `v4.1.1` with its shipped Fluent Bit
 `2.0` image reference (observed as `v2.0.14`) and generic Fluent Bit `v5.0.9`;

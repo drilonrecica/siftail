@@ -1,12 +1,13 @@
 # Database upgrade compatibility
 
 **Reviewed:** 2026-11-05
-**Scope:** SFT-047 schema 1–4 fixture and recovery matrix; SFT-087 schema 5
+**Scope:** SFT-047 schema 1–4 fixture and recovery matrix; SFT-087 schema 5;
+SFT-090 schema 6
 
 ## Supported window
 
 The current pre-public binary supports automatic forward migration from every
-checked-in historical schema fixture, versions 1 through 5. It supports a
+checked-in historical schema fixture, versions 1 through 6. It supports a
 fresh database through the same production open path. Before `1.0`, only the
 latest stable Siftail release receives ordinary support, but that release must
 continue to open every schema fixture retained in this repository.
@@ -27,7 +28,8 @@ settings, trusted Server/token, source/container, and immutable application
 event state. Schema 2 adds a deterministic synthetic Argon2id administrator;
 schema 3 adds a hashed synthetic browser session; schema 4 adds a sanitized
 immutable security-audit event; schema 5 adds a recreated container instance
-(the same name with a new container ID), which schema 4 could not hold.
+(the same name with a new container ID), which schema 4 could not hold; schema
+6 adds a stable-ID event whose time was defaulted to receive time.
 
 Every name, address, token, credential, timestamp, and payload is an obvious
 synthetic test value. The generator contains no production data and makes no
@@ -67,9 +69,41 @@ the upgraded database with its actual and supported versions and changes
 nothing. Downgrading requires restoring a backup taken before the upgrade;
 there is no down-migration.
 
+## Schema 6: defaulted event time
+
+Migration `0006_event_time_defaulted.sql` (ADR 0007) adds
+`log_events.event_at_defaulted INTEGER NOT NULL DEFAULT 0 CHECK
+(event_at_defaulted IN (0, 1))`, which records that an event carried no
+timestamp and its time is the receive time. Stable source-event-ID
+deduplication ignores such a time, so a retried batch without timestamps is an
+idempotent no-op instead of a conflict.
+
+Existing rows carry no record of how their time was chosen. The migration marks
+a row as defaulted only when it has a `source_event_id` and `event_at_us =
+received_at_us`; no other row is read by deduplication. That one-time backfill
+of a new derived column is the only write to stored events. It drops the event
+immutability trigger and recreates it unchanged inside the same migration
+transaction. The backfill walks the partial `source_event_id` index, so its
+cost follows the number of stable-ID rows, not table size.
+
+Adding a column to a STRICT table makes SQLite run `quick_check` over that
+table, so the first open after the upgrade runs about one extra integrity pass
+over `log_events`. That pass costs about as much as the `quick_check` every
+open already runs. Measured with `sqlite3` 3.50 on btrfs on a SATA SSD on
+2026-11-05, on 2,000,000 events (1.3 GB, 1% with a stable ID, 0.1%
+backfilled): the whole migration took 5.8 seconds with a warm page cache,
+compared with 5.5 seconds for the database `quick_check`. The host was under
+heavy unrelated IO load at the time, and cold-cache runs took 61 to 197
+seconds, so expect the first open after the upgrade to take noticeably longer
+on large databases.
+
+The migration is forward-only. A binary that supports only schema 5 refuses
+the upgraded database with its actual and supported versions and changes
+nothing. Downgrading requires restoring a backup taken before the upgrade.
+
 ## Matrix guarantees
 
-For each schema 1–5 fixture, tests:
+For each schema 1–6 fixture, tests:
 
 1. copy the immutable file and verify its pinned digest;
 2. open it through production pragmas, compatibility checks, migrations,

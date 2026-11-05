@@ -20,8 +20,6 @@ const (
 	containerCacheCapacity = 8_192
 )
 
-var errCanonicalConflict = errors.New("stable source event ID conflicts with persisted content")
-
 // Publisher must enqueue without waiting for consumers. False indicates that
 // Live delivery was truncated; durable persistence remains successful.
 type Publisher interface {
@@ -118,8 +116,16 @@ type cacheUpdate[K comparable] struct {
 	id  int64
 }
 
+// PersistResult is the committed outcome of one batch.
+type PersistResult struct {
+	// ConflictsDropped counts records that reused a stable source event ID
+	// for different canonical content and were therefore not persisted or
+	// published (ADR 0007). It is zero unless the batch committed.
+	ConflictsDropped int
+}
+
 // Persist commits exactly one HTTP batch transaction. It does not complete the
-// queue result; the lifecycle-owned queue worker does that in SFT-013.
+// queue result; the lifecycle-owned queue worker does that.
 //
 // The source and container caches are hints: every hit is confirmed inside the
 // transaction, because source removal, Clear logs, and retention pruning delete
@@ -127,49 +133,63 @@ type cacheUpdate[K comparable] struct {
 // an INSERT regardless, the foreign-key failure clears the batch's entries and
 // the batch is retried once, uncached, within the same request.
 func (w *BatchWriter) Persist(ctx context.Context, batch *WriteBatch) error {
+	_, err := w.PersistWithResult(ctx, batch)
+	return err
+}
+
+// PersistWithResult is Persist that also reports the committed outcome.
+func (w *BatchWriter) PersistWithResult(ctx context.Context, batch *WriteBatch) (PersistResult, error) {
 	if w == nil || w.coordinator == nil || batch == nil || len(batch.Events) == 0 {
-		return &Error{Category: CategoryUnavailable}
+		return PersistResult{}, &Error{Category: CategoryUnavailable}
 	}
-	committed, err := w.persistAttempt(ctx, batch)
+	outcome, err := w.persistAttempt(ctx, batch)
 	if database.IsForeignKeyViolation(err) {
 		w.forgetBatch(batch)
-		committed, err = w.persistAttempt(ctx, batch)
+		outcome, err = w.persistAttempt(ctx, batch)
 	}
 	if err != nil {
-		return persistenceError(err)
+		return PersistResult{}, persistenceError(err)
 	}
+	committed := outcome.committed
 	sort.Slice(committed, func(i, j int) bool { return committed[i].ID < committed[j].ID })
 	if len(committed) > 0 && w.publisher != nil {
 		w.publisher.TryPublish(committed)
 	}
-	return nil
+	return PersistResult{ConflictsDropped: outcome.conflicts}, nil
+}
+
+// transactionOutcome is what one batch transaction produced. The cache updates
+// apply only after it commits.
+type transactionOutcome struct {
+	committed        []logs.CommittedEvent
+	conflicts        int
+	sourceUpdates    []cacheUpdate[sourceKey]
+	containerUpdates []cacheUpdate[containerKey]
 }
 
 // persistAttempt runs one batch transaction and, only after it commits, records
 // the IDs it resolved in the caches.
-func (w *BatchWriter) persistAttempt(ctx context.Context, batch *WriteBatch) ([]logs.CommittedEvent, error) {
-	var committed []logs.CommittedEvent
-	var sourceUpdates []cacheUpdate[sourceKey]
-	var containerUpdates []cacheUpdate[containerKey]
+func (w *BatchWriter) persistAttempt(ctx context.Context, batch *WriteBatch) (transactionOutcome, error) {
+	var outcome transactionOutcome
 	err := w.coordinator.Do(ctx, func(tx *sql.Tx) error {
 		// Admission transfers persistence ownership away from the request.
 		// BeginTx remains tied to the coordinator lifecycle; request
 		// cancellation must not roll back an already admitted batch.
 		mutationCtx := context.Background()
 		var err error
-		committed, sourceUpdates, containerUpdates, err = w.persistTransaction(mutationCtx, tx, batch)
+		outcome, err = w.persistTransaction(mutationCtx, tx, batch)
 		return err
 	})
 	if err != nil {
-		return nil, err
+		return transactionOutcome{}, err
 	}
-	for _, update := range sourceUpdates {
+	for _, update := range outcome.sourceUpdates {
 		w.sources.Add(update.key, update.id)
 	}
-	for _, update := range containerUpdates {
+	for _, update := range outcome.containerUpdates {
 		w.containers.Add(update.key, update.id)
 	}
-	return committed, nil
+	return outcome, nil
 }
 
 // forgetBatch drops every cache entry the batch could have used, so the retry
@@ -188,7 +208,7 @@ func (w *BatchWriter) persistTransaction(
 	ctx context.Context,
 	tx *sql.Tx,
 	batch *WriteBatch,
-) ([]logs.CommittedEvent, []cacheUpdate[sourceKey], []cacheUpdate[containerKey], error) {
+) (transactionOutcome, error) {
 	if batch.AuthenticatedTokenID > 0 {
 		result, err := tx.ExecContext(ctx, `UPDATE ingestion_tokens
 			SET last_used_at_us = max(coalesce(last_used_at_us, 0), ?)
@@ -197,19 +217,19 @@ func (w *BatchWriter) persistTransaction(
 			batch.AuthenticatedServerID,
 		)
 		if err != nil {
-			return nil, nil, nil, database.Classify("update ingestion-token use", err)
+			return transactionOutcome{}, database.Classify("update ingestion-token use", err)
 		}
 		affected, err := result.RowsAffected()
 		if err != nil {
-			return nil, nil, nil, database.Classify("read ingestion-token update", err)
+			return transactionOutcome{}, database.Classify("read ingestion-token update", err)
 		}
 		if affected != 1 {
-			return nil, nil, nil, &Error{Category: CategoryForbidden}
+			return transactionOutcome{}, &Error{Category: CategoryForbidden}
 		}
 	}
 	for _, event := range batch.Events {
 		if batch.AuthenticatedServerID <= 0 || event.Source.ServerID != batch.AuthenticatedServerID {
-			return nil, nil, nil, &Error{Category: CategoryForbidden}
+			return transactionOutcome{}, &Error{Category: CategoryForbidden}
 		}
 	}
 
@@ -225,7 +245,7 @@ func (w *BatchWriter) persistTransaction(
 			// reuses a freed rowid, so the hit must still carry this identity.
 			found, err := cachedSourceExists(ctx, tx, id, key)
 			if err != nil {
-				return nil, nil, nil, err
+				return transactionOutcome{}, err
 			}
 			if found {
 				sourceIDs[key] = id
@@ -234,15 +254,15 @@ func (w *BatchWriter) persistTransaction(
 		}
 		id, created, err := w.resolveSource(ctx, tx, event.Source, event.ReceivedAtUS)
 		if err != nil {
-			return nil, nil, nil, err
+			return transactionOutcome{}, err
 		}
 		if created {
 			var count int
 			if err := tx.QueryRowContext(ctx, "SELECT count(*) FROM sources WHERE server_id=?", key.serverID).Scan(&count); err != nil {
-				return nil, nil, nil, database.Classify("count server sources", err)
+				return transactionOutcome{}, database.Classify("count server sources", err)
 			}
 			if count > w.options.SourceLimit {
-				return nil, nil, nil, &Error{Category: CategoryForbidden}
+				return transactionOutcome{}, &Error{Category: CategoryForbidden}
 			}
 		}
 		sourceIDs[key] = id
@@ -269,7 +289,7 @@ func (w *BatchWriter) persistTransaction(
 			// instances, so a cached ID is a hint that SQLite confirms.
 			cached, found, err := loadCachedContainer(ctx, tx, id, key)
 			if err != nil {
-				return nil, nil, nil, err
+				return transactionOutcome{}, err
 			}
 			if found {
 				resolved = &cached
@@ -278,7 +298,7 @@ func (w *BatchWriter) persistTransaction(
 		if resolved == nil {
 			fresh, created, err := w.resolveContainer(ctx, tx, sourceID, *event.Container, event.ReceivedAtUS)
 			if err != nil {
-				return nil, nil, nil, err
+				return transactionOutcome{}, err
 			}
 			containerCreated = containerCreated || created
 			resolved = &fresh
@@ -295,22 +315,23 @@ func (w *BatchWriter) persistTransaction(
 		if err := tx.QueryRowContext(ctx, `SELECT count(*)
 			FROM container_instances c JOIN sources s ON s.id=c.source_id
 			WHERE s.server_id=?`, batch.AuthenticatedServerID).Scan(&count); err != nil {
-			return nil, nil, nil, database.Classify("count server containers", err)
+			return transactionOutcome{}, database.Classify("count server containers", err)
 		}
 		if count > w.options.ContainerLimit {
-			return nil, nil, nil, &Error{Category: CategoryForbidden}
+			return transactionOutcome{}, &Error{Category: CategoryForbidden}
 		}
 	}
 	if err := updateContainerLabels(ctx, tx, containerOrder, containers); err != nil {
-		return nil, nil, nil, err
+		return transactionOutcome{}, err
 	}
 	if w.beforeInsert != nil {
 		if err := w.beforeInsert(tx); err != nil {
-			return nil, nil, nil, err
+			return transactionOutcome{}, err
 		}
 	}
 
 	var committed []logs.CommittedEvent
+	conflicts := 0
 	for _, event := range batch.Events {
 		sourceID := sourceIDs[sourceCacheKey(event.Source)]
 		var containerID int64
@@ -322,33 +343,37 @@ func (w *BatchWriter) persistTransaction(
 		if event.SourceEventID != "" {
 			existing, found, err := loadCanonicalEvent(ctx, tx, sourceID, event.SourceEventID, event.Source)
 			if err != nil {
-				return nil, nil, nil, err
+				return transactionOutcome{}, err
 			}
 			if found {
+				// The first committed content for an ID, in the database or
+				// earlier in this batch, is authoritative (ADR 0007): an
+				// identical repeat is a no-op, and different content is
+				// dropped and counted instead of rejecting the batch.
 				if !logs.CanonicalEqual(existing, event) {
-					return nil, nil, nil, errCanonicalConflict
+					conflicts++
 				}
 				continue
 			}
 		}
 		result, err := tx.ExecContext(ctx, `INSERT INTO log_events(
-			event_at_us, received_at_us, source_id, container_instance_id, stream,
+			event_at_us, event_at_defaulted, received_at_us, source_id, container_instance_id, stream,
 			level_normalized, level_original, message_raw, message_text, attributes_json,
 			source_event_id, logger, request_id, error_type, http_method, http_path,
 			http_status, duration_ms
-		) VALUES (?, ?, ?, ?, ?, ?, nullif(?, ''), ?, ?, nullif(?, ''),
+		) VALUES (?, ?, ?, ?, ?, ?, ?, nullif(?, ''), ?, ?, nullif(?, ''),
 			nullif(?, ''), nullif(?, ''), nullif(?, ''), nullif(?, ''), nullif(?, ''),
 			nullif(?, ''), ?, ?)`,
-			event.EventAtUS, event.ReceivedAtUS, sourceID, databaseContainerID, event.Stream,
+			event.EventAtUS, event.EventAtDefaulted, event.ReceivedAtUS, sourceID, databaseContainerID, event.Stream,
 			event.Level, event.OriginalLevel, event.MessageRaw, event.MessageText, string(event.Attributes),
 			event.SourceEventID, event.Common.Logger, event.Common.RequestID, event.Common.ErrorType,
 			event.Common.HTTPMethod, event.Common.HTTPPath, event.Common.HTTPStatus, event.Common.DurationMS)
 		if err != nil {
-			return nil, nil, nil, database.Classify("insert log event", err)
+			return transactionOutcome{}, database.Classify("insert log event", err)
 		}
 		id, err := result.LastInsertId()
 		if err != nil {
-			return nil, nil, nil, database.Classify("read log event ID", err)
+			return transactionOutcome{}, database.Classify("read log event ID", err)
 		}
 		committed = append(committed, logs.CommittedEvent{
 			ID: id, SourceID: sourceID, ContainerInstanceID: containerID, Event: event,
@@ -356,9 +381,12 @@ func (w *BatchWriter) persistTransaction(
 	}
 
 	if err := updateLastSeen(ctx, tx, batch.Events, sourceIDs, containers); err != nil {
-		return nil, nil, nil, err
+		return transactionOutcome{}, err
 	}
-	return committed, sourceUpdates, containerUpdates, nil
+	return transactionOutcome{
+		committed: committed, conflicts: conflicts,
+		sourceUpdates: sourceUpdates, containerUpdates: containerUpdates,
+	}, nil
 }
 
 func maxBatchReceivedAt(events []logs.CanonicalEvent) int64 {
@@ -567,7 +595,7 @@ func loadCanonicalEvent(
 	var status sql.NullInt64
 	var duration sql.NullFloat64
 	err := tx.QueryRowContext(ctx, `SELECT
-		e.event_at_us, e.stream, e.level_normalized, e.level_original,
+		e.event_at_us, e.event_at_defaulted, e.stream, e.level_normalized, e.level_original,
 		e.message_raw, e.message_text, e.attributes_json, e.source_event_id,
 		e.logger, e.request_id, e.error_type, e.http_method, e.http_path,
 		e.http_status, e.duration_ms, c.container_id, c.container_name
@@ -575,7 +603,7 @@ func loadCanonicalEvent(
 		LEFT JOIN container_instances c ON c.id=e.container_instance_id
 		WHERE e.source_id=? AND e.source_event_id=?`,
 		sourceID, sourceEventID).Scan(
-		&event.EventAtUS, &event.Stream, &event.Level, &levelOriginal,
+		&event.EventAtUS, &event.EventAtDefaulted, &event.Stream, &event.Level, &levelOriginal,
 		&event.MessageRaw, &event.MessageText, &attributes, &event.SourceEventID,
 		&logger, &requestID, &errorType, &method, &path, &status, &duration,
 		&containerID, &containerName)
@@ -628,9 +656,6 @@ func nullable(value string) any {
 // to the batch that caused them (audit DAT-03): one poison batch must not gate
 // every other Server.
 func persistenceError(err error) error {
-	if errors.Is(err, errCanonicalConflict) {
-		return &Error{Category: CategoryConflict}
-	}
 	var ingestErr *Error
 	if errors.As(err, &ingestErr) {
 		return ingestErr

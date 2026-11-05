@@ -66,6 +66,7 @@ func assertCurrentMigrationHistory(t *testing.T, db *sql.DB) {
 		"0003_sessions.sql",
 		"0004_security_audit.sql",
 		"0005_container_identity.sql",
+		"0006_event_time_defaulted.sql",
 	}
 	var got []string
 	for rows.Next() {
@@ -115,6 +116,24 @@ func assertPreservedHistoricalState(
 			strconv.Itoa(origin)+`}` {
 		t.Fatalf("schema-%d preserved state = %q %q %q",
 			origin, serverName, message, attributes)
+	}
+	// Migration 0006 marks only a stable-ID row whose times are equal as
+	// defaulted (ADR 0007); event 15 has distinct times, and the schema-6
+	// fixture's event 19 was written defaulted.
+	var defaulted15, defaulted19 int
+	if err := db.QueryRow(`SELECT
+		(SELECT event_at_defaulted FROM log_events WHERE id=15),
+		coalesce((SELECT event_at_defaulted FROM log_events WHERE id=19), -1)`).
+		Scan(&defaulted15, &defaulted19); err != nil {
+		t.Fatal(err)
+	}
+	wantDefaulted19 := -1
+	if origin >= 6 {
+		wantDefaulted19 = 1
+	}
+	if defaulted15 != 0 || defaulted19 != wantDefaulted19 {
+		t.Fatalf("schema-%d event_at_defaulted = 15:%d 19:%d",
+			origin, defaulted15, defaulted19)
 	}
 	if _, err := writer.Exec(
 		"UPDATE log_events SET message_text='changed' WHERE id=15",
@@ -202,7 +221,12 @@ func exerciseProductionCriticalPaths(
 	if err != nil {
 		t.Fatal(err)
 	}
-	if origin > 0 && (len(before) != 1 || before[0].ID != 15) {
+	wantBefore := 1
+	if origin >= 6 {
+		// Schema 6 adds event 19, newer than event 15.
+		wantBefore = 2
+	}
+	if origin > 0 && (len(before) != wantBefore || before[len(before)-1].ID != 15) {
 		t.Fatalf("schema-%d initial History = %#v", origin, before)
 	}
 	if origin == 0 && len(before) != 0 {

@@ -115,8 +115,9 @@ Every agent must preserve these unless an explicitly approved architectural chan
 - Multiline assembly belongs to Fluent Bit/source in version one.
 - No hash-based message deduplication.
 - Deduplication uses a stable source-provided event ID scoped to source when one
-  is present. Identical repeats are idempotent; conflicting reuse rejects the
-  entire request.
+  is present. Identical repeats are idempotent; a record that reuses the ID for
+  different content is dropped and counted while the rest of the request
+  commits (ADR 0007).
 
 ### 4.4 Events
 
@@ -457,8 +458,10 @@ Allowed:
 
 - stable source event ID, scoped to stable source.
 - identical canonical repeats are successful no-ops.
-- reuse of the same identity for different canonical content rejects the whole
-  request with a conflict response.
+- reuse of the same identity for different canonical content drops that record,
+  keeps the first committed content, commits the rest of the request, and
+  counts the drop on Status (ADR 0007); an event time defaulted to receive time
+  is not compared.
 
 Forbidden:
 

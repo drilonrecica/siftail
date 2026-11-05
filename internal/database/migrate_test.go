@@ -555,3 +555,85 @@ func contains(value, part string) bool {
 	}
 	return false
 }
+
+func TestEventTimeDefaultedMigrationBackfillsOnlyStableIDRowsWithEqualTimes(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "schema-5.db")
+	db, err := sql.Open("sqlite3", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	db.SetMaxOpenConns(1)
+	if _, err := db.Exec("PRAGMA foreign_keys=ON"); err != nil {
+		t.Fatal(err)
+	}
+	migrations, err := loadMigrations(migrationFiles)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if migrations[5].name != "0006_event_time_defaulted.sql" || migrations[5].foreignKeysOff {
+		t.Fatalf("migration 6 = %q (foreign keys off %v)", migrations[5].name, migrations[5].foreignKeysOff)
+	}
+	if err := applyMigrations(context.Background(), db, migrations[:5]); err != nil {
+		t.Fatal(err)
+	}
+	// 30: stable ID, equal times (defaulted in practice); 31: stable ID,
+	// supplied time; 32: no stable ID, equal times (never read by dedup).
+	if _, err := db.Exec(`INSERT INTO servers(id,name,created_at_us) VALUES(1,'s',1);
+		INSERT INTO sources(id,server_id,project_key,environment_key,application_key,service_key,project_label,environment_label,application_label,service_label,first_seen_at_us,last_seen_at_us)
+		VALUES(1,1,'p','e','a','x','p','e','a','x',1,1);
+		INSERT INTO log_events(id,event_at_us,received_at_us,source_id,stream,level_normalized,message_raw,message_text,source_event_id)
+		VALUES(30,500,500,1,'stdout','info',x'61','a','id-a'),
+			(31,400,500,1,'stdout','info',x'62','b','id-b'),
+			(32,500,500,1,'stdout','info',x'63','c',NULL)`); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := applyMigrations(context.Background(), db, migrations); err != nil {
+		t.Fatal(err)
+	}
+	assertSchemaVersion(t, db, MaxSchemaVersion)
+	rows, err := db.Query(`SELECT id, event_at_us, received_at_us, event_at_defaulted,
+		message_text FROM log_events ORDER BY id`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for rows.Next() {
+		var id, eventAt, receivedAt, defaulted int64
+		var message string
+		if err := rows.Scan(&id, &eventAt, &receivedAt, &defaulted, &message); err != nil {
+			t.Fatal(err)
+		}
+		got = append(got, strings.Join([]string{
+			strconv.FormatInt(id, 10), strconv.FormatInt(eventAt, 10),
+			strconv.FormatInt(receivedAt, 10), strconv.FormatInt(defaulted, 10), message,
+		}, "|"))
+	}
+	if err := rows.Close(); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"30|500|500|1|a", "31|400|500|0|b", "32|500|500|0|c"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("migrated events = %v, want %v", got, want)
+	}
+	if _, err := db.Exec(`INSERT INTO log_events(event_at_us,event_at_defaulted,received_at_us,source_id,stream,level_normalized,message_raw,message_text)
+		VALUES(1,2,1,1,'stdout','info',x'64','d')`); err == nil {
+		t.Fatal("event_at_defaulted accepted a non-boolean value")
+	}
+	var defaultValue int
+	if _, err := db.Exec(`INSERT INTO log_events(id,event_at_us,received_at_us,source_id,stream,level_normalized,message_raw,message_text)
+		VALUES(33,1,1,1,'stdout','info',x'65','e')`); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow("SELECT event_at_defaulted FROM log_events WHERE id=33").Scan(&defaultValue); err != nil || defaultValue != 0 {
+		t.Fatalf("default event_at_defaulted = %d, err=%v", defaultValue, err)
+	}
+	// The backfill recreated the immutability trigger.
+	if _, err := db.Exec("UPDATE log_events SET event_at_defaulted=0 WHERE id=30"); err == nil {
+		t.Fatal("migrated event lost immutability")
+	}
+	if err := IntegrityCheck(context.Background(), db); err != nil {
+		t.Fatal(err)
+	}
+}

@@ -145,6 +145,10 @@ func assertRestoredUpgradeFixture(
 		// Schema 5 adds a recreated container (same name, new ID).
 		wantContainers = 2
 	}
+	if origin >= 6 {
+		// Schema 6 adds a stable-ID event with a defaulted time.
+		wantEvents = 2
+	}
 	if backupType == TypeConfiguration {
 		wantEvents, wantContainers = 0, 0
 	}
@@ -223,6 +227,10 @@ func exerciseRestoredUpgradeFixture(
 		t.Fatal(err)
 	}
 	want := 2
+	if origin >= 6 {
+		// Schema 6 adds a stable-ID event with a defaulted time.
+		want = 3
+	}
 	if backupType == TypeConfiguration {
 		want = 1
 	}

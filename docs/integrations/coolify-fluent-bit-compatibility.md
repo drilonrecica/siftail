@@ -132,12 +132,20 @@ an internal persistent overflow spool.
 
 A Siftail `204 No Content` means the complete request committed. `503` and
 `507` communicate retryable capacity/storage conditions. `400`, `401`, `403`,
-`409`, `413`, `415`, and `429` require correcting authentication, payload,
-identity conflict, format, or configured limits rather than assuming a later
-retry will make the same request valid. A connection loss after submission is
-ambiguous: a retry without `source_event_id` can legitimately create repeated
-events; a byte-identical retry with a stable source event ID is an idempotent
-no-op.
+`413`, `415`, and `429` require correcting authentication, payload, format, or
+configured limits rather than assuming a later retry will make the same
+request valid. A connection loss after submission is ambiguous: a retry
+without `source_event_id` can legitimately create repeated events; a retry with
+a stable source event ID and the same content is an idempotent no-op, even when
+the record has no timestamp and Siftail defaulted its event time to a different
+receive time.
+
+Siftail does not return `409`. Fluent Bit retries every non-success flush and
+the pinned configuration sets `Retry_Limit False`, so a whole-request conflict
+would be resent indefinitely and withhold every co-batched record. A record
+that reuses a stable source event ID for different content is instead dropped,
+the rest of the request commits with `204`, and the Status page counts the
+dropped records per Server (ADR 0007).
 
 ## Verification record
 
@@ -150,7 +158,7 @@ The repository tests exercise:
 - Coolify project/environment/application/service hierarchy and Docker
   stdout/stderr mapping;
 - committed acknowledgement, retryable saturation, ambiguous cancellation,
-  stable-ID duplicate no-op, conflicting duplicate rollback, clean queue
+  stable-ID duplicate no-op, conflicting duplicate drop-and-count, clean queue
   shutdown, and application restart behavior;
 - exact self-exclusion ordering and match behavior; and
 - required output, retry, TLS, compression, and finite-storage directives.

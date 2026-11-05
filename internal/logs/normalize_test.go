@@ -91,16 +91,20 @@ func TestNormalizeCoolifyFluentdAliases(t *testing.T) {
 func TestTimestampPrecedenceAndFailure(t *testing.T) {
 	received := time.Date(2026, 7, 28, 0, 0, 0, 0, time.UTC)
 	tests := []struct {
-		name    string
-		body    string
-		date    string
-		want    time.Time
-		wantErr bool
+		name      string
+		body      string
+		date      string
+		want      time.Time
+		defaulted bool
+		wantErr   bool
 	}{
-		{"application over fluent", `{"timestamp":"2025-01-01T00:00:00Z","log":"x"}`, `"2024-01-01T00:00:00Z"`, time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC), false},
-		{"fluent date", `{"log":"x"}`, `"2024-01-01T00:00:00Z"`, time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC), false},
-		{"absent fallback", `{"log":"x"}`, "", received, false},
-		{"invalid supplied", `{"timestamp":"yesterday","log":"x"}`, "", time.Time{}, true},
+		{"application over fluent", `{"timestamp":"2025-01-01T00:00:00Z","log":"x"}`, `"2024-01-01T00:00:00Z"`, time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC), false, false},
+		{"fluent date", `{"log":"x"}`, `"2024-01-01T00:00:00Z"`, time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC), false, false},
+		{"absent fallback", `{"log":"x"}`, "", received, true, false},
+		{"null fallback", `{"timestamp":null,"log":"x"}`, "", received, true, false},
+		// A supplied time equal to the receive time is producer content.
+		{"supplied equals receive", `{"timestamp":"2026-07-28T00:00:00Z","log":"x"}`, "", received, false, false},
+		{"invalid supplied", `{"timestamp":"yesterday","log":"x"}`, "", time.Time{}, false, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -110,8 +114,9 @@ func TestTimestampPrecedenceAndFailure(t *testing.T) {
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("err = %v", err)
 			}
-			if !tt.wantErr && event.EventAtUS != tt.want.UnixMicro() {
-				t.Fatalf("event time = %d", event.EventAtUS)
+			if !tt.wantErr && (event.EventAtUS != tt.want.UnixMicro() ||
+				event.EventAtDefaulted != tt.defaulted) {
+				t.Fatalf("event time = %d defaulted=%v", event.EventAtUS, event.EventAtDefaulted)
 			}
 		})
 	}
@@ -219,6 +224,79 @@ func TestCanonicalEqualityExcludesReceiveTime(t *testing.T) {
 	second.MessageText = "changed"
 	if CanonicalEqual(first, second) {
 		t.Fatal("content change did not affect canonical equality")
+	}
+}
+
+func TestCanonicalEqualityIgnoresOnlyDefaultedEventTime(t *testing.T) {
+	// A retry of a timestamp-less record arrives with a new receive time.
+	first, err := Normalize(testRecord(`{"log":"x","source_event_id":"e"}`), TrustedServer{ID: 1}, time.Unix(1, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	retry, err := Normalize(testRecord(`{"log":"x","source_event_id":"e"}`), TrustedServer{ID: 1}, time.Unix(2, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !first.EventAtDefaulted || first.EventAtUS == retry.EventAtUS {
+		t.Fatalf("defaulted times = %d/%d (%v)", first.EventAtUS, retry.EventAtUS, first.EventAtDefaulted)
+	}
+	if !CanonicalEqual(first, retry) {
+		t.Fatal("defaulted event time made a retry a conflict")
+	}
+	// One side supplied, the other defaulted: the defaulted time carries no
+	// producer content, so time is not compared.
+	supplied, err := Normalize(testRecord(`{"timestamp":"2026-01-01T00:00:00Z","log":"x","source_event_id":"e"}`), TrustedServer{ID: 1}, time.Unix(3, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !CanonicalEqual(first, supplied) || !CanonicalEqual(supplied, first) {
+		t.Fatal("event time compared although one side defaulted it")
+	}
+	// Both supplied: a different time is a conflict.
+	later := supplied
+	later.EventAtUS++
+	if CanonicalEqual(supplied, later) {
+		t.Fatal("different supplied event times compared equal")
+	}
+	// A defaulted retry still detects content changes.
+	retry.MessageText = "changed"
+	if CanonicalEqual(first, retry) {
+		t.Fatal("content change hidden by defaulted event time")
+	}
+}
+
+func TestCanonicalEqualityContainerIdentity(t *testing.T) {
+	base, err := Normalize(testRecord(`{"timestamp":"2026-01-01T00:00:00Z","log":"x","source_event_id":"e"}`), TrustedServer{ID: 1}, time.Unix(1, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	with := func(container *ContainerIdentity) CanonicalEvent {
+		event := base
+		event.Container = container
+		return event
+	}
+	tests := []struct {
+		name  string
+		a, b  *ContainerIdentity
+		equal bool
+	}{
+		{"both absent", nil, nil, true},
+		{"one absent", &ContainerIdentity{ID: "c1", Name: "web"}, nil, false},
+		{"same ID renamed", &ContainerIdentity{ID: "c1", Name: "web"}, &ContainerIdentity{ID: "c1", Name: "web-renamed"}, true},
+		{"different ID same name", &ContainerIdentity{ID: "c1", Name: "web"}, &ContainerIdentity{ID: "c2", Name: "web"}, false},
+		{"names only equal", &ContainerIdentity{Name: "web"}, &ContainerIdentity{Name: "web"}, true},
+		{"names only differ", &ContainerIdentity{Name: "web"}, &ContainerIdentity{Name: "worker"}, false},
+		{"ID on one side only", &ContainerIdentity{ID: "c1", Name: "web"}, &ContainerIdentity{Name: "web"}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := CanonicalEqual(with(tt.a), with(tt.b)); got != tt.equal {
+				t.Fatalf("equal = %v, want %v", got, tt.equal)
+			}
+			if got := CanonicalEqual(with(tt.b), with(tt.a)); got != tt.equal {
+				t.Fatalf("reversed equal = %v, want %v", got, tt.equal)
+			}
+		})
 	}
 }
 

@@ -56,9 +56,16 @@
         <div><dt>Queued bytes</dt><dd>{{.QueuedBytes}}</dd></div>
         <div><dt>Accepted events</dt><dd>{{.AcceptedEvents}}</dd></div>
         <div><dt>Rejected batches</dt><dd>{{.RejectedBatches}}</dd></div>
+        <div><dt>Conflicting duplicates dropped</dt><dd>{{.ConflictsDropped}}</dd></div>
         <div><dt>Last successful ingest</dt><dd>{{.LastIngest}}</dd></div>
         <div><dt>Last database error</dt><dd>{{.LastDatabaseError}}</dd></div>
       </dl>
+      {{if .ConflictServers}}<h3 id="status-conflicts">Conflicting duplicates by Server</h3>
+      <p>Records that reused a stable source event ID for different content. The first stored content was kept; these records were not stored. Counts reset when Siftail restarts.</p>
+      <dl class="status-facts" aria-labelledby="status-conflicts">
+        {{range .ConflictServers}}<div><dt>{{.Server}}</dt><dd>{{.Dropped}} · last {{.LastAt}}</dd></div>{{end}}
+      </dl>
+      {{if .ConflictServersMore}}<p>{{.ConflictServersMore}}</p>{{end}}{{end}}
     </section>
 
     <section aria-labelledby="status-diagnostics">

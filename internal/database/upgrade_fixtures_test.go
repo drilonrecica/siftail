@@ -22,14 +22,16 @@ var upgradeFixtureDigests = map[string]string{
 	"schema-3.db": "feaef12f35a3a01256eebce642c6679960dc4219ddb1df9d1952143e0056320b",
 	"schema-4.db": "5c9926b8c354e9622147acb0f10454e81db764068677776bd31fcddac92e4fe2",
 	"schema-5.db": "3e051e348460e4ceb851028a93a998032d295a3865c770ac35c478ab7a840870",
+	"schema-6.db": "d8c662571bb2fc726d93dae1493ae8a189e219d5e46b627fcb60b785762f43dc",
 }
 
 var releasedMigrationDigests = map[string]string{
-	"0001_initial_ingestion.sql":  "0ab04b3124455d3a85506240e78ecebcb16d55efd582499aa91866ac6a931083",
-	"0002_administrator.sql":      "462a28b4f485b3e3f2f1c1dc0865b679d5b320cdcf0f9e01b8f0cb81c995cc41",
-	"0003_sessions.sql":           "ff06187d1d558e1a454487293d40733d4eb0ba445909fc42e48f51f9c8a0af31",
-	"0004_security_audit.sql":     "713a2f0114794fadd13e14809a8d8c7682d180bc4c804dd1b517ecc83dbef6b2",
-	"0005_container_identity.sql": "58e29550ad535fab6890a6aa437c717d5d8b9e7eba0a4efd07026c83b497be5d",
+	"0001_initial_ingestion.sql":    "0ab04b3124455d3a85506240e78ecebcb16d55efd582499aa91866ac6a931083",
+	"0002_administrator.sql":        "462a28b4f485b3e3f2f1c1dc0865b679d5b320cdcf0f9e01b8f0cb81c995cc41",
+	"0003_sessions.sql":             "ff06187d1d558e1a454487293d40733d4eb0ba445909fc42e48f51f9c8a0af31",
+	"0004_security_audit.sql":       "713a2f0114794fadd13e14809a8d8c7682d180bc4c804dd1b517ecc83dbef6b2",
+	"0005_container_identity.sql":   "58e29550ad535fab6890a6aa437c717d5d8b9e7eba0a4efd07026c83b497be5d",
+	"0006_event_time_defaulted.sql": "e73e5d1a397ef713f5841853f5a4e78626487f0264fe67a511fd31d57e717e76",
 }
 
 func TestReleasedMigrationsAndHistoricalFixturesAreImmutable(t *testing.T) {

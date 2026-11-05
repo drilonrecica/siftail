@@ -43,10 +43,16 @@ func (w *WriterWorker) Run(ctx context.Context) error {
 			return nil
 		default:
 		}
-		persistErr := w.writer.Persist(ctx, batch)
+		result, persistErr := w.writer.PersistWithResult(ctx, batch)
 		if w.observer != nil {
 			if persistErr == nil {
-				w.observer.RecordIngestAccepted(len(batch.Events), time.Now().UTC())
+				now := time.Now().UTC()
+				w.observer.RecordIngestAccepted(len(batch.Events), now)
+				if result.ConflictsDropped > 0 {
+					w.observer.RecordIngestConflicts(
+						batch.AuthenticatedServerID, result.ConflictsDropped, now,
+					)
+				}
 			} else {
 				category := CategoryUnavailable
 				var ingestErr *Error
@@ -54,8 +60,8 @@ func (w *WriterWorker) Run(ctx context.Context) error {
 					category = ingestErr.Category
 				}
 				// Only storage-wide categories degrade ingestion globally;
-				// conflict, policy, constraint, and internal failures are
-				// scoped to this batch.
+				// policy, constraint, and internal failures are scoped to
+				// this batch.
 				databaseFailure := category == CategoryUnavailable ||
 					category == CategoryStorageFull
 				w.observer.RecordIngestRejected(

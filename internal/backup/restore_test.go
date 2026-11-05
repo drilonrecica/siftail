@@ -112,6 +112,7 @@ func TestRestoreMigratesSupportedArtifactAndRejectsActiveOwner(t *testing.T) {
 		INSERT INTO settings(key,value_json,updated_at_us)
 		VALUES('artifact_only','{"artifact":true}',2);
 		DROP TABLE security_audit_events;
+		ALTER TABLE log_events DROP COLUMN event_at_defaulted;
 		DELETE FROM schema_migrations WHERE version>=4;
 		UPDATE siftail_backup_metadata SET source_schema_version=3;
 	`)

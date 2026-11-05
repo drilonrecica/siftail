@@ -6,14 +6,30 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/drilonrecica/siftail/internal/ingest"
 	"github.com/drilonrecica/siftail/internal/retention"
 )
 
+// ConflictDisplayLimit bounds the per-Server conflicting-duplicate rows Status
+// resolves and shows; the total covers every Server.
+const ConflictDisplayLimit = 20
+
+// ServerConflictView is one per-Server conflicting-duplicate counter with the
+// Server's current name, or an empty name when the Server was removed.
+type ServerConflictView struct {
+	ServerConflicts
+	ServerName string
+}
+
 type OperationalSnapshot struct {
-	State         Snapshot
+	State Snapshot
+	// Conflicts holds at most ConflictDisplayLimit most recent per-Server
+	// counters from State.Conflicts, with Server names.
+	Conflicts     []ServerConflictView
 	Queue         ingest.AdmissionStats
 	Retention     retention.Settings
 	DatabaseBytes int64
@@ -110,6 +126,10 @@ func (s *Store) Read(ctx context.Context) (OperationalSnapshot, error) {
 		); err != nil {
 		return OperationalSnapshot{}, fmt.Errorf("read sanitized event status: %w", err)
 	}
+	snapshot.Conflicts, err = s.conflictViews(ctx, snapshot.State.Conflicts)
+	if err != nil {
+		return OperationalSnapshot{}, err
+	}
 	snapshot.EventsToday = int64(snapshot.State.EventsToday)
 	if oldest.Valid {
 		value := oldest.Int64
@@ -120,6 +140,45 @@ func (s *Store) Read(ctx context.Context) (OperationalSnapshot, error) {
 		snapshot.NewestEventUS = &value
 	}
 	return snapshot, nil
+}
+
+// conflictViews resolves Server names for the displayed counters with one
+// primary-key lookup per bounded row set. Names are administrator-set labels,
+// never payload content.
+func (s *Store) conflictViews(ctx context.Context, conflicts []ServerConflicts) ([]ServerConflictView, error) {
+	if len(conflicts) == 0 {
+		return nil, nil
+	}
+	if len(conflicts) > ConflictDisplayLimit {
+		conflicts = conflicts[:ConflictDisplayLimit]
+	}
+	ids := make([]string, len(conflicts))
+	for index, conflict := range conflicts {
+		ids[index] = strconv.FormatInt(conflict.ServerID, 10)
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT id, name FROM servers
+		WHERE id IN (SELECT value FROM json_each(?))`, "["+strings.Join(ids, ",")+"]")
+	if err != nil {
+		return nil, fmt.Errorf("read conflicting-duplicate Servers: %w", err)
+	}
+	defer rows.Close()
+	names := make(map[int64]string, len(conflicts))
+	for rows.Next() {
+		var id int64
+		var name string
+		if err := rows.Scan(&id, &name); err != nil {
+			return nil, fmt.Errorf("scan conflicting-duplicate Server: %w", err)
+		}
+		names[id] = name
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read conflicting-duplicate Servers: %w", err)
+	}
+	views := make([]ServerConflictView, len(conflicts))
+	for index, conflict := range conflicts {
+		views[index] = ServerConflictView{ServerConflicts: conflict, ServerName: names[conflict.ServerID]}
+	}
+	return views, nil
 }
 
 func regularFileSize(path string) (int64, error) {

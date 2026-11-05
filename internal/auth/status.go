@@ -144,6 +144,7 @@ func statusView(snapshot statusstate.OperationalSnapshot, now time.Time) webui.S
 		QueuedEvents:      strconv.FormatInt(snapshot.Queue.QueuedEvents, 10),
 		QueuedBytes:       formatStatusBytes(snapshot.Queue.QueuedBytes),
 		RejectedBatches:   strconv.FormatUint(state.RejectedBatches, 10),
+		ConflictsDropped:  strconv.FormatUint(state.ConflictsDropped, 10),
 		AcceptedEvents:    strconv.FormatUint(state.AcceptedEvents, 10),
 		LastIngest:        "Never",
 		LastDatabaseError: "None",
@@ -174,6 +175,22 @@ func statusView(snapshot statusstate.OperationalSnapshot, now time.Time) webui.S
 		view.StorageWarning = "Storage is full. Ingestion is returning 507 while retained reads remain available. Free host space or reduce retention pressure; Siftail will test recovery automatically."
 	case "retention_target_unmet":
 		view.StorageWarning = "The configured storage target cannot be reached after bounded retention. Ingestion is returning 507 while retained reads remain available. Increase the limit or reduce retention pressure."
+	}
+	for _, conflict := range snapshot.Conflicts {
+		server := conflict.ServerName
+		if server == "" {
+			server = "Removed Server #" + strconv.FormatInt(conflict.ServerID, 10)
+		}
+		view.ConflictServers = append(view.ConflictServers, webui.StatusConflictView{
+			Server:  server,
+			Dropped: strconv.FormatUint(conflict.Dropped, 10) + " dropped",
+			LastAt:  formatStatusTime(conflict.LastAt),
+		})
+	}
+	if hidden := len(state.Conflicts) - len(snapshot.Conflicts); hidden > 0 {
+		view.ConflictServersMore = fmt.Sprintf(
+			"%d more Servers with conflicting duplicates are counted in the total.", hidden,
+		)
 	}
 	for index, diagnostic := range state.Diagnostics {
 		view.Diagnostics[index] = webui.StatusDiagnosticView{

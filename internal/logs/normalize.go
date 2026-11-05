@@ -87,18 +87,22 @@ type CommonFields struct {
 }
 
 type CanonicalEvent struct {
-	EventAtUS     int64
-	ReceivedAtUS  int64
-	Source        SourceIdentity
-	Container     *ContainerIdentity
-	Stream        Stream
-	Level         Level
-	OriginalLevel string
-	MessageRaw    []byte
-	MessageText   string
-	Attributes    []byte
-	SourceEventID string
-	Common        CommonFields
+	EventAtUS int64
+	// EventAtDefaulted is true exactly when neither a source timestamp nor a
+	// Fluent Bit record timestamp was present and EventAtUS is the receive
+	// time (DOMAIN.md §5.2 step 3, ADR 0007).
+	EventAtDefaulted bool
+	ReceivedAtUS     int64
+	Source           SourceIdentity
+	Container        *ContainerIdentity
+	Stream           Stream
+	Level            Level
+	OriginalLevel    string
+	MessageRaw       []byte
+	MessageText      string
+	Attributes       []byte
+	SourceEventID    string
+	Common           CommonFields
 }
 
 type TrustedServer struct {
@@ -122,7 +126,7 @@ func Normalize(record ReceivedRecord, server TrustedServer, receivedAt time.Time
 	}
 
 	fields := cloneFields(record.Fields)
-	eventAt, err := normalizeTimestamp(fields, record.Timestamp, receivedAt)
+	eventAt, eventAtDefaulted, err := normalizeTimestamp(fields, record.Timestamp, receivedAt)
 	if err != nil {
 		return CanonicalEvent{}, err
 	}
@@ -153,18 +157,19 @@ func Normalize(record ReceivedRecord, server TrustedServer, receivedAt time.Time
 	}
 
 	event := CanonicalEvent{
-		EventAtUS:     eventAt,
-		ReceivedAtUS:  receivedAt.UnixMicro(),
-		Source:        source,
-		Container:     container,
-		Stream:        stream,
-		Level:         level,
-		OriginalLevel: originalLevel,
-		MessageRaw:    messageRaw,
-		MessageText:   messageText,
-		Attributes:    attributes,
-		SourceEventID: eventID,
-		Common:        common,
+		EventAtUS:        eventAt,
+		EventAtDefaulted: eventAtDefaulted,
+		ReceivedAtUS:     receivedAt.UnixMicro(),
+		Source:           source,
+		Container:        container,
+		Stream:           stream,
+		Level:            level,
+		OriginalLevel:    originalLevel,
+		MessageRaw:       messageRaw,
+		MessageText:      messageText,
+		Attributes:       attributes,
+		SourceEventID:    eventID,
+		Common:           common,
 	}
 	if event.RetainedBytes() > int64(maxMessageBytes+maxAttributesSize+4096) {
 		return CanonicalEvent{}, ErrLimit
@@ -180,7 +185,9 @@ func cloneFields(input map[string]json.RawMessage) map[string]json.RawMessage {
 	return out
 }
 
-func normalizeTimestamp(fields map[string]json.RawMessage, fluent json.RawMessage, received time.Time) (int64, error) {
+// normalizeTimestamp applies the DOMAIN.md §5.2 precedence and reports whether
+// the receive time was used because no timestamp was supplied.
+func normalizeTimestamp(fields map[string]json.RawMessage, fluent json.RawMessage, received time.Time) (int64, bool, error) {
 	var raw json.RawMessage
 	for _, key := range []string{"timestamp", "@timestamp", "time"} {
 		if value, ok := fields[key]; ok {
@@ -194,13 +201,13 @@ func normalizeTimestamp(fields map[string]json.RawMessage, fluent json.RawMessag
 	}
 	delete(fields, "date")
 	if len(bytes.TrimSpace(raw)) == 0 || bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
-		return received.UnixMicro(), nil
+		return received.UnixMicro(), true, nil
 	}
 	timestamp, err := parseTimestamp(raw)
 	if err != nil {
-		return 0, fmt.Errorf("invalid supplied timestamp")
+		return 0, false, fmt.Errorf("invalid supplied timestamp")
 	}
-	return timestamp.UnixMicro(), nil
+	return timestamp.UnixMicro(), false, nil
 }
 
 func parseTimestamp(raw json.RawMessage) (time.Time, error) {
@@ -696,10 +703,13 @@ func (e CanonicalEvent) RetainedBytes() int64 {
 }
 
 // CanonicalEqual compares the content used by stable source-event-ID
-// idempotency. Receive time and future database IDs are intentionally excluded.
+// idempotency (DOMAIN.md §8.1, ADR 0007). Receive time and database IDs are
+// excluded. Event time is compared only when neither side defaulted it to
+// receive time, because a defaulted time is Siftail's observation, not
+// producer content.
 func CanonicalEqual(a, b CanonicalEvent) bool {
-	a.ReceivedAtUS, b.ReceivedAtUS = 0, 0
-	return a.EventAtUS == b.EventAtUS &&
+	eventTimeEqual := a.EventAtDefaulted || b.EventAtDefaulted || a.EventAtUS == b.EventAtUS
+	return eventTimeEqual &&
 		sourceIdentityEqual(a.Source, b.Source) &&
 		containerEqual(a.Container, b.Container) &&
 		a.Stream == b.Stream && a.Level == b.Level &&
@@ -719,11 +729,18 @@ func sourceIdentityEqual(a, b SourceIdentity) bool {
 		a.Service == b.Service
 }
 
+// containerEqual compares container identity (ADR 0006, ADR 0007): by
+// container ID when both carry one, by name only when neither does. The name of
+// an instance with an ID is a mutable label, so a rename is not a difference;
+// one side with an ID and the other without is.
 func containerEqual(a, b *ContainerIdentity) bool {
 	if a == nil || b == nil {
 		return a == b
 	}
-	return *a == *b
+	if a.ID != "" || b.ID != "" {
+		return a.ID == b.ID
+	}
+	return a.Name == b.Name
 }
 
 func commonEqual(a, b CommonFields) bool {

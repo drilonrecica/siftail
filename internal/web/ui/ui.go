@@ -439,16 +439,27 @@ type StatusView struct {
 	QueuedEvents      string
 	QueuedBytes       string
 	RejectedBatches   string
-	AcceptedEvents    string
-	LastIngest        string
-	LastDatabaseError string
-	DatabaseCheck     string
-	DatabaseCheckAt   string
-	StorageWarning    string
-	CSRFToken         string
-	Diagnostics       []StatusDiagnosticView
-	Error             string
-	ErrorRequestID    string
+	ConflictsDropped  string
+	// ConflictServers lists per-Server conflicting-duplicate counters (ADR
+	// 0007), most recent first; ConflictServersMore names any not shown.
+	ConflictServers     []StatusConflictView
+	ConflictServersMore string
+	AcceptedEvents      string
+	LastIngest          string
+	LastDatabaseError   string
+	DatabaseCheck       string
+	DatabaseCheckAt     string
+	StorageWarning      string
+	CSRFToken           string
+	Diagnostics         []StatusDiagnosticView
+	Error               string
+	ErrorRequestID      string
+}
+
+type StatusConflictView struct {
+	Server  string
+	Dropped string
+	LastAt  string
 }
 
 type StatusDiagnosticView struct {

@@ -7,6 +7,10 @@ import "time"
 type Observer interface {
 	RecordIngestAccepted(events int, at time.Time)
 	RecordIngestRejected(category ErrorCategory, databaseFailure bool, at time.Time)
+	// RecordIngestConflicts reports records of one committed batch from the
+	// trusted Server that were dropped because they reused a stable source
+	// event ID for different content (ADR 0007). Only the count is passed.
+	RecordIngestConflicts(serverID int64, dropped int, at time.Time)
 }
 
 func categoryForStatus(status int) ErrorCategory {

@@ -69,3 +69,39 @@ func TestStoreReadsOnlyBoundedSanitizedFacts(t *testing.T) {
 		t.Fatalf("status event bounds plan = %s", plan.String())
 	}
 }
+
+func TestStoreResolvesBoundedConflictServerNames(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "siftail.db")
+	db, err := database.Open(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.Writer().Exec(`INSERT INTO servers(id,name,created_at_us)
+		VALUES(1,'alpha',1),(2,'beta',1)`); err != nil {
+		t.Fatal(err)
+	}
+	started := time.Unix(1, 0).UTC()
+	state := NewState(started)
+	state.RecordIngestConflicts(1, 2, started.Add(time.Second))
+	state.RecordIngestConflicts(99, 1, started.Add(2*time.Second))
+	for server := int64(100); server < 100+ConflictDisplayLimit; server++ {
+		state.RecordIngestConflicts(server, 1, started)
+	}
+	store := NewStore(db.Reader(), path, nil, retention.NewStore(db.Reader(), nil), state)
+	snapshot, err := store.Read(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snapshot.Conflicts) != ConflictDisplayLimit ||
+		len(snapshot.State.Conflicts) != ConflictDisplayLimit+2 {
+		t.Fatalf("conflict rows = %d shown of %d", len(snapshot.Conflicts), len(snapshot.State.Conflicts))
+	}
+	// Most recent first; a removed Server has no name.
+	if got := snapshot.Conflicts[0]; got.ServerID != 99 || got.ServerName != "" {
+		t.Fatalf("first conflict row = %#v", got)
+	}
+	if got := snapshot.Conflicts[1]; got.ServerID != 1 || got.ServerName != "alpha" || got.Dropped != 2 {
+		t.Fatalf("second conflict row = %#v", got)
+	}
+}

@@ -23,7 +23,7 @@ import (
 )
 
 const (
-	currentSchema = 5
+	currentSchema = 6
 	fixtureTimeUS = int64(1785196800000000)
 )
 
@@ -33,6 +33,7 @@ var migrationNames = []string{
 	"0003_sessions.sql",
 	"0004_security_audit.sql",
 	"0005_container_identity.sql",
+	"0006_event_time_defaulted.sql",
 }
 
 // foreignKeysOffDirective mirrors internal/database/migrate.go: such a
@@ -309,6 +310,21 @@ func seedFixture(db *sql.DB, version int) error {
 			id,source_id,container_id,container_name,first_seen_at_us,last_seen_at_us
 		) VALUES(18,13,'synthetic-container-id-recreated','synthetic-container',?,?)`,
 			fixtureTimeUS+4, fixtureTimeUS+4,
+		); err != nil {
+			return err
+		}
+	}
+	if version >= 6 {
+		// A stable-ID event whose time was defaulted to receive time
+		// (ADR 0007), which schema 5 could not record.
+		if _, err := tx.Exec(`INSERT INTO log_events(
+			id,event_at_us,event_at_defaulted,received_at_us,source_id,
+			container_instance_id,stream,level_normalized,message_raw,
+			message_text,source_event_id
+		) VALUES(19,?,1,?,13,18,'stdout','info',?,?,'synthetic-event-2')`,
+			fixtureTimeUS+5, fixtureTimeUS+5,
+			[]byte("synthetic defaulted-time fixture event"),
+			"synthetic defaulted-time fixture event",
 		); err != nil {
 			return err
 		}

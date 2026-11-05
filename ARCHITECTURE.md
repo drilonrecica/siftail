@@ -1956,8 +1956,9 @@ clears that condition. Shutdown makes readiness unhealthy before listeners
 drain. Liveness remains healthy for these database and degradation states while
 the HTTP stack can respond.
 
-Batch-scoped ingestion failures (constraint `400`, internal `500`, conflicts,
-and policy rejections) never change readiness. Storage-full keeps readiness
+Batch-scoped ingestion failures (constraint `400`, internal `500`, and policy
+rejections) and dropped conflicting duplicates (ADR 0007) never change
+readiness. Storage-full keeps readiness
 unhealthy on purpose: it is the signal that ingestion is refused. The image's
 `HEALTHCHECK` probes readiness, so the container reports `unhealthy` while
 degraded. Docker does not restart unhealthy containers on its own, but an

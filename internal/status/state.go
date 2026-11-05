@@ -3,6 +3,7 @@ package status
 
 import (
 	"errors"
+	"sort"
 	"sync"
 	"time"
 	"unicode"
@@ -12,7 +13,31 @@ import (
 	"github.com/drilonrecica/siftail/internal/retention"
 )
 
-const diagnosticCapacity = 100
+const (
+	diagnosticCapacity = 100
+	// conflictServerCapacity bounds the per-Server conflicting-duplicate
+	// counters; the Server with the oldest last occurrence is evicted first.
+	// The process-wide total stays exact.
+	conflictServerCapacity = 1024
+	// conflictDiagnosticInterval limits the conflicting-duplicate diagnostic
+	// to one entry per Server per minute (ADR 0007).
+	conflictDiagnosticInterval = time.Minute
+)
+
+// ServerConflicts is the process-local conflicting-duplicate counter of one
+// Server (ADR 0007): records dropped because they reused a stable source event
+// ID for different content, and when that last happened.
+type ServerConflicts struct {
+	ServerID int64
+	Dropped  uint64
+	LastAt   time.Time
+}
+
+type conflictCounter struct {
+	dropped        uint64
+	lastAt         time.Time
+	lastDiagnostic time.Time
+}
 
 type Diagnostic struct {
 	At          time.Time  `json:"at"`
@@ -45,15 +70,18 @@ func (d Diagnostic) Validate() error {
 }
 
 type Snapshot struct {
-	StartedAt            time.Time
-	WriterReady          bool
-	DatabaseWritable     bool
-	Degraded             bool
-	DegradedCategory     string
-	AcceptedBatches      uint64
-	AcceptedEvents       uint64
-	EventsToday          uint64
-	RejectedBatches      uint64
+	StartedAt        time.Time
+	WriterReady      bool
+	DatabaseWritable bool
+	Degraded         bool
+	DegradedCategory string
+	AcceptedBatches  uint64
+	AcceptedEvents   uint64
+	EventsToday      uint64
+	RejectedBatches  uint64
+	ConflictsDropped uint64
+	// Conflicts lists per-Server counters, most recent occurrence first.
+	Conflicts            []ServerConflicts
 	RecentEvents         uint64
 	LastSuccessfulIngest *time.Time
 	LastDatabaseError    *Diagnostic
@@ -80,6 +108,8 @@ type State struct {
 	dailyDay          int64
 	dailyEvents       uint64
 	rejectedBatches   uint64
+	conflictsDropped  uint64
+	conflicts         map[int64]*conflictCounter
 	lastSuccess       time.Time
 	lastDatabase      Diagnostic
 	lastCleanup       time.Time
@@ -250,6 +280,59 @@ func (s *State) RecordIngestRejected(
 	s.mu.Unlock()
 }
 
+// RecordIngestConflicts counts records dropped from a committed batch because
+// they reused a stable source event ID for different content (ADR 0007). The
+// diagnostic is rate-limited per Server and carries no Server, source, ID, or
+// event field; attribution lives in the counter.
+func (s *State) RecordIngestConflicts(serverID int64, dropped int, at time.Time) {
+	if s == nil || dropped <= 0 || serverID <= 0 {
+		return
+	}
+	at = at.UTC()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.conflictsDropped += uint64(dropped)
+	if s.conflicts == nil {
+		s.conflicts = make(map[int64]*conflictCounter)
+	}
+	counter, ok := s.conflicts[serverID]
+	if !ok {
+		if len(s.conflicts) >= conflictServerCapacity {
+			s.evictOldestConflictLocked()
+		}
+		counter = &conflictCounter{}
+		s.conflicts[serverID] = counter
+	}
+	counter.dropped += uint64(dropped)
+	if at.After(counter.lastAt) {
+		counter.lastAt = at
+	}
+	if !counter.lastDiagnostic.IsZero() &&
+		at.Sub(counter.lastDiagnostic) < conflictDiagnosticInterval {
+		return
+	}
+	counter.lastDiagnostic = at
+	s.appendDiagnosticLocked(Diagnostic{
+		At: at, Severity: "attention", Component: "ingestion",
+		Category: "conflicting_duplicate",
+		Summary:  conflictingDuplicateSummary,
+	})
+}
+
+const conflictingDuplicateSummary = "Records that reused a stable source event ID for different content were dropped; see the per-Server count on Status."
+
+func (s *State) evictOldestConflictLocked() {
+	var oldestID int64
+	var oldest time.Time
+	for id, counter := range s.conflicts {
+		if oldestID == 0 || counter.lastAt.Before(oldest) ||
+			(counter.lastAt.Equal(oldest) && id < oldestID) {
+			oldestID, oldest = id, counter.lastAt
+		}
+	}
+	delete(s.conflicts, oldestID)
+}
+
 func (s *State) RecordCleanup(result retention.CleanupResult, at time.Time) {
 	if s == nil {
 		return
@@ -306,7 +389,23 @@ func (s *State) Snapshot(now time.Time) Snapshot {
 		AcceptedBatches:  s.acceptedBatches, AcceptedEvents: s.acceptedEvents,
 		EventsToday:       s.dailyEvents,
 		RejectedBatches:   s.rejectedBatches,
+		ConflictsDropped:  s.conflictsDropped,
 		LastCleanupResult: s.cleanupResult,
+	}
+	if len(s.conflicts) > 0 {
+		snapshot.Conflicts = make([]ServerConflicts, 0, len(s.conflicts))
+		for id, counter := range s.conflicts {
+			snapshot.Conflicts = append(snapshot.Conflicts, ServerConflicts{
+				ServerID: id, Dropped: counter.dropped, LastAt: counter.lastAt,
+			})
+		}
+		sort.Slice(snapshot.Conflicts, func(i, j int) bool {
+			a, b := snapshot.Conflicts[i], snapshot.Conflicts[j]
+			if !a.LastAt.Equal(b.LastAt) {
+				return a.LastAt.After(b.LastAt)
+			}
+			return a.ServerID < b.ServerID
+		})
 	}
 	if snapshot.DegradedCategory == "" && s.retentionDegraded {
 		snapshot.DegradedCategory = "retention_target_unmet"
@@ -412,6 +511,9 @@ func sanitizeDiagnostic(input DiagnosticInput) (Diagnostic, error) {
 	case "ingestion/batch_internal_error":
 		severity = "attention"
 		summary = "An ingestion batch failed with an internal error and was not committed."
+	case "ingestion/conflicting_duplicate":
+		severity = "attention"
+		summary = conflictingDuplicateSummary
 	case "ingestion/guided_test_rejected":
 		severity = "information"
 		summary = "A guided ingestion test request was rejected."

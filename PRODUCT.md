@@ -726,6 +726,7 @@ The authenticated status page must show:
 - current ingestion rate;
 - queue events and bytes;
 - rejected batches;
+- conflicting duplicates dropped, per Server, since process start (ADR 0007);
 - last database error;
 - last retention result;
 - last backup result;
