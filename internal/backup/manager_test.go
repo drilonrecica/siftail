@@ -2,7 +2,6 @@ package backup
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"path/filepath"
 	"testing"
@@ -14,7 +13,6 @@ import (
 func TestManagerSerializesReportsAndCompletesBackup(t *testing.T) {
 	fixture := newBackupFixture(t)
 	seedFullBackupState(t, fixture.db.Writer())
-	fixture.service.stepPages = 8
 	manager := NewManager(fixture.service)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
@@ -93,12 +91,11 @@ func TestManagerCancellationStopsOwnedBackupAndLeavesNoArtifact(t *testing.T) {
 	copyStarted := make(chan struct{})
 	fixture.service.copy = func(
 		ctx context.Context,
-		_ *sql.DB,
 		_ string,
-		_ int,
-		progress func(database.BackupProgress),
+		_ string,
+		progress func(database.SnapshotProgress),
 	) error {
-		progress(database.BackupProgress{PageCount: 10, Remaining: 6})
+		progress(database.SnapshotProgress{Written: 4, Total: 10})
 		close(copyStarted)
 		<-ctx.Done()
 		return ctx.Err()

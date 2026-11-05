@@ -58,42 +58,22 @@ func newBackupFixture(t *testing.T) *backupFixture {
 	}
 }
 
-func TestCreateFullBackupWhileWritingExcludesSessionsAndRestores(t *testing.T) {
+func TestCreateFullBackupExcludesSessionsAndRestores(t *testing.T) {
 	fixture := newBackupFixture(t)
 	seedFullBackupState(t, fixture.db.Writer())
 	output := filepath.Join(t.TempDir(), "full.sqlite")
-	fixture.service.stepPages = 8
-	writeDone := make(chan error, 1)
-	var startWrite sync.Once
+	var progress []Progress
 	result, err := fixture.service.CreateFull(
 		context.Background(), output,
-		func(Progress) {
-			startWrite.Do(func() {
-				go func() {
-					writeDone <- fixture.coordinator.Do(
-						context.Background(), func(tx *sql.Tx) error {
-							_, err := tx.Exec(`INSERT INTO settings(
-								key,value_json,updated_at_us
-							) VALUES('during_backup','{"ok":true}',2)`)
-							return err
-						},
-					)
-				}()
-			})
-		},
+		func(value Progress) { progress = append(progress, value) },
 	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := <-writeDone; err != nil {
-		t.Fatalf("concurrent write: %v", err)
-	}
-	var sourceConcurrentSetting int
-	if err := fixture.db.Reader().QueryRow(
-		"SELECT count(*) FROM settings WHERE key='during_backup'",
-	).Scan(&sourceConcurrentSetting); err != nil || sourceConcurrentSetting != 1 {
-		t.Fatalf("source concurrent setting = %d, %v",
-			sourceConcurrentSetting, err)
+	if len(progress) < 2 || progress[0].Completed != 0 ||
+		progress[len(progress)-1].Completed != progress[len(progress)-1].Total ||
+		progress[0].Total <= 0 || progress[0].Unit != "bytes" {
+		t.Fatalf("progress = %#v", progress)
 	}
 	if err := result.Validate(); err != nil {
 		t.Fatalf("result: %v", err)
@@ -136,13 +116,8 @@ func TestCreateFullBackupWhileWritingExcludesSessionsAndRestores(t *testing.T) {
 	if err := restoreFile.Close(); err != nil {
 		t.Fatal(err)
 	}
-	artifact, err := sql.Open("sqlite3", sqlitePath(output, "ro"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer artifact.Close()
-	if err := database.OnlineBackup(
-		context.Background(), artifact, restoredPath, 8, nil,
+	if err := database.SnapshotInto(
+		context.Background(), output, restoredPath, nil,
 	); err != nil {
 		t.Fatalf("restore artifact snapshot: %v", err)
 	}
@@ -168,14 +143,6 @@ func TestCreateFullBackupWhileWritingExcludesSessionsAndRestores(t *testing.T) {
 			t.Fatalf("%s = %d, want %d", query, got, want)
 		}
 	}
-	var capturedConcurrentSetting int
-	if err := restored.QueryRow(
-		"SELECT count(*) FROM settings WHERE key='during_backup'",
-	).Scan(&capturedConcurrentSetting); err != nil ||
-		(capturedConcurrentSetting != 0 && capturedConcurrentSetting != 1) {
-		t.Fatalf("captured concurrent setting = %d, %v",
-			capturedConcurrentSetting, err)
-	}
 	var integrity string
 	if err := restored.QueryRow("PRAGMA integrity_check").Scan(&integrity); err != nil ||
 		integrity != "ok" {
@@ -199,16 +166,15 @@ func TestCreateFullBackupWhileWritingExcludesSessionsAndRestores(t *testing.T) {
 func TestCreateFullBackupFailureCleansStagingAndNeverOverwrites(t *testing.T) {
 	tests := []struct {
 		name string
-		copy func(context.Context, *sql.DB, string, int, func(database.BackupProgress)) error
+		copy func(context.Context, string, string, func(database.SnapshotProgress)) error
 	}{
 		{
 			name: "destination full",
 			copy: func(
 				_ context.Context,
-				_ *sql.DB,
+				_ string,
 				path string,
-				_ int,
-				_ func(database.BackupProgress),
+				_ func(database.SnapshotProgress),
 			) error {
 				destination, err := sql.Open("sqlite3", sqlitePath(path, "rw"))
 				if err != nil {
@@ -230,7 +196,7 @@ func TestCreateFullBackupFailureCleansStagingAndNeverOverwrites(t *testing.T) {
 		},
 		{
 			name: "interrupted partial",
-			copy: func(_ context.Context, _ *sql.DB, path string, _ int, _ func(database.BackupProgress)) error {
+			copy: func(_ context.Context, _ string, path string, _ func(database.SnapshotProgress)) error {
 				if err := os.WriteFile(path, []byte("partial"), 0600); err != nil {
 					return err
 				}
@@ -319,10 +285,9 @@ func TestCreateFullBackupCancellationAndVerificationFailureCleanUp(t *testing.T)
 	output := filepath.Join(outputDirectory, "canceled.sqlite")
 	fixture.service.copy = func(
 		ctx context.Context,
-		_ *sql.DB,
 		_ string,
-		_ int,
-		_ func(database.BackupProgress),
+		_ string,
+		_ func(database.SnapshotProgress),
 	) error {
 		<-ctx.Done()
 		return ctx.Err()

@@ -63,9 +63,8 @@ type Service struct {
 	sourcePath string
 	audit      *audit.Store
 	now        func() time.Time
-	copy       func(context.Context, *sql.DB, string, int, func(database.BackupProgress)) error
+	copy       func(context.Context, string, string, func(database.SnapshotProgress)) error
 	verify     func(context.Context, string) (Result, error)
-	stepPages  int
 }
 
 func NewService(
@@ -75,8 +74,7 @@ func NewService(
 ) *Service {
 	return &Service{
 		source: source, sourcePath: sourcePath, audit: auditStore,
-		now: time.Now, copy: database.OnlineBackup, verify: Verify,
-		stepPages: database.DefaultBackupStepPages,
+		now: time.Now, copy: database.SnapshotInto, verify: Verify,
 	}
 }
 
@@ -141,7 +139,7 @@ func (s *Service) create(
 		)
 	}
 	if err := ensureBackupSpace(
-		s.source.Reader(), filepath.Dir(finalPath), backupType,
+		s.source.Reader(), s.sourcePath, filepath.Dir(finalPath), backupType,
 	); err != nil {
 		return s.fail(
 			ctx, finalPath, backupType, "insufficient_space", err,
@@ -164,12 +162,12 @@ func (s *Service) create(
 	switch backupType {
 	case TypeFull:
 		snapshotErr = s.copy(
-			ctx, s.source.Reader(), stagingPath, s.stepPages,
-			func(value database.BackupProgress) {
+			ctx, s.sourcePath, stagingPath,
+			func(value database.SnapshotProgress) {
 				if progress != nil {
 					progress(Progress{
-						Completed: value.PageCount - value.Remaining,
-						Total:     value.PageCount, Unit: "pages",
+						Completed: int(value.Written),
+						Total:     int(value.Total), Unit: "bytes",
 					})
 				}
 			},
@@ -372,8 +370,15 @@ func createStagingFile(finalPath string) (string, func(), error) {
 	}, nil
 }
 
+// ensureBackupSpace requires room for the artifact plus slack in the
+// destination, and WAL headroom on the database's filesystem: the snapshot's
+// read transaction holds back checkpoints, so the WAL grows while it runs. The
+// headroom uses the same rule as the slack (5% of the logical database size, at
+// least 1 MiB) and is added to the destination requirement when both share a
+// filesystem.
 func ensureBackupSpace(
 	source *sql.DB,
+	sourcePath string,
 	destinationDirectory string,
 	backupType string,
 ) error {
@@ -388,27 +393,62 @@ func ensureBackupSpace(
 		pageCount > int64(^uint64(0)>>1)/pageSize {
 		return errors.New("backup size is unsupported")
 	}
-	required := pageCount * pageSize
+	databaseSize := pageCount * pageSize
+	walHeadroom := backupSlack(databaseSize)
+	required := databaseSize
 	if backupType == TypeConfiguration {
 		required = 1 << 20
 	}
-	slack := required / 20
-	if slack < 1<<20 {
-		slack = 1 << 20
-	}
-	if required > int64(^uint64(0)>>1)-slack {
+	slack := backupSlack(required)
+	if required > int64(^uint64(0)>>1)-slack-walHeadroom {
 		return errors.New("backup size is unsupported")
 	}
 	required += slack
-	var stats syscall.Statfs_t
-	if err := syscall.Statfs(destinationDirectory, &stats); err != nil {
+	destination, err := filesystemSpace(destinationDirectory)
+	if err != nil {
 		return errors.New("inspect backup destination capacity")
 	}
-	available := uint64(stats.Bavail) * uint64(stats.Bsize)
-	if available < uint64(required) {
+	sourceDirectory, err := filesystemSpace(filepath.Dir(sourcePath))
+	if err != nil {
+		return errors.New("inspect backup source capacity")
+	}
+	if destination.device == sourceDirectory.device {
+		required += walHeadroom
+	} else if sourceDirectory.available < uint64(walHeadroom) {
+		return errors.New("database volume has insufficient WAL headroom for backup")
+	}
+	if destination.available < uint64(required) {
 		return errors.New("backup destination has insufficient space")
 	}
 	return nil
+}
+
+func backupSlack(size int64) int64 {
+	slack := size / 20
+	if slack < 1<<20 {
+		slack = 1 << 20
+	}
+	return slack
+}
+
+type filesystemCapacity struct {
+	device    uint64
+	available uint64
+}
+
+func filesystemSpace(directory string) (filesystemCapacity, error) {
+	var info syscall.Stat_t
+	if err := syscall.Stat(directory, &info); err != nil {
+		return filesystemCapacity{}, err
+	}
+	var stats syscall.Statfs_t
+	if err := syscall.Statfs(directory, &stats); err != nil {
+		return filesystemCapacity{}, err
+	}
+	return filesystemCapacity{
+		device:    uint64(info.Dev),
+		available: uint64(stats.Bavail) * uint64(stats.Bsize),
+	}, nil
 }
 
 func finalizeSnapshot(

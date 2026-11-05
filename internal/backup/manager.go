@@ -75,7 +75,7 @@ func (s Status) Validate() error {
 	}
 	if s.TotalUnits < 0 || s.CompletedUnits < 0 ||
 		(s.TotalUnits > 0 && s.CompletedUnits > s.TotalUnits) ||
-		(s.Unit != "" && s.Unit != "pages" && s.Unit != "rows") {
+		(s.Unit != "" && s.Unit != "bytes" && s.Unit != "rows") {
 		return errors.New("invalid backup progress")
 	}
 	if s.StartedAt != nil &&

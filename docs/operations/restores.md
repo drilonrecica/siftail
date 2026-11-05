@@ -33,8 +33,9 @@ own the database simultaneously. With the lock held, restore:
 1. verifies the input without applying it;
 2. runs a full read-only check on the current database;
 3. copies and re-verifies the input in owner-private staging;
-4. snapshots the current database through SQLite's online backup API, including
-   committed WAL state, into a verified session-free full rollback artifact;
+4. snapshots the current database with `VACUUM INTO` (the full-backup snapshot
+   path, ADR 0009), including committed WAL state, into a verified
+   session-free full rollback artifact;
 5. checkpoints and closes the old database before removing only its stale
    sidecars;
 6. atomically installs the staged artifact;

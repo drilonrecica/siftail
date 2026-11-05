@@ -682,12 +682,13 @@ applying it:
 ```
 
 The authenticated Backup workspace exposes the same single-job operation with
-bounded page/row progress, read-only verification, and a sanitized final result.
+bounded byte/row progress, read-only verification, and a sanitized final result.
 The destination directory
 must already exist on protected storage and have room for the logical database
-plus 5% or at least 1 MiB of slack. Existing output files are never overwritten.
+plus 5% or at least 1 MiB of slack, and the database volume needs WAL headroom
+because ingestion continues during the snapshot. Existing output files are never overwritten.
 Siftail creates a hidden mode-`0600` staging file in the same directory, copies
-the active WAL database with SQLite's online backup API, removes all browser
+one consistent snapshot of the active WAL database with `VACUUM INTO`, removes all browser
 sessions from the artifact, writes versioned completion metadata, runs full
 integrity/schema/table/session verification, streams a SHA-256 checksum, syncs
 the data, and only then atomically exposes the final filename.

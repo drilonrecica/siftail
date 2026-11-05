@@ -148,8 +148,8 @@ func TestCreateConfigurationBackupCopiesOnlyConsistentConfiguration(t *testing.T
 	if err := restoredFile.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if err := database.OnlineBackup(
-		context.Background(), artifact, restoredPath, 8, nil,
+	if err := database.SnapshotInto(
+		context.Background(), output, restoredPath, nil,
 	); err != nil {
 		t.Fatalf("round-trip configuration artifact: %v", err)
 	}

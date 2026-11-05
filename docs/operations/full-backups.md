@@ -1,7 +1,8 @@
 # Verified full and configuration-only backups
 
-**Reviewed:** 2026-07-28  
-**Scope:** SFT-042–SFT-043 format-1 backup creation and verification
+**Reviewed:** 2026-11-05  
+**Scope:** SFT-042–SFT-043 format-1 backup creation and verification; SFT-093
+`VACUUM INTO` snapshot (ADR 0009)
 
 ## Create
 
@@ -29,7 +30,12 @@ database bytes through HTTP.
 For full backup, the output directory must have capacity for the current logical
 SQLite page count plus 5% or at least 1 MiB of slack. Configuration backup
 reserves at least 2 MiB before starting; a larger configuration still fails
-safely if the filesystem fills. Siftail refuses:
+safely if the filesystem fills. Both types also reserve WAL headroom of 5% of
+the database size (at least 1 MiB) on the filesystem that holds the database:
+the snapshot's read transaction holds back WAL checkpoints, so the WAL grows
+while ingestion continues during the backup. When the destination shares that
+filesystem, the headroom is added to the destination requirement. Siftail
+refuses:
 
 - the live main database, WAL, or shared-memory path;
 - a missing/non-directory parent;
@@ -42,11 +48,20 @@ creates that path between validation and publication.
 
 ## Snapshot and verification contract
 
-The active reader pool supplies a dedicated source connection to SQLite's
-online backup API. Each step copies at most 256 pages and yields before the
-next step. Ordinary ingestion remains on the single writer coordinator. SQLite
-provides one consistent snapshot: a concurrent committed request is wholly
-included or wholly absent, never partly copied.
+Siftail runs `VACUUM INTO` the empty staging file on a dedicated source
+connection (ADR 0009). The statement reads one read transaction, so it copies
+one consistent snapshot: a concurrent committed request is wholly included or
+wholly absent, never partly copied, and commits after the snapshot began are not
+in the artifact. Concurrent commits never restart the copy, so a full backup
+completes under steady ingestion. Ordinary ingestion remains on the single
+writer coordinator. The dedicated connection is opened read-write without
+create because SQLite opens the `VACUUM INTO` output with the source
+connection's flags; the statement only reads the source database.
+
+`VACUUM INTO` has no step callback. Progress is reported as staged bytes
+written against the source's logical size (in-use pages × page size), sampled
+while the statement runs. Cancellation interrupts the statement and removes
+the staging file.
 
 After copying, Siftail modifies only the staged destination:
 
@@ -55,7 +70,8 @@ After copying, Siftail modifies only the staged destination:
    session row;
 3. write one format-1 `full` metadata record containing creation time, source
    schema version, and completed state;
-4. close and synchronize the artifact;
+4. close and synchronize the artifact (SQLite does not fsync `VACUUM INTO`
+   output);
 5. run full `integrity_check`;
 6. require the supported schema version and every full-backup table;
 7. require exactly one completed metadata record and zero session rows; and
@@ -86,6 +102,18 @@ a time is retained by the copier. The artifact is marked format-1
 `configuration`; restoring it replaces the whole database with this
 configuration and empty history. It is not a merge and is not a complete
 log-history backup.
+
+### Format version
+
+Artifacts remain format 1. SFT-093 changed only how the full snapshot is copied:
+a `VACUUM INTO` artifact contains no free pages, so it is usually smaller than
+a 0.4.0 online-backup artifact of the same database, but its schema, metadata
+record, verification, and restore handling are identical. `backup verify` and
+`siftail restore` accept format-1 artifacts made either way. The restore
+command's rollback capture of the current database uses the same `VACUUM INTO`
+snapshot.
+
+### Configuration determinism
 
 Equivalent unchanged configuration has deterministic logical rows and
 validation. SQLite header state can differ between creations, so byte-for-byte
@@ -149,20 +177,41 @@ state but does not alter completed artifacts.
 ## Measured development-host cost
 
 The repository benchmark uses a migrated source with 10,000 events containing
-256-byte messages (about a 6.72 MiB artifact) and includes online copy, session
-exclusion/metadata finalization, full verification, two checksums, file and
-directory synchronization, atomic publication, and success auditing:
+256-byte messages (about a 6.3 MiB artifact) and includes the `VACUUM INTO`
+copy, session exclusion/metadata finalization, full verification, two
+checksums, file and directory synchronization, atomic publication, and success
+auditing. Run it with `TMPDIR` on a real disk (`AGENTS.md` §17.2):
 
 ```bash
-go test -run '^$' -bench '^BenchmarkCreateFullBackup$' \
-  -benchtime=1s -count=3 -benchmem ./internal/backup
+TMPDIR=/path/on/real/disk go test -run '^$' \
+  -bench '^BenchmarkCreateFullBackup$' \
+  -benchtime=3x -count=5 -benchmem ./internal/backup
 ```
 
-Three one-second Fedora/i5 runs measured a 95.762 ms/op median
-(95.349–100.503 ms/op), 73.61 MB/s median artifact throughput, 128,844–130,613
-bytes/op, and 1,086–1,088 allocations/op. These local results are not
-guarantees for larger databases, slower synchronization, concurrent write
-rates, filesystems, storage hardware, encryption, or failure conditions.
+On 2026-11-05, five three-iteration runs on a Fedora i5-7500 host with `TMPDIR`
+on btrfs over a SATA disk measured a 150.568 ms/op median
+(143.512–158.488 ms/op), 43.93 MB/s median artifact throughput,
+116,010–117,282 bytes/op, and 1,072–1,077 allocations/op. Single-iteration
+runs on the same disk ranged from 1.07 to 4.38 s/op when synchronization
+contended with other I/O. For comparison with the 0.4.0 online-backup figure
+(95.762 ms/op on tmpfs), the same benchmark on tmpfs measured a 98.321 ms/op
+median (96.633–98.701 ms/op). These local results are not guarantees for
+larger databases, slower synchronization, concurrent write rates, filesystems,
+storage hardware, encryption, or failure conditions.
+
+The continuous-ingestion test backs up an approximately 256 MiB source while
+one goroutine commits one event per transaction through the writer coordinator,
+and requires completion within 90 s, at least 200 overlapping commits, a
+verified artifact, and a captured set of ingested rows that is exactly a prefix
+of commit order:
+
+```bash
+go test -run '^TestCreateFullBackupCompletesUnderContinuousIngestion$' \
+  -count=1 -v ./internal/backup
+```
+
+With `TMPDIR` on the same btrfs disk it completed in 3.36 s while 824
+transactions committed (213 during the `VACUUM INTO` statement itself).
 
 The configuration benchmark uses the same 10,000-event source but copies one
 administrator, Server, token, source, and their configuration into an

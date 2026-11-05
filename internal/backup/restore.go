@@ -448,9 +448,8 @@ func createRollbackArtifact(
 	if err := database.IntegrityCheck(ctx, current.Writer()); err != nil {
 		return errors.New("current database integrity check failed")
 	}
-	if err := database.OnlineBackup(
-		ctx, current.Reader(), outputPath,
-		database.DefaultBackupStepPages, nil,
+	if err := database.SnapshotInto(
+		ctx, databasePath, outputPath, nil,
 	); err != nil {
 		return errors.New("create current database rollback")
 	}
