@@ -15,13 +15,16 @@ import (
 
 const (
 	diagnosticCapacity = 100
-	// conflictServerCapacity bounds the per-Server conflicting-duplicate
-	// counters; the Server with the oldest last occurrence is evicted first.
-	// The process-wide total stays exact.
-	conflictServerCapacity = 1024
+	// serverCounterCapacity bounds each set of per-Server ingestion counters;
+	// the Server with the oldest last occurrence is evicted first. The
+	// process-wide totals stay exact.
+	serverCounterCapacity = 1024
 	// conflictDiagnosticInterval limits the conflicting-duplicate diagnostic
 	// to one entry per Server per minute (ADR 0007).
 	conflictDiagnosticInterval = time.Minute
+	// lateDiagnosticInterval limits the late-event diagnostic to one entry
+	// per Server per hour (ADR 0008).
+	lateDiagnosticInterval = time.Hour
 )
 
 // ServerConflicts is the process-local conflicting-duplicate counter of one
@@ -33,10 +36,89 @@ type ServerConflicts struct {
 	LastAt   time.Time
 }
 
-type conflictCounter struct {
-	dropped        uint64
+// ServerLateEvents is the process-local late-event counter of one Server
+// (ADR 0008): stored records whose event time was already older than the
+// age-retention cutoff when received, and when that last happened.
+type ServerLateEvents struct {
+	ServerID int64
+	Late     uint64
+	LastAt   time.Time
+}
+
+type serverCounter struct {
+	count          uint64
 	lastAt         time.Time
 	lastDiagnostic time.Time
+}
+
+// serverCounterSet is a bounded set of per-Server counters with an exact
+// process-wide total and a per-Server diagnostic rate limit.
+type serverCounterSet struct {
+	total   uint64
+	servers map[int64]*serverCounter
+}
+
+// record adds n occurrences for the Server and reports whether a diagnostic
+// is due under the interval.
+func (c *serverCounterSet) record(serverID int64, n int, at time.Time, interval time.Duration) bool {
+	c.total += uint64(n)
+	if c.servers == nil {
+		c.servers = make(map[int64]*serverCounter)
+	}
+	counter, ok := c.servers[serverID]
+	if !ok {
+		if len(c.servers) >= serverCounterCapacity {
+			c.evictOldest()
+		}
+		counter = &serverCounter{}
+		c.servers[serverID] = counter
+	}
+	counter.count += uint64(n)
+	if at.After(counter.lastAt) {
+		counter.lastAt = at
+	}
+	if !counter.lastDiagnostic.IsZero() && at.Sub(counter.lastDiagnostic) < interval {
+		return false
+	}
+	counter.lastDiagnostic = at
+	return true
+}
+
+func (c *serverCounterSet) evictOldest() {
+	var oldestID int64
+	var oldest time.Time
+	for id, counter := range c.servers {
+		if oldestID == 0 || counter.lastAt.Before(oldest) ||
+			(counter.lastAt.Equal(oldest) && id < oldestID) {
+			oldestID, oldest = id, counter.lastAt
+		}
+	}
+	delete(c.servers, oldestID)
+}
+
+type serverCount struct {
+	serverID int64
+	count    uint64
+	lastAt   time.Time
+}
+
+// sorted lists the counters, most recent occurrence first.
+func (c *serverCounterSet) sorted() []serverCount {
+	if len(c.servers) == 0 {
+		return nil
+	}
+	counts := make([]serverCount, 0, len(c.servers))
+	for id, counter := range c.servers {
+		counts = append(counts, serverCount{serverID: id, count: counter.count, lastAt: counter.lastAt})
+	}
+	sort.Slice(counts, func(i, j int) bool {
+		a, b := counts[i], counts[j]
+		if !a.lastAt.Equal(b.lastAt) {
+			return a.lastAt.After(b.lastAt)
+		}
+		return a.serverID < b.serverID
+	})
+	return counts
 }
 
 type Diagnostic struct {
@@ -81,7 +163,11 @@ type Snapshot struct {
 	RejectedBatches  uint64
 	ConflictsDropped uint64
 	// Conflicts lists per-Server counters, most recent occurrence first.
-	Conflicts            []ServerConflicts
+	Conflicts  []ServerConflicts
+	LateEvents uint64
+	// Late lists per-Server late-event counters, most recent occurrence
+	// first.
+	Late                 []ServerLateEvents
 	RecentEvents         uint64
 	LastSuccessfulIngest *time.Time
 	LastDatabaseError    *Diagnostic
@@ -108,8 +194,8 @@ type State struct {
 	dailyDay          int64
 	dailyEvents       uint64
 	rejectedBatches   uint64
-	conflictsDropped  uint64
-	conflicts         map[int64]*conflictCounter
+	conflicts         serverCounterSet
+	late              serverCounterSet
 	lastSuccess       time.Time
 	lastDatabase      Diagnostic
 	lastCleanup       time.Time
@@ -291,27 +377,9 @@ func (s *State) RecordIngestConflicts(serverID int64, dropped int, at time.Time)
 	at = at.UTC()
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.conflictsDropped += uint64(dropped)
-	if s.conflicts == nil {
-		s.conflicts = make(map[int64]*conflictCounter)
-	}
-	counter, ok := s.conflicts[serverID]
-	if !ok {
-		if len(s.conflicts) >= conflictServerCapacity {
-			s.evictOldestConflictLocked()
-		}
-		counter = &conflictCounter{}
-		s.conflicts[serverID] = counter
-	}
-	counter.dropped += uint64(dropped)
-	if at.After(counter.lastAt) {
-		counter.lastAt = at
-	}
-	if !counter.lastDiagnostic.IsZero() &&
-		at.Sub(counter.lastDiagnostic) < conflictDiagnosticInterval {
+	if !s.conflicts.record(serverID, dropped, at, conflictDiagnosticInterval) {
 		return
 	}
-	counter.lastDiagnostic = at
 	s.appendDiagnosticLocked(Diagnostic{
 		At: at, Severity: "attention", Component: "ingestion",
 		Category: "conflicting_duplicate",
@@ -321,17 +389,29 @@ func (s *State) RecordIngestConflicts(serverID int64, dropped int, at time.Time)
 
 const conflictingDuplicateSummary = "Records that reused a stable source event ID for different content were dropped; see the per-Server count on Status."
 
-func (s *State) evictOldestConflictLocked() {
-	var oldestID int64
-	var oldest time.Time
-	for id, counter := range s.conflicts {
-		if oldestID == 0 || counter.lastAt.Before(oldest) ||
-			(counter.lastAt.Equal(oldest) && id < oldestID) {
-			oldestID, oldest = id, counter.lastAt
-		}
+// RecordIngestLate counts stored records of a committed batch whose event time
+// was already older than the age-retention cutoff when received (ADR 0008).
+// They are kept by receive time; the count points the operator at a clock or
+// replay problem. The diagnostic is rate-limited per Server to one per hour
+// and carries no Server, source, or event field.
+func (s *State) RecordIngestLate(serverID int64, late int, at time.Time) {
+	if s == nil || late <= 0 || serverID <= 0 {
+		return
 	}
-	delete(s.conflicts, oldestID)
+	at = at.UTC()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.late.record(serverID, late, at, lateDiagnosticInterval) {
+		return
+	}
+	s.appendDiagnosticLocked(Diagnostic{
+		At: at, Severity: "attention", Component: "ingestion",
+		Category: "late_event",
+		Summary:  lateEventSummary,
+	})
 }
+
+const lateEventSummary = "Events older than the retention age limit are arriving, which indicates a wrong clock or a replayed backlog; they are kept by receive time. See the per-Server count on Status."
 
 func (s *State) RecordCleanup(result retention.CleanupResult, at time.Time) {
 	if s == nil {
@@ -389,22 +469,18 @@ func (s *State) Snapshot(now time.Time) Snapshot {
 		AcceptedBatches:  s.acceptedBatches, AcceptedEvents: s.acceptedEvents,
 		EventsToday:       s.dailyEvents,
 		RejectedBatches:   s.rejectedBatches,
-		ConflictsDropped:  s.conflictsDropped,
+		ConflictsDropped:  s.conflicts.total,
+		LateEvents:        s.late.total,
 		LastCleanupResult: s.cleanupResult,
 	}
-	if len(s.conflicts) > 0 {
-		snapshot.Conflicts = make([]ServerConflicts, 0, len(s.conflicts))
-		for id, counter := range s.conflicts {
-			snapshot.Conflicts = append(snapshot.Conflicts, ServerConflicts{
-				ServerID: id, Dropped: counter.dropped, LastAt: counter.lastAt,
-			})
-		}
-		sort.Slice(snapshot.Conflicts, func(i, j int) bool {
-			a, b := snapshot.Conflicts[i], snapshot.Conflicts[j]
-			if !a.LastAt.Equal(b.LastAt) {
-				return a.LastAt.After(b.LastAt)
-			}
-			return a.ServerID < b.ServerID
+	for _, counter := range s.conflicts.sorted() {
+		snapshot.Conflicts = append(snapshot.Conflicts, ServerConflicts{
+			ServerID: counter.serverID, Dropped: counter.count, LastAt: counter.lastAt,
+		})
+	}
+	for _, counter := range s.late.sorted() {
+		snapshot.Late = append(snapshot.Late, ServerLateEvents{
+			ServerID: counter.serverID, Late: counter.count, LastAt: counter.lastAt,
 		})
 	}
 	if snapshot.DegradedCategory == "" && s.retentionDegraded {
@@ -514,6 +590,9 @@ func sanitizeDiagnostic(input DiagnosticInput) (Diagnostic, error) {
 	case "ingestion/conflicting_duplicate":
 		severity = "attention"
 		summary = conflictingDuplicateSummary
+	case "ingestion/late_event":
+		severity = "attention"
+		summary = lateEventSummary
 	case "ingestion/guided_test_rejected":
 		severity = "information"
 		summary = "A guided ingestion test request was rejected."

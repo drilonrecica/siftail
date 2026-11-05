@@ -444,22 +444,33 @@ type StatusView struct {
 	// 0007), most recent first; ConflictServersMore names any not shown.
 	ConflictServers     []StatusConflictView
 	ConflictServersMore string
-	AcceptedEvents      string
-	LastIngest          string
-	LastDatabaseError   string
-	DatabaseCheck       string
-	DatabaseCheckAt     string
-	StorageWarning      string
-	CSRFToken           string
-	Diagnostics         []StatusDiagnosticView
-	Error               string
-	ErrorRequestID      string
+	LateEvents          string
+	// LateServers lists per-Server late-event counters (ADR 0008), most
+	// recent first; LateServersMore names any not shown.
+	LateServers       []StatusLateView
+	LateServersMore   string
+	AcceptedEvents    string
+	LastIngest        string
+	LastDatabaseError string
+	DatabaseCheck     string
+	DatabaseCheckAt   string
+	StorageWarning    string
+	CSRFToken         string
+	Diagnostics       []StatusDiagnosticView
+	Error             string
+	ErrorRequestID    string
 }
 
 type StatusConflictView struct {
 	Server  string
 	Dropped string
 	LastAt  string
+}
+
+type StatusLateView struct {
+	Server string
+	Late   string
+	LastAt string
 }
 
 type StatusDiagnosticView struct {

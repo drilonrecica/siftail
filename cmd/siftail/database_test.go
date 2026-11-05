@@ -36,7 +36,7 @@ func TestDatabaseCheckCLIOfflineQuickFullAndSafeFailures(t *testing.T) {
 		}
 		output := stdout.String()
 		for _, expected := range []string{
-			"schema: 6/6", "compatible: true", "integrity: ok",
+			"schema: 7/7", "compatible: true", "integrity: ok",
 			"writable: true (filesystem_access)",
 			"checkpoint: not_run_read_only",
 		} {

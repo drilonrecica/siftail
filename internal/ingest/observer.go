@@ -11,6 +11,10 @@ type Observer interface {
 	// trusted Server that were dropped because they reused a stable source
 	// event ID for different content (ADR 0007). Only the count is passed.
 	RecordIngestConflicts(serverID int64, dropped int, at time.Time)
+	// RecordIngestLate reports persisted records of one committed batch from
+	// the trusted Server whose event time was already older than the
+	// age-retention cutoff when received (ADR 0008). Only the count is passed.
+	RecordIngestLate(serverID int64, late int, at time.Time)
 }
 
 func categoryForStatus(status int) ErrorCategory {

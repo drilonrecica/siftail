@@ -53,6 +53,11 @@ func (w *WriterWorker) Run(ctx context.Context) error {
 						batch.AuthenticatedServerID, result.ConflictsDropped, now,
 					)
 				}
+				if result.LateEvents > 0 {
+					w.observer.RecordIngestLate(
+						batch.AuthenticatedServerID, result.LateEvents, now,
+					)
+				}
 			} else {
 				category := CategoryUnavailable
 				var ingestErr *Error

@@ -21,7 +21,7 @@
           value="{{.RetentionDays}}"{{if .RetentionError}} aria-invalid="true"
           aria-describedby="retention-days-error retention-days-help" autofocus{{else}}
           aria-describedby="retention-days-help"{{end}}>
-        <p class="field-help" id="retention-days-help">Whole days from 1 to 3,650. Default: 14 days.</p>
+        <p class="field-help" id="retention-days-help">Whole days from 1 to 3,650. Default: 14 days. Events are kept for this long after Siftail receives them.</p>
         {{if .RetentionError}}<p class="field-error" id="retention-days-error">{{.RetentionError}}</p>{{end}}
       </div>
 
@@ -44,7 +44,7 @@
     <aside class="settings-explanation" aria-labelledby="retention-scope-heading">
       <h2 id="retention-scope-heading">Scope and deletion order</h2>
       <p>These limits apply globally to retained application events. They do not delete Servers, ingestion-token metadata, aliases, administrator sessions, settings, or security audit history.</p>
-      <p>Cleanup removes the oldest eligible events first, ordered by the earlier of event time and receive time, then internal event ID. Work is performed in bounded transactions.</p>
+      <p>Cleanup removes the earliest-received eligible events first, ordered by receive time, then internal event ID. An event's own timestamp does not shorten its retention, so a host with a wrong clock or a delayed backlog keeps its events for the full age. Work is performed in bounded transactions.</p>
       <p>Size cleanup starts near 95% of the configured target and works toward 90%. One admitted batch and transient WAL activity can temporarily exceed the target.</p>
       <div class="notice notice-warning">
         <h2>Deletion limitation</h2>

@@ -302,12 +302,12 @@ func TestStateCountsConflictsPerServerWithRateLimitedDiagnostic(t *testing.T) {
 func TestStateConflictCountersAreBounded(t *testing.T) {
 	started := time.Unix(20_000, 0).UTC()
 	state := NewState(started)
-	for server := int64(1); server <= conflictServerCapacity+5; server++ {
+	for server := int64(1); server <= serverCounterCapacity+5; server++ {
 		state.RecordIngestConflicts(server, 1, started.Add(time.Duration(server)*time.Second))
 	}
 	snapshot := state.Snapshot(started)
-	if len(snapshot.Conflicts) != conflictServerCapacity ||
-		snapshot.ConflictsDropped != conflictServerCapacity+5 {
+	if len(snapshot.Conflicts) != serverCounterCapacity ||
+		snapshot.ConflictsDropped != serverCounterCapacity+5 {
 		t.Fatalf("bounded conflicts = %d rows, %d total",
 			len(snapshot.Conflicts), snapshot.ConflictsDropped)
 	}
@@ -315,7 +315,74 @@ func TestStateConflictCountersAreBounded(t *testing.T) {
 	if last := snapshot.Conflicts[len(snapshot.Conflicts)-1]; last.ServerID != 6 {
 		t.Fatalf("oldest retained Server = %d, want 6", last.ServerID)
 	}
-	if first := snapshot.Conflicts[0]; first.ServerID != conflictServerCapacity+5 {
+	if first := snapshot.Conflicts[0]; first.ServerID != serverCounterCapacity+5 {
 		t.Fatalf("newest Server = %d", first.ServerID)
+	}
+}
+
+func TestStateCountsLateEventsPerServerWithHourlyDiagnostic(t *testing.T) {
+	started := time.Unix(30_000, 0).UTC()
+	state := NewState(started)
+	state.RecordIngestLate(7, 3, started)
+	state.RecordIngestLate(7, 2, started.Add(59*time.Minute))
+	state.RecordIngestLate(8, 1, started.Add(10*time.Minute))
+	state.RecordIngestLate(7, 1, started.Add(61*time.Minute))
+	state.RecordIngestLate(7, 0, started.Add(62*time.Minute))
+	state.RecordIngestLate(0, 5, started.Add(63*time.Minute))
+
+	snapshot := state.Snapshot(started.Add(70 * time.Minute))
+	if snapshot.LateEvents != 7 || snapshot.ConflictsDropped != 0 {
+		t.Fatalf("late total = %d, conflicts = %d", snapshot.LateEvents, snapshot.ConflictsDropped)
+	}
+	want := []ServerLateEvents{
+		{ServerID: 7, Late: 6, LastAt: started.Add(61 * time.Minute)},
+		{ServerID: 8, Late: 1, LastAt: started.Add(10 * time.Minute)},
+	}
+	if len(snapshot.Late) != len(want) || len(snapshot.Conflicts) != 0 {
+		t.Fatalf("per-Server late = %#v, conflicts = %#v", snapshot.Late, snapshot.Conflicts)
+	}
+	for index := range want {
+		if snapshot.Late[index] != want[index] {
+			t.Fatalf("per-Server late = %#v, want %#v", snapshot.Late, want)
+		}
+	}
+	// Server 7: one at 0, suppressed at 59 min, another at 61 min; Server 8:
+	// one.
+	diagnostics := 0
+	for _, diagnostic := range snapshot.Diagnostics {
+		if diagnostic.Component != "ingestion" || diagnostic.Category != "late_event" {
+			t.Fatalf("unexpected diagnostic %#v", diagnostic)
+		}
+		if err := diagnostic.Validate(); err != nil {
+			t.Fatalf("late-event diagnostic is not in the closed table: %v", err)
+		}
+		if diagnostic.RequestID != "" || strings.Contains(diagnostic.Summary, "7") {
+			t.Fatalf("late-event diagnostic carries attribution: %#v", diagnostic)
+		}
+		diagnostics++
+	}
+	if diagnostics != 3 {
+		t.Fatalf("late-event diagnostics = %d, want 3", diagnostics)
+	}
+	// Late events are stored normally and never affect health.
+	state.SetWriterReady(true)
+	if !state.Ready(false) || state.HealthSeverity() != "Healthy" {
+		t.Fatal("late events changed readiness or health")
+	}
+}
+
+func TestStateLateEventCountersAreBounded(t *testing.T) {
+	started := time.Unix(40_000, 0).UTC()
+	state := NewState(started)
+	for server := int64(1); server <= serverCounterCapacity+3; server++ {
+		state.RecordIngestLate(server, 2, started.Add(time.Duration(server)*time.Second))
+	}
+	snapshot := state.Snapshot(started)
+	if len(snapshot.Late) != serverCounterCapacity ||
+		snapshot.LateEvents != 2*(serverCounterCapacity+3) {
+		t.Fatalf("bounded late = %d rows, %d total", len(snapshot.Late), snapshot.LateEvents)
+	}
+	if last := snapshot.Late[len(snapshot.Late)-1]; last.ServerID != 4 {
+		t.Fatalf("oldest retained Server = %d, want 4", last.ServerID)
 	}
 }

@@ -85,7 +85,7 @@ func TestRestoreCLIRequiresStoppedServerConfirmationAndStaysSecretFree(
 	for _, expected := range []string{
 		"restore complete", "type: full",
 		"artifact: private-artifact.sqlite",
-		"rollback: siftail.db.rollback", "schema: 6",
+		"rollback: siftail.db.rollback", "schema: 7",
 		"fresh login required: true",
 	} {
 		if !strings.Contains(stdout.String(), expected) {

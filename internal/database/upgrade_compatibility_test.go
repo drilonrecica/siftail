@@ -67,6 +67,7 @@ func assertCurrentMigrationHistory(t *testing.T, db *sql.DB) {
 		"0004_security_audit.sql",
 		"0005_container_identity.sql",
 		"0006_event_time_defaulted.sql",
+		"0007_retention_by_receipt.sql",
 	}
 	var got []string
 	for rows.Next() {
@@ -91,6 +92,18 @@ func assertCurrentMigrationHistory(t *testing.T, db *sql.DB) {
 			t.Fatalf("migration %d name = %q, want %q",
 				index+1, got[index], want[index])
 		}
+	}
+	// Migration 0007 (ADR 0008) replaces the retention index with the
+	// receipt-order index.
+	var received, legacy int
+	if err := db.QueryRow(`SELECT
+		(SELECT count(*) FROM sqlite_schema WHERE type='index' AND name='log_events_received_idx'),
+		(SELECT count(*) FROM sqlite_schema WHERE type='index' AND name='log_events_retention_idx')`).
+		Scan(&received, &legacy); err != nil {
+		t.Fatal(err)
+	}
+	if received != 1 || legacy != 0 {
+		t.Fatalf("retention indexes: received=%d legacy=%d", received, legacy)
 	}
 }
 
@@ -226,7 +239,12 @@ func exerciseProductionCriticalPaths(
 		// Schema 6 adds event 19, newer than event 15.
 		wantBefore = 2
 	}
-	if origin > 0 && (len(before) != wantBefore || before[len(before)-1].ID != 15) {
+	wantOldest := int64(15)
+	if origin >= 7 {
+		// Schema 7 adds late event 20, claimed 30 days before event 15.
+		wantBefore, wantOldest = 3, 20
+	}
+	if origin > 0 && (len(before) != wantBefore || before[len(before)-1].ID != wantOldest) {
 		t.Fatalf("schema-%d initial History = %#v", origin, before)
 	}
 	if origin == 0 && len(before) != 0 {

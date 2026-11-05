@@ -727,6 +727,8 @@ The authenticated status page must show:
 - queue events and bytes;
 - rejected batches;
 - conflicting duplicates dropped, per Server, since process start (ADR 0007);
+- late events kept (event time already past the retention age at receipt), per
+  Server, since process start (ADR 0008);
 - last database error;
 - last retention result;
 - last backup result;

@@ -18,6 +18,10 @@ import (
 // resolves and shows; the total covers every Server.
 const ConflictDisplayLimit = 20
 
+// LateDisplayLimit bounds the per-Server late-event rows Status resolves and
+// shows; the total covers every Server.
+const LateDisplayLimit = 20
+
 // ServerConflictView is one per-Server conflicting-duplicate counter with the
 // Server's current name, or an empty name when the Server was removed.
 type ServerConflictView struct {
@@ -25,11 +29,21 @@ type ServerConflictView struct {
 	ServerName string
 }
 
+// ServerLateView is one per-Server late-event counter with the Server's
+// current name, or an empty name when the Server was removed.
+type ServerLateView struct {
+	ServerLateEvents
+	ServerName string
+}
+
 type OperationalSnapshot struct {
 	State Snapshot
 	// Conflicts holds at most ConflictDisplayLimit most recent per-Server
 	// counters from State.Conflicts, with Server names.
-	Conflicts     []ServerConflictView
+	Conflicts []ServerConflictView
+	// Late holds at most LateDisplayLimit most recent per-Server late-event
+	// counters from State.Late, with Server names.
+	Late          []ServerLateView
 	Queue         ingest.AdmissionStats
 	Retention     retention.Settings
 	DatabaseBytes int64
@@ -126,7 +140,9 @@ func (s *Store) Read(ctx context.Context) (OperationalSnapshot, error) {
 		); err != nil {
 		return OperationalSnapshot{}, fmt.Errorf("read sanitized event status: %w", err)
 	}
-	snapshot.Conflicts, err = s.conflictViews(ctx, snapshot.State.Conflicts)
+	snapshot.Conflicts, snapshot.Late, err = s.counterViews(
+		ctx, snapshot.State.Conflicts, snapshot.State.Late,
+	)
 	if err != nil {
 		return OperationalSnapshot{}, err
 	}
@@ -142,43 +158,61 @@ func (s *Store) Read(ctx context.Context) (OperationalSnapshot, error) {
 	return snapshot, nil
 }
 
-// conflictViews resolves Server names for the displayed counters with one
-// primary-key lookup per bounded row set. Names are administrator-set labels,
-// never payload content.
-func (s *Store) conflictViews(ctx context.Context, conflicts []ServerConflicts) ([]ServerConflictView, error) {
-	if len(conflicts) == 0 {
-		return nil, nil
-	}
+// counterViews resolves Server names for the displayed per-Server counters
+// with one primary-key lookup over a bounded ID set. Names are
+// administrator-set labels, never payload content.
+func (s *Store) counterViews(
+	ctx context.Context,
+	conflicts []ServerConflicts,
+	late []ServerLateEvents,
+) ([]ServerConflictView, []ServerLateView, error) {
 	if len(conflicts) > ConflictDisplayLimit {
 		conflicts = conflicts[:ConflictDisplayLimit]
 	}
-	ids := make([]string, len(conflicts))
-	for index, conflict := range conflicts {
-		ids[index] = strconv.FormatInt(conflict.ServerID, 10)
+	if len(late) > LateDisplayLimit {
+		late = late[:LateDisplayLimit]
+	}
+	if len(conflicts) == 0 && len(late) == 0 {
+		return nil, nil, nil
+	}
+	ids := make([]string, 0, len(conflicts)+len(late))
+	for _, conflict := range conflicts {
+		ids = append(ids, strconv.FormatInt(conflict.ServerID, 10))
+	}
+	for _, counter := range late {
+		ids = append(ids, strconv.FormatInt(counter.ServerID, 10))
 	}
 	rows, err := s.db.QueryContext(ctx, `SELECT id, name FROM servers
 		WHERE id IN (SELECT value FROM json_each(?))`, "["+strings.Join(ids, ",")+"]")
 	if err != nil {
-		return nil, fmt.Errorf("read conflicting-duplicate Servers: %w", err)
+		return nil, nil, fmt.Errorf("read counted Servers: %w", err)
 	}
 	defer rows.Close()
-	names := make(map[int64]string, len(conflicts))
+	names := make(map[int64]string, len(ids))
 	for rows.Next() {
 		var id int64
 		var name string
 		if err := rows.Scan(&id, &name); err != nil {
-			return nil, fmt.Errorf("scan conflicting-duplicate Server: %w", err)
+			return nil, nil, fmt.Errorf("scan counted Server: %w", err)
 		}
 		names[id] = name
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("read conflicting-duplicate Servers: %w", err)
+		return nil, nil, fmt.Errorf("read counted Servers: %w", err)
 	}
-	views := make([]ServerConflictView, len(conflicts))
-	for index, conflict := range conflicts {
-		views[index] = ServerConflictView{ServerConflicts: conflict, ServerName: names[conflict.ServerID]}
+	var conflictViews []ServerConflictView
+	for _, conflict := range conflicts {
+		conflictViews = append(conflictViews, ServerConflictView{
+			ServerConflicts: conflict, ServerName: names[conflict.ServerID],
+		})
 	}
-	return views, nil
+	var lateViews []ServerLateView
+	for _, counter := range late {
+		lateViews = append(lateViews, ServerLateView{
+			ServerLateEvents: counter, ServerName: names[counter.ServerID],
+		})
+	}
+	return conflictViews, lateViews, nil
 }
 
 func regularFileSize(path string) (int64, error) {

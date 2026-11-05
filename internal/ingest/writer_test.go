@@ -14,6 +14,7 @@ import (
 
 	"github.com/drilonrecica/siftail/internal/database"
 	"github.com/drilonrecica/siftail/internal/logs"
+	"github.com/drilonrecica/siftail/internal/retention"
 )
 
 type recordingPublisher struct {
@@ -792,4 +793,75 @@ func TestBatchWriterContainerCapCountsTheWholeBatch(t *testing.T) {
 	assertCounts(t, db.Reader(), 0, 0, 0)
 	persistEvents(t, writer, serverID, events[:2]...)
 	assertCounts(t, db.Reader(), 1, 2, 2)
+}
+
+func TestBatchWriterCountsLateEventsAgainstPersistedAgeLimit(t *testing.T) {
+	db, _, writer := newWriterTest(t, WriterOptions{})
+	serverID := insertTestServer(t, db.Writer())
+	day := int64(24 * time.Hour / time.Microsecond)
+	received := time.Date(2026, 11, 5, 12, 0, 0, 0, time.UTC).UnixMicro()
+	event := func(id, message string, eventAt int64, defaulted bool) logs.CanonicalEvent {
+		value := canonicalEvent(serverID, id, message, 0)
+		value.EventAtUS, value.ReceivedAtUS, value.EventAtDefaulted = eventAt, received, defaulted
+		return value
+	}
+	persist := func(events ...logs.CanonicalEvent) PersistResult {
+		t.Helper()
+		result, err := writer.PersistWithResult(context.Background(), &WriteBatch{
+			Events: events, AuthenticatedServerID: serverID,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return result
+	}
+	cutoff := retention.AgeCutoffUS(time.UnixMicro(received), retention.DefaultAgeDays)
+	if cutoff != received-retention.DefaultAgeDays*day {
+		t.Fatalf("default cutoff = %d", cutoff)
+	}
+
+	// Default 14-day policy: only an event time before the cutoff is late.
+	result := persist(
+		event("late", "delayed backlog", cutoff-1, false),
+		event("", "exactly at the cutoff", cutoff, false),
+		event("", "recent", received-day, false),
+		event("", "future-skewed", received+365*day, false),
+		event("", "defaulted", received, true),
+	)
+	if result.LateEvents != 1 || result.ConflictsDropped != 0 {
+		t.Fatalf("default-policy result = %#v", result)
+	}
+	assertCounts(t, db.Reader(), 1, 1, 5)
+
+	// A late event is stored like any other; an idempotent retry of it is
+	// not stored again and not counted again.
+	if result := persist(event("late", "delayed backlog", cutoff-1, false)); result.LateEvents != 0 {
+		t.Fatalf("idempotent late retry result = %#v", result)
+	}
+	assertCounts(t, db.Reader(), 1, 1, 5)
+
+	// The persisted policy decides: under 30 days, 15 days old is not late.
+	if _, err := db.Writer().Exec(`INSERT INTO settings(key,value_json,updated_at_us)
+		VALUES('application_retention','{"age_days":30,"max_database_bytes":4294967296}',1)`); err != nil {
+		t.Fatal(err)
+	}
+	result = persist(
+		event("", "fifteen days", received-15*day, false),
+		event("", "thirty-one days", received-31*day, false),
+	)
+	if result.LateEvents != 1 {
+		t.Fatalf("30-day-policy result = %#v", result)
+	}
+
+	// An invalid stored policy leaves late events uncounted but never fails
+	// ingestion; retention reports the invalid policy itself.
+	if _, err := db.Writer().Exec(`UPDATE settings SET value_json='{"age_days":0}'
+		WHERE key='application_retention'`); err != nil {
+		t.Fatal(err)
+	}
+	result = persist(event("", "invalid policy", received-400*day, false))
+	if result.LateEvents != 0 {
+		t.Fatalf("invalid-policy result = %#v", result)
+	}
+	assertCounts(t, db.Reader(), 1, 1, 8)
 }

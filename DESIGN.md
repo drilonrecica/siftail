@@ -767,6 +767,12 @@ database error. When records were dropped as conflicting duplicates (ADR 0007),
 a "Conflicting duplicates by Server" definition list follows: Server name,
 dropped count, and last occurrence for the 20 most recent Servers, a removed
 Server as `Removed Server #<id>`, and one line counting any Servers not shown.
+"Late events kept" follows the conflict count (ADR 0008). When events arrived
+whose own time was already older than the retention age, a "Late events by
+Server" definition list follows with the same shape: Server name, late count,
+last occurrence, at most 20 Servers, and one line counting any not shown. Its
+copy says the events were stored and are kept for the retention age after
+receipt.
 
 **Diagnostics:** latest sanitized operational events with time, textual
 severity, component, category, fixed safe summary, optional request ID.

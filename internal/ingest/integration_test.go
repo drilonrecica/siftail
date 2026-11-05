@@ -38,6 +38,7 @@ type recordingIngestObserver struct {
 	rejectedBatches int
 	databaseFailure bool
 	conflicts       map[int64]int
+	late            map[int64]int
 }
 
 func (o *recordingIngestObserver) RecordIngestAccepted(events int, _ time.Time) {
@@ -65,6 +66,21 @@ func (o *recordingIngestObserver) RecordIngestConflicts(serverID int64, dropped 
 	}
 	o.conflicts[serverID] += dropped
 	o.mu.Unlock()
+}
+
+func (o *recordingIngestObserver) RecordIngestLate(serverID int64, late int, _ time.Time) {
+	o.mu.Lock()
+	if o.late == nil {
+		o.late = make(map[int64]int)
+	}
+	o.late[serverID] += late
+	o.mu.Unlock()
+}
+
+func (o *recordingIngestObserver) lateFor(serverID int64) int {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.late[serverID]
 }
 
 func (o *recordingIngestObserver) conflictsFor(serverID int64) int {
@@ -595,4 +611,28 @@ func nextIntegrationLive(t *testing.T, subscription *logs.LiveSubscription) logs
 		t.Fatal(err)
 	}
 	return message
+}
+
+func TestIngestionAcceptsAndCountsLateEvent(t *testing.T) {
+	fixture := newIngestionIntegration(t, 10, 1<<20)
+	now := time.Now().UTC()
+	record := func(at time.Time, message string) string {
+		return `{"timestamp":"` + at.Format(time.RFC3339Nano) + `","project":"p",` +
+			`"environment":"e","application":"a","service":"api",` +
+			`"container_id":"container-1","stream":"stdout","level":"info",` +
+			`"log":"` + message + `"}`
+	}
+	// ADR 0008: an event older than the default 14-day age at receipt is
+	// acknowledged, stored, and counted; a current one is not counted.
+	body := `[` + record(now.AddDate(0, 0, -30), "replayed backlog") + `,` +
+		record(now, "current") + `]`
+	response, done := fixture.request(context.Background(), body)
+	<-done
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, body=%q", response.Code, response.Body.String())
+	}
+	assertEventCount(t, fixture.db.Reader(), 2)
+	if got := fixture.observer.lateFor(fixture.serverID(t)); got != 1 {
+		t.Fatalf("late events recorded = %d, want 1", got)
+	}
 }

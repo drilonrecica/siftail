@@ -2,12 +2,12 @@
 
 **Reviewed:** 2026-11-05
 **Scope:** SFT-047 schema 1–4 fixture and recovery matrix; SFT-087 schema 5;
-SFT-090 schema 6
+SFT-090 schema 6; SFT-091 schema 7
 
 ## Supported window
 
 The current pre-public binary supports automatic forward migration from every
-checked-in historical schema fixture, versions 1 through 6. It supports a
+checked-in historical schema fixture, versions 1 through 7. It supports a
 fresh database through the same production open path. Before `1.0`, only the
 latest stable Siftail release receives ordinary support, but that release must
 continue to open every schema fixture retained in this repository.
@@ -29,7 +29,8 @@ event state. Schema 2 adds a deterministic synthetic Argon2id administrator;
 schema 3 adds a hashed synthetic browser session; schema 4 adds a sanitized
 immutable security-audit event; schema 5 adds a recreated container instance
 (the same name with a new container ID), which schema 4 could not hold; schema
-6 adds a stable-ID event whose time was defaulted to receive time.
+6 adds a stable-ID event whose time was defaulted to receive time; schema 7
+adds a late event whose event time is 30 days before its receipt.
 
 Every name, address, token, credential, timestamp, and payload is an obvious
 synthetic test value. The generator contains no production data and makes no
@@ -101,9 +102,60 @@ The migration is forward-only. A binary that supports only schema 5 refuses
 the upgraded database with its actual and supported versions and changes
 nothing. Downgrading requires restoring a backup taken before the upgrade.
 
+## Schema 7: retention by receipt
+
+Migration `0007_retention_by_receipt.sql` (ADR 0008) creates
+`log_events_received_idx ON log_events (received_at_us, id)` and drops
+`log_events_retention_idx`. Age retention, size retention, and every bounded
+deletion now order by receive time, so an accepted event is kept for at least
+the configured age after Siftail received it. The stored generated column
+`retention_at_us` (the earlier of event and receive time) cannot be redefined
+without rewriting every row. It stays in the schema, deprecated and unused,
+and a later rebuild may remove it.
+
+No stored event is written. Every row keeps its recorded receive time, so the
+new basis applies to old and new rows alike. Rows whose event time preceded
+their receive time are retained longer than before, and none becomes eligible
+sooner. See [`retention.md`](retention.md) for the operator-facing behavior and
+the late-event counter.
+
+Building the index reads the whole event table once, inside the migration
+transaction, on the first open after the upgrade. Measured on 2026-11-05 with
+the release binary's SQLite 3.53.4 (`go-sqlite3` 1.14.52), btrfs on a SATA SSD
+(Crucial BX500), on a synthetic schema-6 database of 4.11 GiB with 1,750,002
+events (`TMPDIR` and the data directory on that disk):
+
+| First open after upgrade | Wall clock | Peak RSS | Read from disk |
+|---|---|---|---|
+| Cold page cache | 6 min 6 s | 120 MiB | 9.4 GB |
+| Warm page cache | 19 s | 120 MiB | 0.36 GB |
+| Ordinary open, no migration (warm, for comparison) | 10 s | 15 MiB | 0.06 GB |
+
+Each open also runs the startup `quick_check`. The host had about 9 GiB of
+available memory, so it could not cache the whole file. Siftail runs with
+`temp_store = MEMORY`, so the index sort uses no temporary files. Its working
+set is the 105 MiB difference in peak RSS. The database file grew by 37 MB
+for the new index. The dropped index's pages go to the freelist and are reused.
+The WAL peaked at 42 MB and was checkpointed at the end of the open.
+
+Expect the first start after upgrading a large database to take minutes when
+its pages are not cached. The UI and ingestion listeners open only after the
+migration commits. Until then the healthcheck cannot connect, and Fluent Bit
+keeps its chunks and retries. With the image's healthcheck (10-second start period, three 30-second retries),
+Docker may mark the container unhealthy during a long upgrade. Docker does not
+restart an unhealthy container on its own. Do not restart it by hand either.
+The migration runs in one transaction, so an interrupted upgrade rolls back
+completely. Nothing is lost, but the next start begins the work again. Take
+and verify a backup before upgrading
+([`full-backups.md`](full-backups.md)).
+
+The migration is forward-only. A binary that supports only schema 6 refuses
+the upgraded database with its actual and supported versions and changes
+nothing. Downgrading requires restoring a backup taken before the upgrade.
+
 ## Matrix guarantees
 
-For each schema 1–6 fixture, tests:
+For each schema 1–7 fixture, tests:
 
 1. copy the immutable file and verify its pinned digest;
 2. open it through production pragmas, compatibility checks, migrations,

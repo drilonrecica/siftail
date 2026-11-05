@@ -8,9 +8,11 @@ import (
 	"fmt"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/drilonrecica/siftail/internal/database"
 	"github.com/drilonrecica/siftail/internal/logs"
+	"github.com/drilonrecica/siftail/internal/retention"
 )
 
 const (
@@ -122,6 +124,11 @@ type PersistResult struct {
 	// for different canonical content and were therefore not persisted or
 	// published (ADR 0007). It is zero unless the batch committed.
 	ConflictsDropped int
+	// LateEvents counts persisted records whose event time was already older
+	// than the age-retention cutoff when they were received (ADR 0008). They
+	// are stored and retained by receive time like any other event; the count
+	// only tells the operator about a clock or replay problem.
+	LateEvents int
 }
 
 // Persist commits exactly one HTTP batch transaction. It does not complete the
@@ -155,7 +162,7 @@ func (w *BatchWriter) PersistWithResult(ctx context.Context, batch *WriteBatch) 
 	if len(committed) > 0 && w.publisher != nil {
 		w.publisher.TryPublish(committed)
 	}
-	return PersistResult{ConflictsDropped: outcome.conflicts}, nil
+	return PersistResult{ConflictsDropped: outcome.conflicts, LateEvents: outcome.late}, nil
 }
 
 // transactionOutcome is what one batch transaction produced. The cache updates
@@ -163,6 +170,7 @@ func (w *BatchWriter) PersistWithResult(ctx context.Context, batch *WriteBatch) 
 type transactionOutcome struct {
 	committed        []logs.CommittedEvent
 	conflicts        int
+	late             int
 	sourceUpdates    []cacheUpdate[sourceKey]
 	containerUpdates []cacheUpdate[containerKey]
 }
@@ -332,6 +340,7 @@ func (w *BatchWriter) persistTransaction(
 
 	var committed []logs.CommittedEvent
 	conflicts := 0
+	var lateCandidates []eventTimes
 	for _, event := range batch.Events {
 		sourceID := sourceIDs[sourceCacheKey(event.Source)]
 		var containerID int64
@@ -378,15 +387,57 @@ func (w *BatchWriter) persistTransaction(
 		committed = append(committed, logs.CommittedEvent{
 			ID: id, SourceID: sourceID, ContainerInstanceID: containerID, Event: event,
 		})
+		// No age limit is shorter than the minimum, so an event inside it
+		// cannot be late and ordinary batches never read the policy.
+		if event.EventAtUS < retention.AgeCutoffUS(
+			time.UnixMicro(event.ReceivedAtUS), retention.MinimumAgeDays,
+		) {
+			lateCandidates = append(lateCandidates, eventTimes{event.EventAtUS, event.ReceivedAtUS})
+		}
+	}
+	late, err := countLateEvents(ctx, tx, lateCandidates)
+	if err != nil {
+		return transactionOutcome{}, err
 	}
 
 	if err := updateLastSeen(ctx, tx, batch.Events, sourceIDs, containers); err != nil {
 		return transactionOutcome{}, err
 	}
 	return transactionOutcome{
-		committed: committed, conflicts: conflicts,
+		committed: committed, conflicts: conflicts, late: late,
 		sourceUpdates: sourceUpdates, containerUpdates: containerUpdates,
 	}, nil
+}
+
+// eventTimes is the claimed and receive time of one persisted event.
+type eventTimes struct {
+	eventAtUS    int64
+	receivedAtUS int64
+}
+
+// countLateEvents counts the candidates whose event time precedes the age
+// cutoff at their receive time under the policy the transaction sees. A stored
+// policy that fails validation leaves late events uncounted rather than
+// failing ingestion: the count is informational, and retention reports the
+// invalid policy itself.
+func countLateEvents(ctx context.Context, tx *sql.Tx, candidates []eventTimes) (int, error) {
+	if len(candidates) == 0 {
+		return 0, nil
+	}
+	ageDays, err := retention.LoadAgeDaysTx(ctx, tx)
+	if errors.Is(err, retention.ErrInvalidStored) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	late := 0
+	for _, event := range candidates {
+		if event.eventAtUS < retention.AgeCutoffUS(time.UnixMicro(event.receivedAtUS), ageDays) {
+			late++
+		}
+	}
+	return late, nil
 }
 
 func maxBatchReceivedAt(events []logs.CanonicalEvent) int64 {

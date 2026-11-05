@@ -192,7 +192,12 @@ dropped while the rest of the request commits. The first stored content stays
 authoritative; Status shows a per-Server “conflicting duplicates dropped” count
 since process start, with a rate-limited diagnostic. An event time Siftail
 defaulted to receive time, because the record carried no timestamp, is not
-compared, so retrying such a batch is idempotent (ADR 0007).
+compared, so retrying such a batch is idempotent (ADR 0007). An event whose
+own time is already older than the retention age when it arrives, from a host
+with a wrong clock or a replayed backlog, is accepted with `204`, stored, and
+kept for the full age after receipt; Status counts these late events per Server
+and a rate-limited diagnostic names the clock or replay problem (ADR 0008,
+[`docs/operations/retention.md`](docs/operations/retention.md)).
 
 The date-stamped fixtures pin Coolify `v4.1.1` with its shipped Fluent Bit
 `2.0` image reference (observed as `v2.0.14`) and generic Fluent Bit `v5.0.9`;
@@ -546,8 +551,10 @@ the active SQLite footprint target accepts 1–1,024 whole GiB; defaults are 14
 days and 4 GiB. An invalid or failed save leaves both prior values unchanged,
 and settings survive process restart in the existing SQLite `settings` table.
 
-Whichever threshold is reached first is authoritative. Cleanup is oldest-first
-by the earlier of event time and receive time, then event ID, and size cleanup
+Whichever threshold is reached first is authoritative. Retention is measured
+from receipt (ADR 0008): an event is kept for at least the age limit after
+Siftail received it, whatever its own timestamp says, and cleanup removes the
+earliest-received events first, then by event ID. Size cleanup
 measures the main database plus WAL and shared-memory files. These controls
 apply only to application events: they do not remove Servers, tokens, aliases,
 sessions, settings, or security audit history. The same cycle then prunes
@@ -604,7 +611,8 @@ only after a successful cleanup result.
 The authenticated `/status` page shows version, uptime, architecture,
 schema and SQLite versions, DB/WAL/SHM sizes, the configured retention limit,
 index-backed oldest/newest times, queue gauges, current-process ingestion
-totals and 60-second rate, last cleanup, last safe database category, the last
+totals and 60-second rate, per-Server conflicting-duplicate and late-event
+counts, last cleanup, last safe database category, the last
 manual database check, and at most 100 sanitized diagnostics. Diagnostic
 summaries come from a closed internal list and may include only typed
 severity/component/category, an internal request ID, and recovery time. The

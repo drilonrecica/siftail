@@ -89,6 +89,21 @@ func TestBrowserStatusIsProtectedSanitizedAndShowsTransitions(t *testing.T) {
 		t.Fatalf("conflict Status = %d %q", conflicts.Code, conflictBody)
 	}
 
+	fixture.operational.RecordIngestLate(1, 5, time.Now())
+	fixture.operational.RecordIngestLate(98, 2, time.Now())
+	late := httptest.NewRecorder()
+	fixture.handler().ServeHTTP(late, request.Clone(context.Background()))
+	lateBody := late.Body.String()
+	if late.Code != http.StatusOK ||
+		!strings.Contains(lateBody, "<dt>Late events kept</dt><dd>7</dd>") ||
+		!strings.Contains(lateBody, "Late events by Server") ||
+		!strings.Contains(lateBody, "<dt>status-server</dt><dd>5 late · last ") ||
+		!strings.Contains(lateBody, "<dt>Removed Server #98</dt><dd>2 late · last ") ||
+		!strings.Contains(lateBody, "late_event") ||
+		!strings.Contains(lateBody, "Healthy") {
+		t.Fatalf("late-event Status = %d %q", late.Code, lateBody)
+	}
+
 	invalid := httptest.NewRequest(
 		http.MethodGet, "/status?secret=private-query-marker", nil,
 	)
@@ -134,7 +149,7 @@ func TestBrowserRunsAuthenticatedCorrelatedSafeDatabaseCheck(t *testing.T) {
 	body := page.Body.String()
 	if page.Code != http.StatusOK ||
 		!strings.Contains(body, "Database check completed.") ||
-		!strings.Contains(body, "Healthy · schema 6/6 · SQLite ") ||
+		!strings.Contains(body, "Healthy · schema 7/7 · SQLite ") ||
 		!strings.Contains(body, "· ok · checkpoint completed") ||
 		!strings.Contains(body, "database_check_succeeded") ||
 		!strings.Contains(body, "The bounded database check completed successfully.") ||

@@ -3,7 +3,6 @@ package retention
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -11,8 +10,6 @@ import (
 	"time"
 
 	"github.com/drilonrecica/siftail/internal/database"
-	"github.com/drilonrecica/siftail/internal/ingest"
-	"github.com/drilonrecica/siftail/internal/logs"
 )
 
 func TestCleanerPrunesUnreferencedContainersPastAgeCutoff(t *testing.T) {
@@ -128,71 +125,6 @@ func TestCleanerPrunesOldestUnreferencedContainersAboveServerTarget(t *testing.T
 
 // DAT-14: before pruning, a Server that had cycled through the cap rejected
 // every new container forever, even after retention purged all its events.
-func TestRecreatedContainerAcceptedAgainAfterPruningUnderTheCap(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "siftail.db")
-	db, coordinator, stop := settingsTestDatabase(t, path)
-	defer stop()
-	store := NewStore(db.Reader(), coordinator)
-	if _, err := store.Save(context.Background(), Input{AgeDays: 1, MaxDatabaseGiB: 1}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.Writer().Exec("INSERT INTO servers(id,name,created_at_us) VALUES(1,'cap-server',1)"); err != nil {
-		t.Fatal(err)
-	}
-	const limit = 4
-	writer := ingest.NewBatchWriterWithOptions(coordinator, nil, ingest.WriterOptions{ContainerLimit: limit})
-	day := time.Unix(1_000_000, 0).UTC()
-	event := func(deployment int, at time.Time) logs.CanonicalEvent {
-		return logs.CanonicalEvent{
-			EventAtUS: at.UnixMicro(), ReceivedAtUS: at.UnixMicro(),
-			Source: logs.SourceIdentity{
-				ServerID: 1, Project: "p", Environment: "e", Application: "a", Service: "web",
-				ProjectLabel: "p", EnvLabel: "e", AppLabel: "a", ServiceLabel: "web",
-			},
-			Container:   &logs.ContainerIdentity{ID: fmt.Sprintf("deployment-%d", deployment), Name: "app-web-1"},
-			Stream:      logs.StreamStdout,
-			Level:       logs.LevelInfo,
-			MessageRaw:  []byte("hello"),
-			MessageText: "hello",
-		}
-	}
-	persist := func(deployment int, at time.Time) error {
-		return writer.Persist(context.Background(), &ingest.WriteBatch{
-			Events: []logs.CanonicalEvent{event(deployment, at)}, AuthenticatedServerID: 1,
-		})
-	}
-	for deployment := 0; deployment < limit; deployment++ {
-		if err := persist(deployment, day); err != nil {
-			t.Fatalf("deployment %d: %v", deployment, err)
-		}
-	}
-	later := day.AddDate(0, 0, 3)
-	var rejected *ingest.Error
-	if err := persist(limit, later); !errors.As(err, &rejected) || rejected.Category != ingest.CategoryForbidden {
-		t.Fatalf("deployment beyond the cap = %v", err)
-	}
-
-	cleaner := NewCleaner(db.Reader(), coordinator, path, store, CleanerOptions{
-		VacuumPages: 1, ContainerLimit: limit,
-		Now:              func() time.Time { return later },
-		MeasureFootprint: func(string) (int64, error) { return 1, nil },
-	})
-	result, err := cleaner.RunOnce(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if result.AgeDeleted != limit || result.ContainersPruned != limit {
-		t.Fatalf("cleanup result = %#v", result)
-	}
-	if err := persist(limit, later); err != nil {
-		t.Fatalf("recreated container after pruning: %v", err)
-	}
-	var instances int
-	if err := db.Reader().QueryRow("SELECT count(*) FROM container_instances").Scan(&instances); err != nil || instances != 1 {
-		t.Fatalf("container instances after re-ingestion = %d, %v", instances, err)
-	}
-}
-
 func TestContainerPruneProbeUsesContainerEventIndex(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "siftail.db")
 	db, _, stop := settingsTestDatabase(t, path)

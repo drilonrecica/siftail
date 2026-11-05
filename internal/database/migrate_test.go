@@ -368,7 +368,8 @@ func TestCriticalIndexesAreUsed(t *testing.T) {
 		{"SELECT id FROM log_events WHERE source_id=1 ORDER BY event_at_us DESC, id DESC LIMIT 10", "log_events_source_time_idx"},
 		{"SELECT id FROM log_events WHERE source_id=1 AND level_normalized='error' ORDER BY event_at_us DESC, id DESC LIMIT 10", "log_events_source_level_time_idx"},
 		{"SELECT id FROM log_events WHERE request_id='r'", "log_events_request_id_idx"},
-		{"SELECT id FROM log_events ORDER BY retention_at_us, id LIMIT 10", "log_events_retention_idx"},
+		{"SELECT id FROM log_events WHERE received_at_us < 100 ORDER BY received_at_us, id LIMIT 10", "log_events_received_idx"},
+		{"SELECT id FROM log_events ORDER BY received_at_us, id LIMIT 10", "log_events_received_idx"},
 		{"SELECT id FROM container_instances WHERE source_id=1 AND container_id='c' ORDER BY last_seen_at_us DESC, id DESC LIMIT 1", "container_instances_source_container_id_idx"},
 		{"SELECT id FROM container_instances WHERE source_id=1 AND container_id IS NULL AND container_name='n' ORDER BY last_seen_at_us DESC, id DESC LIMIT 1", "container_instances_source_name_idx"},
 	}
@@ -632,6 +633,91 @@ func TestEventTimeDefaultedMigrationBackfillsOnlyStableIDRowsWithEqualTimes(t *t
 	// The backfill recreated the immutability trigger.
 	if _, err := db.Exec("UPDATE log_events SET event_at_defaulted=0 WHERE id=30"); err == nil {
 		t.Fatal("migrated event lost immutability")
+	}
+	if err := IntegrityCheck(context.Background(), db); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRetentionByReceiptMigrationReplacesRetentionIndex(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "schema-6.db")
+	db, err := sql.Open("sqlite3", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	db.SetMaxOpenConns(1)
+	if _, err := db.Exec("PRAGMA foreign_keys=ON"); err != nil {
+		t.Fatal(err)
+	}
+	migrations, err := loadMigrations(migrationFiles)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if migrations[6].name != "0007_retention_by_receipt.sql" || migrations[6].foreignKeysOff {
+		t.Fatalf("migration 7 = %q (foreign keys off %v)", migrations[6].name, migrations[6].foreignKeysOff)
+	}
+	if err := applyMigrations(context.Background(), db, migrations[:6]); err != nil {
+		t.Fatal(err)
+	}
+	// 40: late (event far before receipt); 41: future-skewed; 42: equal.
+	if _, err := db.Exec(`INSERT INTO servers(id,name,created_at_us) VALUES(1,'s',1);
+		INSERT INTO sources(id,server_id,project_key,environment_key,application_key,service_key,project_label,environment_label,application_label,service_label,first_seen_at_us,last_seen_at_us)
+		VALUES(1,1,'p','e','a','x','p','e','a','x',1,1);
+		INSERT INTO log_events(id,event_at_us,received_at_us,source_id,stream,level_normalized,message_raw,message_text)
+		VALUES(40,100,900,1,'stdout','info',x'61','a'),
+			(41,9000,500,1,'stdout','info',x'62','b'),
+			(42,700,700,1,'stdout','info',x'63','c')`); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := applyMigrations(context.Background(), db, migrations); err != nil {
+		t.Fatal(err)
+	}
+	assertSchemaVersion(t, db, MaxSchemaVersion)
+	var indexes []string
+	rows, err := db.Query(`SELECT name FROM sqlite_schema
+		WHERE type='index' AND tbl_name='log_events' AND name IN
+		('log_events_received_idx','log_events_retention_idx') ORDER BY name`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			t.Fatal(err)
+		}
+		indexes = append(indexes, name)
+	}
+	if err := rows.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(indexes, ",") != "log_events_received_idx" {
+		t.Fatalf("retention indexes after migration = %v", indexes)
+	}
+	// The deprecated generated column stays and keeps its old meaning.
+	var retentionAt int64
+	if err := db.QueryRow("SELECT retention_at_us FROM log_events WHERE id=40").Scan(&retentionAt); err != nil || retentionAt != 100 {
+		t.Fatalf("deprecated retention_at_us = %d, err=%v", retentionAt, err)
+	}
+	// Deletion order is receipt order, independent of claimed event time.
+	order, err := db.Query("SELECT id FROM log_events ORDER BY received_at_us, id")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for order.Next() {
+		var id int64
+		if err := order.Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		got = append(got, strconv.FormatInt(id, 10))
+	}
+	if err := order.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(got, ",") != "41,42,40" {
+		t.Fatalf("receipt order = %v", got)
 	}
 	if err := IntegrityCheck(context.Background(), db); err != nil {
 		t.Fatal(err)

@@ -150,6 +150,34 @@ func (s *Store) Save(ctx context.Context, input Input) (Settings, error) {
 	return settings, nil
 }
 
+// AgeCutoffUS is the receive-time cutoff of age retention evaluated at the
+// given time (ADR 0008): an event received before it is age-expired, and an
+// event received at that time whose event time precedes it is a late event.
+func AgeCutoffUS(at time.Time, ageDays int) int64 {
+	return at.UTC().AddDate(0, 0, -ageDays).UnixMicro()
+}
+
+// LoadAgeDaysTx reads the persisted age limit inside an open transaction, so
+// a caller sees the same policy as the transaction's other reads. It returns
+// the default when no policy was saved and ErrInvalidStored when the stored
+// policy is invalid.
+func LoadAgeDaysTx(ctx context.Context, tx *sql.Tx) (int, error) {
+	var valueJSON string
+	err := tx.QueryRowContext(ctx, `SELECT value_json FROM settings WHERE key = ?`,
+		applicationRetentionKey).Scan(&valueJSON)
+	if errors.Is(err, sql.ErrNoRows) {
+		return DefaultAgeDays, nil
+	}
+	if err != nil {
+		return 0, database.Classify("load application-log retention age", err)
+	}
+	settings, err := decodeSettings(valueJSON)
+	if err != nil {
+		return 0, err
+	}
+	return settings.AgeDays, nil
+}
+
 func decodeSettings(valueJSON string) (Settings, error) {
 	var stored struct {
 		AgeDays          int   `json:"age_days"`

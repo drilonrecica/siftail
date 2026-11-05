@@ -105,3 +105,41 @@ func TestStoreResolvesBoundedConflictServerNames(t *testing.T) {
 		t.Fatalf("second conflict row = %#v", got)
 	}
 }
+
+func TestStoreResolvesLateEventServerNamesAlongsideConflicts(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "siftail.db")
+	db, err := database.Open(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.Writer().Exec(`INSERT INTO servers(id,name,created_at_us)
+		VALUES(1,'alpha',1),(2,'beta',1)`); err != nil {
+		t.Fatal(err)
+	}
+	started := time.Unix(1, 0).UTC()
+	state := NewState(started)
+	state.RecordIngestConflicts(1, 1, started)
+	state.RecordIngestLate(2, 4, started.Add(time.Second))
+	state.RecordIngestLate(77, 1, started.Add(2*time.Second))
+	for server := int64(100); server < 100+LateDisplayLimit; server++ {
+		state.RecordIngestLate(server, 1, started)
+	}
+	store := NewStore(db.Reader(), path, nil, retention.NewStore(db.Reader(), nil), state)
+	snapshot, err := store.Read(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snapshot.Late) != LateDisplayLimit || len(snapshot.State.Late) != LateDisplayLimit+2 {
+		t.Fatalf("late rows = %d shown of %d", len(snapshot.Late), len(snapshot.State.Late))
+	}
+	if got := snapshot.Late[0]; got.ServerID != 77 || got.ServerName != "" {
+		t.Fatalf("first late row = %#v", got)
+	}
+	if got := snapshot.Late[1]; got.ServerID != 2 || got.ServerName != "beta" || got.Late != 4 {
+		t.Fatalf("second late row = %#v", got)
+	}
+	if len(snapshot.Conflicts) != 1 || snapshot.Conflicts[0].ServerName != "alpha" {
+		t.Fatalf("conflict rows = %#v", snapshot.Conflicts)
+	}
+}

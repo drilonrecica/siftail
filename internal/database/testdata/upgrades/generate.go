@@ -23,7 +23,7 @@ import (
 )
 
 const (
-	currentSchema = 6
+	currentSchema = 7
 	fixtureTimeUS = int64(1785196800000000)
 )
 
@@ -34,6 +34,7 @@ var migrationNames = []string{
 	"0004_security_audit.sql",
 	"0005_container_identity.sql",
 	"0006_event_time_defaulted.sql",
+	"0007_retention_by_receipt.sql",
 }
 
 // foreignKeysOffDirective mirrors internal/database/migrate.go: such a
@@ -325,6 +326,20 @@ func seedFixture(db *sql.DB, version int) error {
 			fixtureTimeUS+5, fixtureTimeUS+5,
 			[]byte("synthetic defaulted-time fixture event"),
 			"synthetic defaulted-time fixture event",
+		); err != nil {
+			return err
+		}
+	}
+	if version >= 7 {
+		// A late event (ADR 0008): its claimed time is 30 days before its
+		// receipt, so it is retained by receive time, not event time.
+		if _, err := tx.Exec(`INSERT INTO log_events(
+			id,event_at_us,received_at_us,source_id,container_instance_id,
+			stream,level_normalized,message_raw,message_text
+		) VALUES(20,?,?,13,18,'stdout','info',?,?)`,
+			fixtureTimeUS+6-30*24*60*60*1_000_000, fixtureTimeUS+6,
+			[]byte("synthetic late fixture event"),
+			"synthetic late fixture event",
 		); err != nil {
 			return err
 		}

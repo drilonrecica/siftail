@@ -104,7 +104,7 @@ func (c *Cleaner) RunOnce(ctx context.Context) (CleanupResult, error) {
 		return CleanupResult{}, err
 	}
 	result := CleanupResult{}
-	cutoff := c.now().UTC().AddDate(0, 0, -settings.AgeDays).UnixMicro()
+	cutoff := AgeCutoffUS(c.now(), settings.AgeDays)
 	if err := c.deleteEvents(ctx, settings, cutoff, &result); err != nil {
 		return result, err
 	}
@@ -313,10 +313,10 @@ func (c *Cleaner) deleteOldest(ctx context.Context, cutoff *int64) (int64, error
 			SELECT id FROM log_events`
 		var args []any
 		if cutoff != nil {
-			query += ` WHERE retention_at_us < ?`
+			query += ` WHERE received_at_us < ?`
 			args = append(args, *cutoff)
 		}
-		query += ` ORDER BY retention_at_us, id LIMIT ?)`
+		query += ` ORDER BY received_at_us, id LIMIT ?)`
 		args = append(args, c.deleteChunk)
 		result, err := tx.ExecContext(ctx, query, args...)
 		if err != nil {

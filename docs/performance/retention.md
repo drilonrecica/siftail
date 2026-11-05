@@ -11,8 +11,12 @@ loads the atomic retention policy and deletes at most 10,000 events per
 coordinator-owned transaction in:
 
 ```text
-retention_at_us ASC, id ASC
+received_at_us ASC, id ASC
 ```
+
+That order has applied since ADR 0008 (schema 7). The measurements below were
+taken under the earlier `retention_at_us` (the earlier of event and receive
+time) order; both walk a two-column integer index of the same shape.
 
 Age deletion uses a fixed cutoff for the run. Size deletion begins at 95% of
 the configured active footprint and remeasures after every delete/reclaim

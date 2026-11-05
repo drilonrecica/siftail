@@ -63,7 +63,7 @@ healthcheck`) probes `/health/ready`, so Docker shows the container as
 3. If retained application logs are the pressure source, lower the global
    retention age or size limit before the filesystem is completely exhausted.
    The hourly bounded retention worker deletes only application events in
-   canonical oldest-first chunks.
+   earliest-received-first chunks (ADR 0008).
 4. Watch authenticated Status or `/health/ready`. While degraded, Siftail
    performs one bounded recovery probe every five seconds.
 5. Resume or inspect Fluent Bit delivery after readiness becomes healthy.

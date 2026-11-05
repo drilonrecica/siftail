@@ -27,11 +27,19 @@ func TestCleanerDeletesCanonicalAgeOrderInBoundedCommittedChunks(t *testing.T) {
 	insertRetentionSource(t, db.Writer())
 	now := time.Unix(200_000, 0).UTC()
 	cutoff := now.AddDate(0, 0, -1).UnixMicro()
+	// Age eligibility and order follow receive time only (ADR 0008).
+	// 1: late (old event time, received now) is retained.
+	// 2: future-skewed event time, received before the cutoff, expires.
+	// 3: equal times before the cutoff expire.
+	// 4: equal times exactly at the cutoff are retained.
+	// 5: received after the cutoff is retained.
+	// 6: recent event time but received earliest expires first.
 	insertRetentionEvent(t, db.Writer(), 1, cutoff-20, now.UnixMicro())
 	insertRetentionEvent(t, db.Writer(), 2, now.Add(time.Hour).UnixMicro(), cutoff-10)
 	insertRetentionEvent(t, db.Writer(), 3, cutoff-10, cutoff-10)
 	insertRetentionEvent(t, db.Writer(), 4, cutoff, cutoff)
 	insertRetentionEvent(t, db.Writer(), 5, cutoff+1, cutoff+1)
+	insertRetentionEvent(t, db.Writer(), 6, cutoff+5, cutoff-30)
 
 	var notifications atomic.Int64
 	cleaner := NewCleaner(db.Reader(), coordinator, path, store, CleanerOptions{
@@ -43,11 +51,11 @@ func TestCleanerDeletesCanonicalAgeOrderInBoundedCommittedChunks(t *testing.T) {
 				Scan(&remaining); err != nil {
 				t.Error(err)
 			}
-			if remaining >= 5 {
+			if remaining >= 6 {
 				t.Error("retention notification ran before commit")
 			}
 			if notification == 1 {
-				assertRetentionEventIDs(t, db.Reader(), []int64{3, 4, 5})
+				assertRetentionEventIDs(t, db.Reader(), []int64{1, 3, 4, 5})
 			}
 		},
 		MeasureFootprint: func(string) (int64, error) { return 1, nil },
@@ -60,7 +68,7 @@ func TestCleanerDeletesCanonicalAgeOrderInBoundedCommittedChunks(t *testing.T) {
 		notifications.Load() != 2 {
 		t.Fatalf("cleanup result = %#v, notifications=%d", result, notifications.Load())
 	}
-	assertRetentionEventIDs(t, db.Reader(), []int64{4, 5})
+	assertRetentionEventIDs(t, db.Reader(), []int64{1, 4, 5})
 	var sources, settings int
 	if err := db.Reader().QueryRow("SELECT count(*) FROM sources").Scan(&sources); err != nil {
 		t.Fatal(err)
@@ -84,8 +92,10 @@ func TestCleanerSizeTriggerDeletesOldestTowardTarget(t *testing.T) {
 		t.Fatal(err)
 	}
 	insertRetentionSource(t, db.Writer())
+	// Size retention deletes by receipt, not by the earlier of event and
+	// receive time: the last-received events claim the oldest times.
 	for id := int64(1); id <= 5; id++ {
-		insertRetentionEvent(t, db.Writer(), id, id, id)
+		insertRetentionEvent(t, db.Writer(), id, id, 100-id*10)
 	}
 	var measurements atomic.Int64
 	cleaner := NewCleaner(db.Reader(), coordinator, path, store, CleanerOptions{
@@ -106,7 +116,7 @@ func TestCleanerSizeTriggerDeletesOldestTowardTarget(t *testing.T) {
 		result.SizeDeleted != 2 || result.EventsExhausted {
 		t.Fatalf("size cleanup result = %#v", result)
 	}
-	assertRetentionEventIDs(t, db.Reader(), []int64{3, 4, 5})
+	assertRetentionEventIDs(t, db.Reader(), []int64{1, 2, 3})
 }
 
 func TestCleanerRollbackCancellationAndExhaustedTarget(t *testing.T) {

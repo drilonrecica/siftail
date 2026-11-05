@@ -23,6 +23,7 @@ var upgradeFixtureDigests = map[string]string{
 	"schema-4.db": "5c9926b8c354e9622147acb0f10454e81db764068677776bd31fcddac92e4fe2",
 	"schema-5.db": "3e051e348460e4ceb851028a93a998032d295a3865c770ac35c478ab7a840870",
 	"schema-6.db": "d8c662571bb2fc726d93dae1493ae8a189e219d5e46b627fcb60b785762f43dc",
+	"schema-7.db": "07354718efe238051c3025b24c44945cfa7a470a9b8d4b59927bcf69b0de7c75",
 }
 
 var releasedMigrationDigests = map[string]string{
@@ -32,6 +33,7 @@ var releasedMigrationDigests = map[string]string{
 	"0004_security_audit.sql":       "713a2f0114794fadd13e14809a8d8c7682d180bc4c804dd1b517ecc83dbef6b2",
 	"0005_container_identity.sql":   "58e29550ad535fab6890a6aa437c717d5d8b9e7eba0a4efd07026c83b497be5d",
 	"0006_event_time_defaulted.sql": "e73e5d1a397ef713f5841853f5a4e78626487f0264fe67a511fd31d57e717e76",
+	"0007_retention_by_receipt.sql": "b16a87f173d46a9d5a4f8a3dc13947a6a7aec4cdf18c95db7e800c8a7613c254",
 }
 
 func TestReleasedMigrationsAndHistoricalFixturesAreImmutable(t *testing.T) {

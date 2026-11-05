@@ -149,6 +149,10 @@ func assertRestoredUpgradeFixture(
 		// Schema 6 adds a stable-ID event with a defaulted time.
 		wantEvents = 2
 	}
+	if origin >= 7 {
+		// Schema 7 adds a late event (event time before receipt).
+		wantEvents = 3
+	}
 	if backupType == TypeConfiguration {
 		wantEvents, wantContainers = 0, 0
 	}
@@ -230,6 +234,10 @@ func exerciseRestoredUpgradeFixture(
 	if origin >= 6 {
 		// Schema 6 adds a stable-ID event with a defaulted time.
 		want = 3
+	}
+	if origin >= 7 {
+		// Schema 7 adds a late event (event time before receipt).
+		want = 4
 	}
 	if backupType == TypeConfiguration {
 		want = 1

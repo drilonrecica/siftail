@@ -57,6 +57,7 @@
         <div><dt>Accepted events</dt><dd>{{.AcceptedEvents}}</dd></div>
         <div><dt>Rejected batches</dt><dd>{{.RejectedBatches}}</dd></div>
         <div><dt>Conflicting duplicates dropped</dt><dd>{{.ConflictsDropped}}</dd></div>
+        <div><dt>Late events kept</dt><dd>{{.LateEvents}}</dd></div>
         <div><dt>Last successful ingest</dt><dd>{{.LastIngest}}</dd></div>
         <div><dt>Last database error</dt><dd>{{.LastDatabaseError}}</dd></div>
       </dl>
@@ -66,6 +67,12 @@
         {{range .ConflictServers}}<div><dt>{{.Server}}</dt><dd>{{.Dropped}} · last {{.LastAt}}</dd></div>{{end}}
       </dl>
       {{if .ConflictServersMore}}<p>{{.ConflictServersMore}}</p>{{end}}{{end}}
+      {{if .LateServers}}<h3 id="status-late">Late events by Server</h3>
+      <p>Events whose own time was already older than the retention age when Siftail received them, usually a wrong clock or a replayed backlog. They were stored and are kept for the retention age after receipt; History shows them at their own time. Counts reset when Siftail restarts.</p>
+      <dl class="status-facts" aria-labelledby="status-late">
+        {{range .LateServers}}<div><dt>{{.Server}}</dt><dd>{{.Late}} · last {{.LastAt}}</dd></div>{{end}}
+      </dl>
+      {{if .LateServersMore}}<p>{{.LateServersMore}}</p>{{end}}{{end}}
     </section>
 
     <section aria-labelledby="status-diagnostics">

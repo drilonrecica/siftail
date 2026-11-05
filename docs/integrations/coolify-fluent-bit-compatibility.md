@@ -147,6 +147,13 @@ that reuses a stable source event ID for different content is instead dropped,
 the rest of the request commits with `204`, and the Status page counts the
 dropped records per Server (ADR 0007).
 
+Siftail does not reject old events either. A record whose own timestamp is
+already older than the retention age when it arrives, typically a chunk
+flushed from the Fluent Bit buffer after a long outage or a host whose clock is
+behind, is committed with `204` and retained for the full age after receipt.
+Status counts these late events per Server (ADR 0008); see
+[`docs/operations/retention.md`](../operations/retention.md).
+
 ## Verification record
 
 The repository tests exercise:

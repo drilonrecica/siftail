@@ -145,6 +145,7 @@ func statusView(snapshot statusstate.OperationalSnapshot, now time.Time) webui.S
 		QueuedBytes:       formatStatusBytes(snapshot.Queue.QueuedBytes),
 		RejectedBatches:   strconv.FormatUint(state.RejectedBatches, 10),
 		ConflictsDropped:  strconv.FormatUint(state.ConflictsDropped, 10),
+		LateEvents:        strconv.FormatUint(state.LateEvents, 10),
 		AcceptedEvents:    strconv.FormatUint(state.AcceptedEvents, 10),
 		LastIngest:        "Never",
 		LastDatabaseError: "None",
@@ -190,6 +191,22 @@ func statusView(snapshot statusstate.OperationalSnapshot, now time.Time) webui.S
 	if hidden := len(state.Conflicts) - len(snapshot.Conflicts); hidden > 0 {
 		view.ConflictServersMore = fmt.Sprintf(
 			"%d more Servers with conflicting duplicates are counted in the total.", hidden,
+		)
+	}
+	for _, counter := range snapshot.Late {
+		server := counter.ServerName
+		if server == "" {
+			server = "Removed Server #" + strconv.FormatInt(counter.ServerID, 10)
+		}
+		view.LateServers = append(view.LateServers, webui.StatusLateView{
+			Server: server,
+			Late:   strconv.FormatUint(counter.Late, 10) + " late",
+			LastAt: formatStatusTime(counter.LastAt),
+		})
+	}
+	if hidden := len(state.Late) - len(snapshot.Late); hidden > 0 {
+		view.LateServersMore = fmt.Sprintf(
+			"%d more Servers with late events are counted in the total.", hidden,
 		)
 	}
 	for index, diagnostic := range state.Diagnostics {
