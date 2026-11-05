@@ -57,6 +57,9 @@ func TestPinnedFluentBitConfigurations(t *testing.T) {
 				"False",
 				"storage.total_limit_size 256M",
 			)
+			if strings.Contains(config, "0.0.0.0") || !strings.Contains(config, "127.0.0.1") {
+				t.Fatal("fixture Forward input must listen on loopback only")
+			}
 			if strings.Contains(config, "token (shown once)") ||
 				strings.Contains(config, "sft_") {
 				t.Fatal("fixture contains token-like material")

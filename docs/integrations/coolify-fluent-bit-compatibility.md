@@ -113,6 +113,29 @@ Do not consider a configuration ready if:
 The tests fail if the exclusion disappears, loses its anchors, moves after the
 rename, or begins matching prefix/suffix application names.
 
+## Forward input binding
+
+Both generated templates and fixtures declare `Listen 127.0.0.1` on the
+Forward input. Forward is unauthenticated by default: a listener reachable
+from the network lets any client inject records that Fluent Bit forwards to
+Siftail carrying the server's valid ingestion token. Coolify's own log-drain
+wiring targets `127.0.0.1:24224`, so loopback is correct for Coolify.
+
+A non-loopback listener is required only when Docker log drivers or other
+senders live on a different host or network namespace from Fluent Bit (for
+example a separate Fluent Bit container reached over a bridge network).
+In that case:
+
+- bind to the specific interface address, never `0.0.0.0`, where possible;
+- set `Shared_Key` (and `Self_Hostname`) on the Forward input and the same
+  key on the sender, and add `tls On` with certificates when the path crosses
+  an untrusted network;
+- restrict port 24224 with a firewall or container-network policy to the
+  known senders only.
+
+`Shared_Key` authenticates senders; it is not a substitute for the network
+policy.
+
 ## Delivery and capacity semantics
 
 The fixtures use:

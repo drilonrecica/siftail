@@ -42,11 +42,18 @@ func TestGenerateGuideHTTPSHTTPAndSafeMaterialization(t *testing.T) {
 					"Header                   Content-Type application/x-ndjson",
 					"Retry_Limit              False",
 					"storage.total_limit_size 256M",
+					"Listen",
+					"127.0.0.1",
 					GuideTokenPlaceholder,
 				} {
 					if !strings.Contains(artifact, want) {
 						t.Errorf("artifact missing %q", want)
 					}
+				}
+			}
+			for _, artifact := range []string{guide.CoolifyTemplate, guide.GenericTemplate} {
+				if strings.Contains(artifact, "0.0.0.0") {
+					t.Error("template exposes an unauthenticated Forward input")
 				}
 			}
 			excludeAt := strings.Index(guide.CoolifyTemplate,

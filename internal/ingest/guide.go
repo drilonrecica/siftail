@@ -116,8 +116,11 @@ func GenerateGuide(endpoint, eventID string, eventAt time.Time) (Guide, error) {
     storage.backlog.mem_limit 16M
 
 [INPUT]
+    # Loopback only: an unauthenticated Forward input reachable from the
+    # network lets anyone inject records that this pipeline forwards to
+    # Siftail with your valid token. See the Siftail guide before changing it.
     Name              forward
-    Listen            0.0.0.0
+    Listen            127.0.0.1
     Port              24224
     Buffer_Chunk_Size 1M
     Buffer_Max_Size   6M
@@ -149,8 +152,12 @@ func GenerateGuide(endpoint, eventID string, eventAt time.Time) (Guide, error) {
     storage.backlog.mem_limit 16M
 
 [INPUT]
+    # Loopback only: an unauthenticated Forward input reachable from the
+    # network lets anyone inject records that this pipeline forwards to
+    # Siftail with your valid token. Widen it only with Shared_Key and a
+    # network policy (see the Siftail guide).
     Name         forward
-    Listen       0.0.0.0
+    Listen       127.0.0.1
     Port         24224
     storage.type filesystem
 
