@@ -2,12 +2,13 @@
 
 **Reviewed:** 2026-11-05
 **Scope:** SFT-047 schema 1–4 fixture and recovery matrix; SFT-087 schema 5;
-SFT-090 schema 6; SFT-091 schema 7; SFT-095 schema 8; SFT-099 schema 9
+SFT-090 schema 6; SFT-091 schema 7; SFT-095 schema 8; SFT-099 schema 9;
+SFT-105 schema 10
 
 ## Supported window
 
 The current pre-public binary supports automatic forward migration from every
-checked-in historical schema fixture, versions 1 through 9. It supports a
+checked-in historical schema fixture, versions 1 through 10. It supports a
 fresh database through the same production open path. Before `1.0`, only the
 latest stable Siftail release receives ordinary support, but that release must
 continue to open every schema fixture retained in this repository.
@@ -34,7 +35,9 @@ adds a late event whose event time is 30 days before its receipt. Schema 8
 changes only an index and carries the same rows as schema 7; event 15, present
 in every fixture, has the request ID the rebuilt index must find. Schema 9
 adds only the security-audit row counter and carries the same rows as schema
-8, with a counter of 1.
+8, with a counter of 1. Schema 10 adds only the unauthenticated-row counter and
+its partial index and carries the same rows as schema 9; its one audit row is
+a system row, so the new counter is 0.
 
 Every name, address, token, credential, timestamp, and payload is an obvious
 synthetic test value. The generator contains no production data and makes no
@@ -202,9 +205,35 @@ The migration is forward-only. A binary that supports only schema 8 refuses
 the upgraded database with its actual and supported versions and changes
 nothing. Downgrading requires restoring a backup taken before the upgrade.
 
+## Schema 10: reserved unauthenticated audit capacity
+
+Migration `0010_security_audit_unauthenticated.sql` (SFT-105, ADR 0010) adds
+the one-row `STRICT` table `security_audit_unauthenticated_count`, seeds it
+with the number of existing `unauthenticated` audit rows, and adds `AFTER
+INSERT` and `AFTER DELETE` triggers on `security_audit_events` that fire only
+for that actor. It also adds the partial index
+`security_audit_events_unauthenticated_idx` on `(occurred_at_us, id) WHERE
+actor_type = 'unauthenticated'`, which lets the store evict the oldest
+unauthenticated row without walking privileged history. The store keeps
+unauthenticated rows at or below 10,000 so that no unauthenticated write can
+evict an administrator, local-operator, or system row.
+
+Per-attempt `sign_in` rejection rows from earlier versions stay as they are and
+count toward the new sub-cap. If an upgraded database holds more than 10,000
+of them, each later unauthenticated insert and each hourly cleanup pass
+removes at most 1,000 of the oldest, so the excess converges without a long
+transaction; privileged rows are never touched by that trimming.
+
+The migration reads the audit table once (at most 100,000 rows) and writes one
+counter row plus one index entry per unauthenticated row; it does not touch
+application events. Backup verification and restore validation require the new
+counter table for schema 10 artifacts. The migration is forward-only. A binary
+that supports only schema 9 refuses the upgraded database with its actual and
+supported versions and changes nothing.
+
 ## Matrix guarantees
 
-For each schema 1–9 fixture, tests:
+For each schema 1–10 fixture, tests:
 
 1. copy the immutable file and verify its pinned digest;
 2. open it through production pragmas, compatibility checks, migrations,

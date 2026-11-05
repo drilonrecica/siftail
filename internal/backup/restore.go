@@ -721,6 +721,7 @@ func validateRestoredDatabase(ctx context.Context, db *database.DB) error {
 		"administrators", "servers", "ingestion_tokens", "settings",
 		"sources", "container_instances", "log_events", "sessions",
 		"security_audit_events", "security_audit_event_count",
+		"security_audit_unauthenticated_count",
 	} {
 		var count int
 		if err := db.Reader().QueryRowContext(

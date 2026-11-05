@@ -249,7 +249,7 @@ func TestCleanupUsesIndependentAgeAndCountBounds(t *testing.T) {
 		)
 		SELECT value,
 			CASE WHEN value <= 2 THEN ? ELSE ? + value END,
-			'authentication','sign_in','rejected','unauthenticated','{}'
+			'session','session.cleanup','succeeded','system','{}'
 		FROM n`, old, recent); err != nil {
 		t.Fatal(err)
 	}

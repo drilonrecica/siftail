@@ -817,3 +817,114 @@ func TestRequestTimeIndexMigrationOrdersRequestLookups(t *testing.T) {
 		t.Fatalf("request order = %v", got)
 	}
 }
+
+func TestUnauthenticatedAuditCounterMigrationSeedsAndTracksRows(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "schema-9.db")
+	db, err := sql.Open("sqlite3", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	db.SetMaxOpenConns(1)
+	if _, err := db.Exec("PRAGMA foreign_keys=ON"); err != nil {
+		t.Fatal(err)
+	}
+	migrations, err := loadMigrations(migrationFiles)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if migrations[9].name != "0010_security_audit_unauthenticated.sql" ||
+		migrations[9].foreignKeysOff {
+		t.Fatalf("migration 10 = %q (foreign keys off %v)",
+			migrations[9].name, migrations[9].foreignKeysOff)
+	}
+	if err := applyMigrations(context.Background(), db, migrations[:9]); err != nil {
+		t.Fatal(err)
+	}
+	// Schema-9 history: three per-attempt sign-in rejections and two
+	// privileged rows.
+	if _, err := db.Exec(`INSERT INTO security_audit_events(
+			id,occurred_at_us,category,action,outcome,actor_type,
+			administrator_id,safe_metadata_json
+		) VALUES
+			(1,10,'authentication','sign_in','rejected','unauthenticated',NULL,'{}'),
+			(2,20,'authentication','sign_in','succeeded','administrator',1,'{}'),
+			(3,30,'authentication','sign_in','rejected','unauthenticated',NULL,'{}'),
+			(4,40,'session','session.revoke_all','succeeded','local_operator',NULL,'{}'),
+			(5,50,'authentication','sign_in','rejected','unauthenticated',NULL,'{}')`); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := applyMigrations(context.Background(), db, migrations); err != nil {
+		t.Fatal(err)
+	}
+	assertSchemaVersion(t, db, MaxSchemaVersion)
+	assertUnauthenticatedAuditCount := func(want int) {
+		t.Helper()
+		var total, unauthenticated, stored, storedTotal int
+		if err := db.QueryRow(`SELECT
+			(SELECT count(*) FROM security_audit_events),
+			(SELECT count(*) FROM security_audit_events
+				WHERE actor_type = 'unauthenticated'),
+			(SELECT row_count FROM security_audit_unauthenticated_count WHERE id = 1),
+			(SELECT row_count FROM security_audit_event_count WHERE id = 1)`).
+			Scan(&total, &unauthenticated, &stored, &storedTotal); err != nil {
+			t.Fatal(err)
+		}
+		if unauthenticated != want || stored != want || storedTotal != total {
+			t.Fatalf("unauthenticated rows=%d counter=%d want %d; total rows=%d counter=%d",
+				unauthenticated, stored, want, total, storedTotal)
+		}
+	}
+	assertUnauthenticatedAuditCount(3)
+
+	if _, err := db.Exec(`INSERT INTO security_audit_events(
+			occurred_at_us,category,action,outcome,actor_type,safe_metadata_json
+		) VALUES
+			(60,'authentication','sign_in.rejected_summary','rejected','unauthenticated','{}'),
+			(70,'session','session.cleanup','succeeded','system','{}')`); err != nil {
+		t.Fatal(err)
+	}
+	assertUnauthenticatedAuditCount(4)
+	if _, err := db.Exec(`DELETE FROM security_audit_events WHERE id IN (1, 2)`); err != nil {
+		t.Fatal(err)
+	}
+	assertUnauthenticatedAuditCount(3)
+
+	const oldest = `SELECT id FROM security_audit_events
+		WHERE actor_type = 'unauthenticated'
+		ORDER BY occurred_at_us ASC, id ASC LIMIT ?`
+	var plan []string
+	rows, err := db.Query("EXPLAIN QUERY PLAN "+oldest, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for rows.Next() {
+		var id, parent, unused int
+		var detail string
+		if err := rows.Scan(&id, &parent, &unused, &detail); err != nil {
+			t.Fatal(err)
+		}
+		plan = append(plan, detail)
+	}
+	if err := rows.Close(); err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(plan, "\n")
+	if !strings.Contains(joined, "security_audit_events_unauthenticated_idx") ||
+		strings.Contains(joined, "TEMP B-TREE") {
+		t.Fatalf("oldest unauthenticated lookup plan:\n%s", joined)
+	}
+	var first int64
+	if err := db.QueryRow(oldest, 1).Scan(&first); err != nil || first != 3 {
+		t.Fatalf("oldest unauthenticated row = %d, err=%v", first, err)
+	}
+
+	if _, err := db.Exec("DELETE FROM security_audit_events"); err != nil {
+		t.Fatal(err)
+	}
+	assertUnauthenticatedAuditCount(0)
+	if err := IntegrityCheck(context.Background(), db); err != nil {
+		t.Fatal(err)
+	}
+}

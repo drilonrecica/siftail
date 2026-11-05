@@ -583,6 +583,7 @@ A likely normalized schema includes:
 - `log_events`;
 - `security_audit_events`;
 - `security_audit_event_count`;
+- `security_audit_unauthenticated_count`;
 - `diagnostic_events` if persisted.
 
 `sources` stores the complete stable logical hierarchy as bounded, typed columns. This
@@ -616,6 +617,15 @@ the implemented audit UI benchmarks justify its cost.
 Migration `0009` adds the one-row `security_audit_event_count` table, kept
 exact by `AFTER INSERT` and `AFTER DELETE` triggers on `security_audit_events`.
 The cap check in every audit insert reads it instead of counting the table.
+
+Migration `0010` (ADR 0010) adds the one-row
+`security_audit_unauthenticated_count` table, seeded from existing rows and
+kept exact by triggers that fire only for actor `unauthenticated`, plus the
+partial index `security_audit_events_unauthenticated_idx` on
+`(occurred_at_us, id) WHERE actor_type = 'unauthenticated'`. The index serves
+only the reserved-capacity eviction of the oldest unauthenticated row; it
+holds at most the 10,000 sub-capped rows (plus legacy per-attempt rows until
+they are trimmed), so it costs one small entry per aggregated window.
 
 ### 10.7 Log-event schema sketch
 
@@ -1843,9 +1853,14 @@ shutdown; a crash loses at most that window.
 The audit store enforces the count cap in the same transaction as every insert,
 keeping the newest 100,000 events by `(occurred_at_us, id)`. The row count
 comes from the trigger-maintained `security_audit_event_count` row, so the
-check costs one primary-key read rather than a scan of the capped table. Explicit cleanup
-deletes at most 1,000 rows per coordinator transaction, applying the age limit
-first and then repairing any count overflow. The application root owns one
+check costs one primary-key read rather than a scan of the capped table. An
+unauthenticated insert reads `security_audit_unauthenticated_count` too and
+takes both its sub-cap and any total excess only from unauthenticated rows.
+Per-attempt rows written before migration `0010` may exceed the sub-cap; each
+unauthenticated insert and each cleanup pass trims at most 1,000 of them.
+Explicit cleanup deletes at most 1,000 rows per coordinator transaction,
+applying the age limit first, then the unauthenticated sub-cap, and then
+repairing any count overflow. The application root owns one
 recoverable cleanup worker that runs once at startup and then hourly. A
 cleanup error is logged by safe component/category only and retried on the
 next interval.

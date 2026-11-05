@@ -1,7 +1,7 @@
 # SQLite upgrade fixtures
 
 These databases are immutable, synthetic historical snapshots for Siftail
-schema versions 1 through 9. They contain no production credentials or
+schema versions 1 through 10. They contain no production credentials or
 application payloads. Names, tokens, password/session material, addresses, and
 events are deliberately recognizable test values.
 
@@ -18,7 +18,10 @@ carries a late event whose event time is 30 days before its receipt (ADR
 7; every fixture's event 15 has a request ID that the rebuilt request-ID index
 must cover. Schema 9 adds only the trigger-maintained security audit row
 counter, seeded from the existing rows, so it carries the same state as
-schema 8 with a counter of 1. Fixed timestamps and deterministic synthetic hashes make provenance
+schema 8 with a counter of 1. Schema 10 adds only the trigger-maintained
+counter of unauthenticated audit rows and its partial index (ADR 0010); the
+fixture's one audit row is a system row, so it carries the same state as
+schema 9 with an unauthenticated counter of 0. Fixed timestamps and deterministic synthetic hashes make provenance
 reviewable.
 
 The compatibility tests pin each database's SHA-256 digest. Do not regenerate
@@ -38,13 +41,14 @@ schema-6.db  d8c662571bb2fc726d93dae1493ae8a189e219d5e46b627fcb60b785762f43dc
 schema-7.db  07354718efe238051c3025b24c44945cfa7a470a9b8d4b59927bcf69b0de7c75
 schema-8.db  2675b8dc80d5add3ab8a3321db62c7c857673e931d59a646848b86006b3fe67a
 schema-9.db  100cb9adde8912731e28f1ace2702c8b44bd8cbd86cc290cfd99d2460587230f
+schema-10.db 1081960d2d8ed429c470ecbb8e1fb1a5507f82013c9aa2fa0f8d59e9d100d220
 ```
 
 After adding a migration, update the generator's ordered name list and current
 version, then generate only the new fixture from the repository root:
 
 ```bash
-go run ./internal/database/testdata/upgrades/generate.go -version 10
+go run ./internal/database/testdata/upgrades/generate.go -version 11
 ```
 
 An intentional correction to one existing fixture is explicit:

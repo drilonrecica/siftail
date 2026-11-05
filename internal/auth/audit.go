@@ -202,6 +202,9 @@ func buildAuditView(query audit.Query, page audit.Page) webui.AuditView {
 
 func auditActorLabel(event audit.Event) string {
 	label := strings.ReplaceAll(string(event.ActorType), "_", " ")
+	if event.Action == signInAuditAction {
+		return label + " (5-minute aggregate)"
+	}
 	if event.AdministratorID != nil {
 		label += " #" + strconv.FormatInt(*event.AdministratorID, 10)
 	}
@@ -209,6 +212,9 @@ func auditActorLabel(event audit.Event) string {
 }
 
 func auditSummary(event audit.Event) string {
+	if event.Action == signInAuditAction {
+		return signInAggregateSummary(event)
+	}
 	parts := make([]string, 0, len(event.Metadata)+2)
 	if event.ServerID != nil {
 		parts = append(parts, "Server #"+strconv.FormatInt(*event.ServerID, 10))
@@ -265,4 +271,49 @@ func selectAuditOption(options []webui.SelectOption, selected string) {
 
 func queryTime(value int64) string {
 	return time.UnixMicro(value).UTC().Format(auditTimeLayout)
+}
+
+// signInAggregateSummary renders an aggregated rejection window as one
+// readable sentence instead of raw metadata keys.
+func signInAggregateSummary(event audit.Event) string {
+	metadata := event.Metadata
+	window := "Rejected sign-ins"
+	if start, err := time.Parse(audit.WindowTimeLayout,
+		metadata[audit.MetadataWindowStartedAt]); err == nil {
+		window += " " + start.Format("2006-01-02 15:04") + "–" +
+			event.OccurredAt.UTC().Format("15:04") + " UTC"
+	}
+	parts := []string{window}
+	for _, count := range []struct{ key, label string }{
+		{audit.MetadataInvalidCredentialsCount, "invalid credentials"},
+		{audit.MetadataThrottledCount, "throttled"},
+		{audit.MetadataInFlightCount, "concurrent attempt"},
+		{audit.MetadataOverloadedCount, "overloaded"},
+	} {
+		parts = append(parts, groupDigits(metadata[count.key])+" "+count.label)
+	}
+	if distinct := metadata[audit.MetadataDistinctClientCount]; distinct != "" {
+		label := "distinct clients"
+		if strings.HasSuffix(distinct, "+") {
+			label = "distinct clients (at least)"
+			distinct = strings.TrimSuffix(distinct, "+")
+		}
+		parts = append(parts, groupDigits(distinct)+" "+label)
+	}
+	if client := metadata[audit.MetadataTopClient]; client != "" {
+		parts = append(parts, "most frequent "+client+" ("+
+			groupDigits(metadata[audit.MetadataTopClientCount])+")")
+	}
+	return strings.Join(parts, " · ")
+}
+
+// groupDigits formats a validated decimal count with thousands separators.
+func groupDigits(value string) string {
+	if value == "" {
+		return "0"
+	}
+	if len(value) <= 3 || strings.Trim(value, "0123456789") != "" {
+		return value
+	}
+	return groupDigits(value[:len(value)-3]) + "," + value[len(value)-3:]
 }

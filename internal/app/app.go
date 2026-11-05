@@ -167,7 +167,17 @@ func (a *App) Run(ctx context.Context) error {
 		ExportDataDir:     a.cfg.DataDir,
 		DatabaseChecker:   databaseChecker,
 		LiveBroker:        liveBroker,
+		SignInAuditError: func(error) {
+			_ = operationalState.RecordDiagnostic(statusstate.DiagnosticInput{
+				At: time.Now(), Component: "audit", Category: "sign_in_audit",
+			})
+			a.logger.Warn("aggregated sign-in audit write failed",
+				"component", "audit",
+				"error_category", "sign_in_audit",
+			)
+		},
 	})
+	browser := a.browser
 	defer func() { a.browser = nil }()
 
 	if err := a.initializeIngestion(); err != nil {
@@ -229,6 +239,7 @@ func (a *App) Run(ctx context.Context) error {
 			)
 		}).Run(serverCtx)
 	})
+	g.Go(func() error { return browser.RunSignInAudit(serverCtx) })
 	g.Go(func() error {
 		return database.NewRecoveryWorker(
 			coordinator,
@@ -289,6 +300,12 @@ func (a *App) Run(ctx context.Context) error {
 	if !serverFinished {
 		serverErr = <-serverDone
 	}
+	// The UI server has drained, so no further sign-in rejection can be
+	// counted. Write the open window while the coordinator still runs (ADR
+	// 0010); a failure is reported and does not fail shutdown.
+	flushCtx, cancelFlush := context.WithTimeout(context.Background(), a.cfg.ShutdownTimeout)
+	_ = browser.FlushSignInAudit(flushCtx)
+	cancelFlush()
 	coordinator.Close()
 	cancelCoordinator()
 	coordinatorErr := <-coordinatorDone

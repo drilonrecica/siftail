@@ -70,6 +70,7 @@ func assertCurrentMigrationHistory(t *testing.T, db *sql.DB) {
 		"0007_retention_by_receipt.sql",
 		"0008_request_time_index.sql",
 		"0009_security_audit_count.sql",
+		"0010_security_audit_unauthenticated.sql",
 	}
 	var got []string
 	for rows.Next() {
@@ -337,6 +338,15 @@ func exerciseProductionCriticalPaths(
 		(SELECT row_count FROM security_audit_event_count WHERE id = 1)`).
 		Scan(&counted, &stored); err != nil || counted != stored {
 		t.Fatalf("schema-%d audit counter = %d, rows = %d, %v", origin, stored, counted, err)
+	}
+	// Migration 0010 seeds the unauthenticated sub-cap counter the same way.
+	if err := db.Reader().QueryRow(`SELECT
+		(SELECT count(*) FROM security_audit_events
+			WHERE actor_type = 'unauthenticated'),
+		(SELECT row_count FROM security_audit_unauthenticated_count WHERE id = 1)`).
+		Scan(&counted, &stored); err != nil || counted != stored {
+		t.Fatalf("schema-%d unauthenticated audit counter = %d, rows = %d, %v",
+			origin, stored, counted, err)
 	}
 	if err := database.IntegrityCheck(
 		context.Background(), db.Writer(),

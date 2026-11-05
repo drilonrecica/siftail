@@ -17,27 +17,29 @@ import (
 )
 
 var upgradeFixtureDigests = map[string]string{
-	"schema-1.db": "fa41df2de53d37597eedf87dba7e854539c0a61197f25f2d8f98d76e8a74d0a3",
-	"schema-2.db": "3d12a740144c0c1a08dff3b8a629a9d79180f2c0a4ab2d5f5180e45f8dbce9d4",
-	"schema-3.db": "feaef12f35a3a01256eebce642c6679960dc4219ddb1df9d1952143e0056320b",
-	"schema-4.db": "5c9926b8c354e9622147acb0f10454e81db764068677776bd31fcddac92e4fe2",
-	"schema-5.db": "3e051e348460e4ceb851028a93a998032d295a3865c770ac35c478ab7a840870",
-	"schema-6.db": "d8c662571bb2fc726d93dae1493ae8a189e219d5e46b627fcb60b785762f43dc",
-	"schema-7.db": "07354718efe238051c3025b24c44945cfa7a470a9b8d4b59927bcf69b0de7c75",
-	"schema-8.db": "2675b8dc80d5add3ab8a3321db62c7c857673e931d59a646848b86006b3fe67a",
-	"schema-9.db": "100cb9adde8912731e28f1ace2702c8b44bd8cbd86cc290cfd99d2460587230f",
+	"schema-1.db":  "fa41df2de53d37597eedf87dba7e854539c0a61197f25f2d8f98d76e8a74d0a3",
+	"schema-2.db":  "3d12a740144c0c1a08dff3b8a629a9d79180f2c0a4ab2d5f5180e45f8dbce9d4",
+	"schema-3.db":  "feaef12f35a3a01256eebce642c6679960dc4219ddb1df9d1952143e0056320b",
+	"schema-4.db":  "5c9926b8c354e9622147acb0f10454e81db764068677776bd31fcddac92e4fe2",
+	"schema-5.db":  "3e051e348460e4ceb851028a93a998032d295a3865c770ac35c478ab7a840870",
+	"schema-6.db":  "d8c662571bb2fc726d93dae1493ae8a189e219d5e46b627fcb60b785762f43dc",
+	"schema-7.db":  "07354718efe238051c3025b24c44945cfa7a470a9b8d4b59927bcf69b0de7c75",
+	"schema-8.db":  "2675b8dc80d5add3ab8a3321db62c7c857673e931d59a646848b86006b3fe67a",
+	"schema-9.db":  "100cb9adde8912731e28f1ace2702c8b44bd8cbd86cc290cfd99d2460587230f",
+	"schema-10.db": "1081960d2d8ed429c470ecbb8e1fb1a5507f82013c9aa2fa0f8d59e9d100d220",
 }
 
 var releasedMigrationDigests = map[string]string{
-	"0001_initial_ingestion.sql":    "0ab04b3124455d3a85506240e78ecebcb16d55efd582499aa91866ac6a931083",
-	"0002_administrator.sql":        "462a28b4f485b3e3f2f1c1dc0865b679d5b320cdcf0f9e01b8f0cb81c995cc41",
-	"0003_sessions.sql":             "ff06187d1d558e1a454487293d40733d4eb0ba445909fc42e48f51f9c8a0af31",
-	"0004_security_audit.sql":       "713a2f0114794fadd13e14809a8d8c7682d180bc4c804dd1b517ecc83dbef6b2",
-	"0005_container_identity.sql":   "58e29550ad535fab6890a6aa437c717d5d8b9e7eba0a4efd07026c83b497be5d",
-	"0006_event_time_defaulted.sql": "e73e5d1a397ef713f5841853f5a4e78626487f0264fe67a511fd31d57e717e76",
-	"0007_retention_by_receipt.sql": "b16a87f173d46a9d5a4f8a3dc13947a6a7aec4cdf18c95db7e800c8a7613c254",
-	"0008_request_time_index.sql":   "0f789085925108e3907e64e142a8df81d5e4e2f2ebe853f113aa2f6534deba1f",
-	"0009_security_audit_count.sql": "24ac076acbd2adc8be32f1147c1020a6c35aa8c4d14e2be2ff754f3d4336a8ab",
+	"0001_initial_ingestion.sql":              "0ab04b3124455d3a85506240e78ecebcb16d55efd582499aa91866ac6a931083",
+	"0002_administrator.sql":                  "462a28b4f485b3e3f2f1c1dc0865b679d5b320cdcf0f9e01b8f0cb81c995cc41",
+	"0003_sessions.sql":                       "ff06187d1d558e1a454487293d40733d4eb0ba445909fc42e48f51f9c8a0af31",
+	"0004_security_audit.sql":                 "713a2f0114794fadd13e14809a8d8c7682d180bc4c804dd1b517ecc83dbef6b2",
+	"0005_container_identity.sql":             "58e29550ad535fab6890a6aa437c717d5d8b9e7eba0a4efd07026c83b497be5d",
+	"0006_event_time_defaulted.sql":           "e73e5d1a397ef713f5841853f5a4e78626487f0264fe67a511fd31d57e717e76",
+	"0007_retention_by_receipt.sql":           "b16a87f173d46a9d5a4f8a3dc13947a6a7aec4cdf18c95db7e800c8a7613c254",
+	"0008_request_time_index.sql":             "0f789085925108e3907e64e142a8df81d5e4e2f2ebe853f113aa2f6534deba1f",
+	"0009_security_audit_count.sql":           "24ac076acbd2adc8be32f1147c1020a6c35aa8c4d14e2be2ff754f3d4336a8ab",
+	"0010_security_audit_unauthenticated.sql": "e471df0c335384063c222bd8558c6189d4fa5fa742f8ba21d5718b2b98f226bb",
 }
 
 func TestReleasedMigrationsAndHistoricalFixturesAreImmutable(t *testing.T) {

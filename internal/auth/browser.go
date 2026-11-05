@@ -52,6 +52,9 @@ type BrowserConfig struct {
 	// export error page written after staging. Defaults to 30 seconds.
 	ExportWriteTimeout time.Duration
 	GuideTester        *ingest.GuideTester
+	// SignInAuditError receives sanitized failures of the aggregated sign-in
+	// rejection writer. It must not block.
+	SignInAuditError func(error)
 }
 
 type Browser struct {
@@ -61,6 +64,8 @@ type Browser struct {
 	ingestPublicURL    string
 	proxies            proxyTrust
 	throttle           *loginThrottle
+	signInRejections   *signInRejections
+	signInAuditError   func(error)
 	ui                 *webui.Renderer
 	history            *logs.Store
 	sources            *sources.Store
@@ -102,6 +107,8 @@ func NewBrowser(administrators *Store, sessionStore *sessions.Store, config Brow
 		ingestPublicURL:    config.IngestPublicURL,
 		proxies:            newProxyTrust(config.TrustedProxyCIDRs),
 		throttle:           newLoginThrottle(),
+		signInRejections:   newSignInRejections(),
+		signInAuditError:   config.SignInAuditError,
 		ui:                 webui.New(),
 		history:            config.HistoryStore,
 		sources:            config.SourceStore,
@@ -222,17 +229,16 @@ func (b *Browser) login(w http.ResponseWriter, r *http.Request) {
 	accountKey := accountThrottleKey(username)
 	// Admission happens before any hashing or write (ADR 0010): the throttle
 	// reserves the attempt, so parallel requests cannot multiply guesses.
+	// Rejections are only counted in memory; the aggregated audit row is
+	// written later by the owned writer, never by this request.
 	reservation, decision, delay := b.throttle.Check(clientKey, accountKey)
 	switch decision {
 	case throttleLimited:
-		// SFT-105 replaces this per-request row with a windowed aggregate.
-		if err := b.recordLoginAudit(r, audit.OutcomeRejected); err != nil {
-			http.Error(w, "Sign-in is temporarily unavailable.", http.StatusServiceUnavailable)
-			return
-		}
+		b.signInRejections.add(rejectionThrottled, clientKey)
 		b.writeRateLimitedLogin(w, r, delay)
 		return
 	case throttleInFlight:
+		b.signInRejections.add(rejectionInFlight, clientKey)
 		b.writeRateLimitedLogin(w, r, delay)
 		return
 	}
@@ -245,6 +251,7 @@ func (b *Browser) login(w http.ResponseWriter, r *http.Request) {
 	)
 	if errors.Is(err, errHashOverloaded) {
 		b.throttle.Release(reservation)
+		b.signInRejections.add(rejectionOverloaded, clientKey)
 		b.writeRateLimitedLogin(w, r, hashQueueWait)
 		return
 	}
@@ -255,10 +262,7 @@ func (b *Browser) login(w http.ResponseWriter, r *http.Request) {
 	}
 	if !matched {
 		delay := b.throttle.Failure(reservation)
-		if err := b.recordLoginAudit(r, audit.OutcomeRejected); err != nil {
-			http.Error(w, "Sign-in is temporarily unavailable.", http.StatusServiceUnavailable)
-			return
-		}
+		b.signInRejections.add(rejectionInvalidCredentials, clientKey)
 		if delay > 0 {
 			b.writeRateLimitedLogin(w, r, delay)
 			return
@@ -339,23 +343,6 @@ func (b *Browser) Protect(next http.Handler) http.Handler {
 		ctx = context.WithValue(ctx, browserContextKey{}, browserSession)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
-}
-
-func (b *Browser) recordLoginAudit(r *http.Request, outcome audit.Outcome) error {
-	if b.audit == nil {
-		return nil
-	}
-	metadata := audit.Metadata{}
-	if client := b.proxies.clientIdentity(r); client != "" {
-		metadata[audit.MetadataClientAddress] = client
-	}
-	_, err := b.audit.Record(r.Context(), audit.Input{
-		OccurredAt: b.now(), Category: audit.CategoryAuthentication,
-		Action: "sign_in", Outcome: outcome,
-		ActorType: audit.ActorUnauthenticated, Metadata: metadata,
-		RequestID: web.RequestIDFromContext(r.Context()),
-	})
-	return err
 }
 
 func (b *Browser) logout(w http.ResponseWriter, r *http.Request) {

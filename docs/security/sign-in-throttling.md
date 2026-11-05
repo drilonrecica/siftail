@@ -36,7 +36,7 @@ includes the dummy hash for an unknown or disabled username. The order is:
    with that delay before any hashing.
 2. **One in flight per key.** A second attempt for a client key or account
    key that already has one in flight gets `429` with `Retry-After: 1` at
-   once. No hash and no audit row result. Together with the reservation,
+   once. No hash and no per-request audit row result. Together with the reservation,
    parallel requests therefore cannot multiply guesses. Each key evaluates at
    most one password at a time, and every evaluated password is counted
    before the next one can start.
@@ -49,7 +49,7 @@ includes the dummy hash for an unknown or disabled username. The order is:
      this lane first.
 
    A full lane, or an expired wait, gets `429` with `Retry-After: 2`
-   immediately, without a hash and without an audit row. Administrator
+   immediately, without a hash and without a per-request audit row. Administrator
    creation and password reset by the local operator use an unbounded
    internal lane that waits until its request ends.
 
@@ -107,7 +107,8 @@ values are constants, not configuration.
   expire after 15 minutes idle. An entry with an attempt in flight is never
   evicted, so a burst of fresh keys cannot erase another key's in-flight
   limit.
-- **Auditing.** In-flight and overload refusals write no audit row. Throttled
-  and wrong-credential attempts still write one `sign_in` row each until
-  SFT-105 replaces all rejections with one aggregated summary row per
-  5-minute window ([audit.md](audit.md)).
+- **Auditing.** No rejected attempt writes during its request. Wrong
+  credentials, throttled, in-flight, and overloaded attempts are counted in
+  memory and recorded as at most one `sign_in.rejected_summary` row per
+  5-minute window, with per-reason counts, a distinct-client count, and the
+  most frequent client key ([audit.md](audit.md)).

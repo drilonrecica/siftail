@@ -120,38 +120,60 @@ func TestAuditPageRejectsUnboundedMalformedAndUnknownQueries(t *testing.T) {
 	}
 }
 
-func TestLoginAuditRecordsRejectedAndAtomicSuccessfulAttribution(t *testing.T) {
+func TestLoginAuditAggregatesRejectedAndKeepsAtomicSuccessfulAttribution(t *testing.T) {
 	fixture := newBrowserFixture(t, "https://logs.example.test", true)
 	handler := web.RequestID(fixture.handler())
 	rejected := httptest.NewRecorder()
 	handler.ServeHTTP(
 		rejected, loginRequest("Admin", "wrong-password", "/audit"),
 	)
+	if rejected.Code != http.StatusUnauthorized {
+		t.Fatalf("rejected sign-in = %d", rejected.Code)
+	}
 	success := httptest.NewRecorder()
 	handler.ServeHTTP(
 		success, loginRequest("Admin", "browser-password", "/audit"),
 	)
 	page, err := fixture.browser.audit.List(context.Background(), audit.Query{
-		Category: audit.CategoryAuthentication, Action: "sign_in",
+		Category: audit.CategoryAuthentication,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(page.Events) != 2 {
-		t.Fatalf("sign-in audits = %#v", page.Events)
+	// A rejection is only counted in memory; the request writes no row.
+	if len(page.Events) != 1 {
+		t.Fatalf("sign-in audits before flush = %#v", page.Events)
 	}
-	if page.Events[0].Outcome != audit.OutcomeSucceeded ||
+	if page.Events[0].Action != "sign_in" ||
+		page.Events[0].Outcome != audit.OutcomeSucceeded ||
 		page.Events[0].ActorType != audit.ActorAdministrator ||
 		page.Events[0].AdministratorID == nil ||
 		*page.Events[0].AdministratorID != 1 ||
 		page.Events[0].RequestID == "" {
 		t.Fatalf("successful sign-in audit = %#v", page.Events[0])
 	}
-	if page.Events[1].Outcome != audit.OutcomeRejected ||
-		page.Events[1].ActorType != audit.ActorUnauthenticated ||
-		page.Events[1].AdministratorID != nil ||
-		page.Events[1].RequestID == "" ||
-		page.Events[1].Metadata[audit.MetadataClientAddress] != "192.0.2.1" {
-		t.Fatalf("rejected sign-in audit = %#v", page.Events[1])
+
+	if err := fixture.browser.FlushSignInAudit(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	page, err = fixture.browser.audit.List(context.Background(), audit.Query{
+		Category: audit.CategoryAuthentication, Action: signInAuditAction,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Events) != 1 {
+		t.Fatalf("aggregated rejections = %#v", page.Events)
+	}
+	summary := page.Events[0]
+	if summary.Outcome != audit.OutcomeRejected ||
+		summary.ActorType != audit.ActorUnauthenticated ||
+		summary.AdministratorID != nil || summary.RequestID != "" ||
+		summary.Metadata[audit.MetadataInvalidCredentialsCount] != "1" ||
+		summary.Metadata[audit.MetadataThrottledCount] != "0" ||
+		summary.Metadata[audit.MetadataDistinctClientCount] != "1" ||
+		summary.Metadata[audit.MetadataTopClient] != "192.0.2.1/32" ||
+		summary.Metadata[audit.MetadataTopClientCount] != "1" {
+		t.Fatalf("aggregated rejection = %#v", summary)
 	}
 }

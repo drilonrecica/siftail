@@ -113,6 +113,7 @@ func TestRestoreMigratesSupportedArtifactAndRejectsActiveOwner(t *testing.T) {
 		VALUES('artifact_only','{"artifact":true}',2);
 		DROP TABLE security_audit_events;
 		DROP TABLE security_audit_event_count;
+		DROP TABLE security_audit_unauthenticated_count;
 		ALTER TABLE log_events DROP COLUMN event_at_defaulted;
 		DROP INDEX log_events_received_idx;
 		CREATE INDEX log_events_retention_idx ON log_events(retention_at_us, id);

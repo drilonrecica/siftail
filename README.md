@@ -541,7 +541,10 @@ The migration is additive and automatic. It preserves schema-1/2/3 data, but
 an older Siftail binary correctly refuses the resulting schema-4 database.
 The application records sign-in/session, administrator recovery, Server/token,
 source lifecycle, and retention actions. Successful mutations are recorded
-atomically; rejected sign-ins use their own bounded transaction. The
+atomically. Rejected sign-ins never write per request: they are counted in
+memory and written as at most one `sign_in.rejected_summary` row per 5-minute
+window, and unauthenticated rows have a reserved 10,000-row sub-cap that never
+evicts administrator, local-operator, or system history. The
 authenticated, no-store `/audit` workspace provides a maximum 366-day range,
 exact category/action/outcome filters, and 100-row keyset pages without
 exposing credentials or application payloads. A recoverable worker applies the

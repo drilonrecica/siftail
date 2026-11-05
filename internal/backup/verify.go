@@ -89,6 +89,11 @@ func Verify(ctx context.Context, path string) (Result, error) {
 	if result.SchemaVersion >= 9 {
 		requiredTables = append(requiredTables, "security_audit_event_count")
 	}
+	if result.SchemaVersion >= 10 {
+		requiredTables = append(
+			requiredTables, "security_audit_unauthenticated_count",
+		)
+	}
 	for _, table := range requiredTables {
 		var count int
 		if err := db.QueryRowContext(ctx, `SELECT count(*) FROM sqlite_schema

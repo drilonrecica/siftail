@@ -16,14 +16,18 @@ import (
 )
 
 const (
-	MaxRecords           = 100_000
-	DefaultRetentionDays = 365
-	MaximumRetentionDays = 365
-	DefaultPageLimit     = 100
-	MaxPageLimit         = 200
-	MaxCleanupChunk      = 1_000
-	maxMetadataFields    = 12
-	maxMetadataValue     = 256
+	MaxRecords = 100_000
+	// MaxUnauthenticatedRecords is the reserved-capacity sub-cap (ADR 0010):
+	// unauthenticated rows never exceed it, so at least MaxRecords minus this
+	// many rows remain for administrator, local-operator, and system actions.
+	MaxUnauthenticatedRecords = 10_000
+	DefaultRetentionDays      = 365
+	MaximumRetentionDays      = 365
+	DefaultPageLimit          = 100
+	MaxPageLimit              = 200
+	MaxCleanupChunk           = 1_000
+	maxMetadataFields         = 12
+	maxMetadataValue          = 256
 )
 
 var (
@@ -84,7 +88,20 @@ const (
 	MetadataSettingName        = "setting_name"
 	MetadataPreviousValue      = "previous_value"
 	MetadataCurrentValue       = "current_value"
+
+	// Aggregated sign-in rejection windows (ADR 0010).
+	MetadataWindowStartedAt         = "window_started_at"
+	MetadataInvalidCredentialsCount = "invalid_credentials_count"
+	MetadataThrottledCount          = "throttled_count"
+	MetadataInFlightCount           = "in_flight_count"
+	MetadataOverloadedCount         = "overloaded_count"
+	MetadataDistinctClientCount     = "distinct_client_count"
+	MetadataTopClient               = "top_client"
+	MetadataTopClientCount          = "top_client_count"
 )
+
+// WindowTimeLayout is the exact UTC form of MetadataWindowStartedAt.
+const WindowTimeLayout = "2006-01-02T15:04:05Z"
 
 var allowedMetadata = map[string]struct{}{
 	MetadataActorName: {}, MetadataClientAddress: {}, MetadataServerName: {},
@@ -94,6 +111,10 @@ var allowedMetadata = map[string]struct{}{
 	MetadataBackupType: {}, MetadataBackupName: {}, MetadataExportFormat: {},
 	MetadataResultCategory: {}, MetadataSettingName: {},
 	MetadataPreviousValue: {}, MetadataCurrentValue: {},
+	MetadataWindowStartedAt: {}, MetadataInvalidCredentialsCount: {},
+	MetadataThrottledCount: {}, MetadataInFlightCount: {},
+	MetadataOverloadedCount: {}, MetadataDistinctClientCount: {},
+	MetadataTopClient: {}, MetadataTopClientCount: {},
 }
 
 type Metadata map[string]string
@@ -145,7 +166,11 @@ type Page struct {
 
 type CleanupResult struct {
 	AgeDeleted int64
-	CapDeleted int64
+	// UnauthenticatedCapDeleted counts unauthenticated rows removed to bring
+	// them back under MaxUnauthenticatedRecords, such as per-attempt rows
+	// written before migration 0010.
+	UnauthenticatedCapDeleted int64
+	CapDeleted                int64
 }
 
 type Store struct {
@@ -199,7 +224,12 @@ func RecordTx(ctx context.Context, tx *sql.Tx, input Input) (Event, error) {
 	if err != nil {
 		return Event{}, database.Classify("read security audit event ID", err)
 	}
-	if err := enforceCap(ctx, tx); err != nil {
+	if input.ActorType == ActorUnauthenticated {
+		err = enforceUnauthenticatedCap(ctx, tx)
+	} else {
+		err = enforceCap(ctx, tx)
+	}
+	if err != nil {
 		return Event{}, err
 	}
 	return eventFromInput(id, input), nil
@@ -293,6 +323,22 @@ func (s *Store) Cleanup(
 		if remaining == 0 {
 			return nil
 		}
+		unauthenticated, err := storedUnauthenticatedCount(mutationCtx, tx)
+		if err != nil {
+			return err
+		}
+		if excess := unauthenticated - MaxUnauthenticatedRecords; excess > 0 {
+			cleanup.UnauthenticatedCapDeleted, err = deleteOldestUnauthenticated(
+				mutationCtx, tx, min(excess, remaining),
+			)
+			if err != nil {
+				return err
+			}
+			remaining -= cleanup.UnauthenticatedCapDeleted
+			if remaining == 0 {
+				return nil
+			}
+		}
 		count, err := storedCount(mutationCtx, tx)
 		if err != nil {
 			return err
@@ -338,6 +384,74 @@ func storedCount(ctx context.Context, tx *sql.Tx) (int64, error) {
 		return 0, database.Classify("read security audit row count", err)
 	}
 	return count, nil
+}
+
+// storedUnauthenticatedCount reads the unauthenticated row count that
+// migration 0010's triggers maintain for the reserved-capacity sub-cap.
+func storedUnauthenticatedCount(ctx context.Context, tx *sql.Tx) (int64, error) {
+	var count int64
+	err := tx.QueryRowContext(ctx, `SELECT row_count
+		FROM security_audit_unauthenticated_count WHERE id = 1`).Scan(&count)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, errors.New("security audit unauthenticated row counter is missing")
+	}
+	if err != nil {
+		return 0, database.Classify("read security audit unauthenticated row count", err)
+	}
+	return count, nil
+}
+
+func deleteOldestUnauthenticated(ctx context.Context, tx *sql.Tx, limit int64) (int64, error) {
+	result, err := tx.ExecContext(ctx, `DELETE FROM security_audit_events
+		WHERE id IN (
+			SELECT id FROM security_audit_events
+			WHERE actor_type = 'unauthenticated'
+			ORDER BY occurred_at_us ASC, id ASC
+			LIMIT ?
+		)`, limit)
+	if err != nil {
+		return 0, database.Classify("delete excess unauthenticated security audit events", err)
+	}
+	deleted, err := result.RowsAffected()
+	if err != nil {
+		return 0, database.Classify("read unauthenticated security audit deletion", err)
+	}
+	return deleted, nil
+}
+
+// enforceUnauthenticatedCap makes room for an unauthenticated insert by
+// evicting only unauthenticated rows (ADR 0010), so no unauthenticated write
+// can remove an administrator, local-operator, or system row. It applies both
+// the sub-cap and the total cap. Before the insert the total was at most
+// MaxRecords, so the total excess is at most one row, and the just-inserted
+// row guarantees an unauthenticated row exists to evict. A sub-cap excess left
+// by per-attempt rows from before migration 0010 shrinks by at most
+// MaxCleanupChunk rows per insert; hourly cleanup removes the rest.
+func enforceUnauthenticatedCap(ctx context.Context, tx *sql.Tx) error {
+	count, err := storedCount(ctx, tx)
+	if err != nil {
+		return err
+	}
+	unauthenticated, err := storedUnauthenticatedCount(ctx, tx)
+	if err != nil {
+		return err
+	}
+	totalExcess := count - MaxRecords
+	if totalExcess > MaxCleanupChunk {
+		return ErrCapacityInvariant
+	}
+	excess := max(totalExcess, min(unauthenticated-MaxUnauthenticatedRecords, MaxCleanupChunk))
+	if excess <= 0 {
+		return nil
+	}
+	deleted, err := deleteOldestUnauthenticated(ctx, tx, excess)
+	if err != nil {
+		return err
+	}
+	if deleted < totalExcess {
+		return ErrCapacityInvariant
+	}
+	return nil
 }
 
 func enforceCap(ctx context.Context, tx *sql.Tx) error {
@@ -404,7 +518,9 @@ func validMetadataValue(key, value string) bool {
 		return false
 	}
 	switch key {
-	case MetadataAffectedCount, MetadataSessionCount:
+	case MetadataAffectedCount, MetadataSessionCount,
+		MetadataInvalidCredentialsCount, MetadataThrottledCount,
+		MetadataInFlightCount, MetadataOverloadedCount, MetadataTopClientCount:
 		number, err := strconv.ParseUint(value, 10, 64)
 		return err == nil && strconv.FormatUint(number, 10) == value
 	case MetadataRetentionAgeDays, MetadataMaximumDatabaseGiB:
@@ -430,6 +546,15 @@ func validMetadataValue(key, value string) bool {
 		return value == "text" || value == "ndjson"
 	case MetadataResultCategory, MetadataSettingName:
 		return validAction(value)
+	case MetadataWindowStartedAt:
+		at, err := time.Parse(WindowTimeLayout, value)
+		return err == nil && at.Format(WindowTimeLayout) == value
+	case MetadataDistinctClientCount:
+		// An exact count, or "N+" when the tracked distinct clients reached
+		// the aggregation bound and more were not counted.
+		digits := strings.TrimSuffix(value, "+")
+		number, err := strconv.ParseUint(digits, 10, 64)
+		return err == nil && strconv.FormatUint(number, 10) == digits
 	default:
 		return true
 	}

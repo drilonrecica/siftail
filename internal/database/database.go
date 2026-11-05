@@ -17,7 +17,7 @@ import (
 )
 
 const (
-	MaxSchemaVersion = 9
+	MaxSchemaVersion = 10
 	readConnections  = 4
 	// authConnections is the dedicated read-only pool for ingestion-token
 	// verification. Exports, History searches, and active

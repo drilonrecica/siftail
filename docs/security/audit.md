@@ -1,8 +1,9 @@
 # Security-audit storage boundary
 
-**Reviewed:** 2026-07-28
-**Scope:** SFT-038 storage and migration plus SFT-039 privileged-action
-attribution, cleanup lifecycle, and authenticated inspection
+**Reviewed:** 2026-11-05
+**Scope:** SFT-038 storage and migration, SFT-039 privileged-action
+attribution, cleanup lifecycle, and authenticated inspection, plus SFT-105
+aggregated sign-in rejections and reserved capacity (ADR 0010)
 
 ## Stored model
 
@@ -30,7 +31,9 @@ record.
 The concrete store accepts at most 12 metadata fields, 256 UTF-8 bytes per
 value, and 2 KiB of encoded JSON. Keys are a closed list for nonsecret names,
 fingerprints, counts, configuration values, result categories, client
-summaries, formats, and backup basenames. A backup name must be a safe basename,
+summaries, formats, backup basenames, and the fields of an aggregated
+rejection window (window start, four reason counts, distinct-client count,
+most frequent client summary and its count). A backup name must be a safe basename,
 not an internal filesystem path.
 
 There is no accepted key for:
@@ -53,15 +56,33 @@ anything. Errors do not echo rejected values.
 `audit.RecordTx` inserts into a caller-owned coordinator transaction so a
 successful privileged mutation and its success audit event commit or roll back
 together. `Store.Record` handles outcomes that require their own coordinated
-transaction, such as a rejected sign-in attempt. A privileged mutation is not
-reported as successful when its required audit insert fails.
+transaction, such as an aggregated sign-in rejection window. A privileged
+mutation is not reported as successful when its required audit insert fails.
 
-Every insertion applies the 100,000-record cap in its transaction, deleting the
-oldest `(occurred_at_us, id)` record when required. Explicit cleanup applies
-the configured age first, then count overflow, and deletes no more than 1,000
-records per transaction. Default and maximum audit age are 365 days.
-Application-log age/size cleanup, Clear logs, and application-event retention
-do not delete audit rows.
+Every insertion applies the 100,000-record cap in its transaction. Both counts
+come from trigger-maintained one-row tables (`security_audit_event_count` from
+migration 0009, `security_audit_unauthenticated_count` from migration 0010),
+so each check is a primary-key read.
+
+- An administrator, local-operator, or system insert deletes the oldest
+  `(occurred_at_us, id)` records overall when the total exceeds 100,000.
+- An `unauthenticated` insert has a reserved sub-cap of 10,000 rows. It
+  deletes only the oldest `unauthenticated` rows, through the partial index
+  `security_audit_events_unauthenticated_idx`, to satisfy both the sub-cap and
+  the total cap. Unauthenticated writes therefore never evict administrator,
+  local-operator, or system rows, which always have at least 90,000 rows of
+  capacity.
+
+Explicit cleanup applies the configured age first, then the unauthenticated
+sub-cap, then count overflow, and deletes no more than 1,000 records per
+transaction. Default and maximum audit age are 365 days. Application-log
+age/size cleanup, Clear logs, and application-event retention do not delete
+audit rows.
+
+Per-attempt `sign_in` rejection rows written before migration 0010 count
+toward the sub-cap and age out normally. If they exceed it, each later
+unauthenticated insert and each cleanup pass removes at most 1,000 of the
+oldest, so a large legacy excess converges in bounded transactions.
 
 The application root runs one owned audit cleanup worker immediately at
 startup and then hourly. Each pass uses the database coordinator and deletes
@@ -69,30 +90,57 @@ at most 1,000 rows. Cleanup failure is reported only as a sanitized component
 and error category; it neither terminates the process nor emits record
 contents.
 
-## Accepted amendments (ADR 0010)
+## Aggregated sign-in rejections (ADR 0010)
 
-[ADR 0010](../decisions/0010-authentication-amendments.md) changes the
-capacity and sign-in rules below. SFT-105 implements it and then rewrites the
-affected sections as shipped behavior. Until then, the code behaves as the
-rest of this document describes.
+Rejected sign-in attempts are not recorded one row each. A sign-in request
+that ends in a rejection never opens a coordinator transaction: the throttle
+and admission decisions (`docs/security/sign-in-throttling.md`) happen before
+any write, and the request only increments an in-memory counter. Four closed
+reasons are counted:
 
-- **Aggregated rejections.** Rejected sign-ins are no longer recorded one row
-  per attempt. That covers invalid credentials, throttled, in-flight, and
-  overloaded attempts. They are counted in memory and written as at most one
-  `sign_in.rejected_summary` row per 5-minute window (outcome `rejected`,
-  actor `unauthenticated`). A row holds closed-reason counts, the window
-  start, a distinct-client count capped at 1,024, and the most frequent
-  client summary. The throttle and admission decisions happen before any
-  write. A crash loses at most the open window.
-- **Reserved capacity.** `unauthenticated` rows have a sub-cap of 10,000. An
-  insert above it evicts only the oldest `unauthenticated` row, so
-  administrator, local-operator, and system rows always keep at least 90,000
-  rows and are never evicted by unauthenticated writes. A trigger-maintained
-  counter, added by an additive migration with a fixture, keeps the check a
-  primary-key read. Existing per-attempt rows count toward the sub-cap and age
-  out normally.
-- **New action.** `session.revoke_others` records "Sign out other sessions"
-  with the revoked count (SFT-106).
+| Reason | Meaning |
+| --- | --- |
+| `invalid_credentials` | the password was evaluated and did not match, or the username is unknown |
+| `throttled` | the client or account key was inside its retry delay |
+| `in_flight` | the key already had an attempt in flight |
+| `overloaded` | the bounded Argon2 admission queue was full or its wait expired |
+
+Windows are aligned 5-minute UTC intervals. For each window that had at least
+one rejection, one owned writer records one `sign_in.rejected_summary` row
+(category `authentication`, outcome `rejected`, actor `unauthenticated`, no
+request ID) through the coordinator when the window ends. Its `occurred_at` is
+the window end, and its metadata holds:
+
+- `window_started_at`, the window start in exact UTC form;
+- `invalid_credentials_count`, `throttled_count`, `in_flight_count`, and
+  `overloaded_count`;
+- `distinct_client_count`, the number of distinct client throttle keys (IPv4
+  /32 or IPv6 /64), exact up to 1,024 and written as `1024+` beyond;
+- `top_client` and `top_client_count`, the most frequent tracked client key
+  and its attempts (ties go to the lexically smaller key).
+
+Memory is bounded: at most 1,024 client keys are tracked per open window, and
+a closed window keeps only its summary. If storage refuses the write, closed
+windows are retried at the next window end, up to 12 pending windows (one
+hour); older ones are dropped and the failure is reported as a sanitized
+`audit`/`sign_in_audit` diagnostic and process-log warning. On graceful
+shutdown the application root flushes the open window after the UI server has
+drained and before the coordinator stops. A crash loses at most the open
+window; that loss is accepted.
+
+Successful sign-ins remain individual `sign_in` rows with the administrator
+actor, written atomically with the new session, and so does every privileged
+and local-operator action.
+
+The Audit page renders an aggregate as one sentence, for example "Rejected
+sign-ins 2026-11-05 12:00–12:05 UTC · 4 invalid credentials · 99,990
+throttled · 5 concurrent attempt · 1 overloaded · 1,024 distinct clients (at
+least) · most frequent 198.51.100.7/32 (50,000)", with the actor shown as
+"unauthenticated (5-minute aggregate)". Exact per-attempt timing within a
+window is not retained.
+
+The planned `session.revoke_others` action for "Sign out other sessions" is
+added by SFT-106.
 
 ## Recorded actions
 
@@ -100,7 +148,8 @@ The current implementation records these normalized actions:
 
 | Action | Outcome and actor |
 | --- | --- |
-| `sign_in` | successful administrator sign-in or rejected unauthenticated attempt (rejections become `sign_in.rejected_summary` windows under ADR 0010) |
+| `sign_in` | successful administrator sign-in (rows from before migration 0010 may also be rejected unauthenticated attempts) |
+| `sign_in.rejected_summary` | rejected, unauthenticated: one aggregated window of rejected sign-in attempts |
 | `session.revoke`, `session.revoke_all` | successful administrator or local-operator revocation |
 | `administrator.create`, `administrator.password_reset` | successful local-operator recovery action |
 | `server.create` | successful administrator or local-operator creation |
@@ -131,16 +180,18 @@ only typed identifiers and validated safe metadata through `html/template`.
 
 ## Migration and compatibility
 
-Fresh creation and immutable schema-1, schema-2, schema-3, and schema-4
-fixture tests reach schema 4. Representative Server, administrator, session,
+Fresh creation and immutable schema-1 through schema-10 fixture tests reach
+the current schema (originally schema 4 for this feature; migrations 0009 and
+0010 add the counters and the partial index). Representative Server, administrator, session,
 source, application-event, settings, and version-applicable audit data survive;
 integrity and production critical reads/writes pass. Migration failure rolls
 back its version, and older binaries refuse a newer schema rather than deleting,
 recreating, or down-migrating the database. See
 [`../operations/upgrade-compatibility.md`](../operations/upgrade-compatibility.md).
 
-The migration is additive and does not rewrite existing rows. It adds bounded
-future disk growth: at most 100,000 audit rows, each with at most 2 KiB of
+The migrations are additive and do not rewrite existing rows. They add bounded
+future disk growth: at most 100,000 audit rows (at most 10,000 of them
+unauthenticated, each with one partial-index entry), each with at most 2 KiB of
 metadata plus fixed columns and one chronological index. Actual SQLite
 overhead varies with values, pages, WAL state, and filesystem allocation.
 
