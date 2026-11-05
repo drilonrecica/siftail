@@ -138,7 +138,9 @@ func (s *Store) ResetPassword(ctx context.Context, password []byte) error {
 }
 
 // Verify performs one Argon2id operation for existing, unknown, malformed, and
-// disabled usernames so account lookup does not bypass the expensive path.
+// disabled usernames so account lookup does not bypass the expensive path. It
+// returns errHashOverloaded when hash admission (taken from the context's
+// lane) refused the attempt, in which case no password was evaluated.
 func (s *Store) Verify(ctx context.Context, username string, password []byte) (Administrator, bool, error) {
 	encoded := dummyPasswordHash
 	var administrator Administrator
@@ -160,6 +162,9 @@ func (s *Store) Verify(ctx context.Context, username string, password []byte) (A
 		}
 	}
 	matches, err := VerifyPassword(ctx, password, encoded)
+	if errors.Is(err, errHashOverloaded) {
+		return Administrator{}, false, errHashOverloaded
+	}
 	if err != nil {
 		return Administrator{}, false, fmt.Errorf("verify administrator")
 	}

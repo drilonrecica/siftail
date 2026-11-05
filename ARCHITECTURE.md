@@ -1599,9 +1599,18 @@ username, passes bounded admission first (ADR 0010):
 4. client keys that signed in successfully in the last 7 days (a bounded
    in-memory set of 64) wait in a separate queue of 2 that is served first.
 
-Overflow, an expired wait, and a second in-flight attempt return `429` with
-`Retry-After` immediately, without hashing and without a per-request audit
-write. The values are constants; SFT-104 records measured final values here.
+Overflow and an expired wait return `429` with `Retry-After: 2`, and a second
+in-flight attempt returns `429` with `Retry-After: 1`, immediately, without
+hashing and without a per-request audit write. Administrator creation and
+password reset use an unbounded internal lane served before both sign-in
+lanes.
+
+Final values (SFT-104), all constants: 2 hash slots; general queue 8; recent
+queue 2; queue wait 2 seconds; recent-client set 64 keys for 7 days. Measured
+on a 4-core development machine, one hash takes about 100 ms, so a full
+general queue drains in about 0.4 s, which leaves about five times headroom
+inside the wait. Under a rotating-address flood, a recently successful client
+signed in after about 140 ms. See `docs/security/sign-in-throttling.md`.
 
 ### 19.3 Sessions
 
@@ -1644,9 +1653,12 @@ For every state-changing browser request:
 
 ### 19.5 Login throttling
 
-Progressive per-client and per-account throttling.
+Progressive per-client and per-account throttling: the fifth counted failure
+on a key sets a 1-second delay, doubling per further failure up to 60 seconds.
 
-`Check` reserves an attempt, and a success releases the reservation, so
+`Check` reserves an attempt and counts it at once. A success releases the
+reservation, and an attempt whose password was never evaluated (admission
+overflow, storage error) is withdrawn. With one in-flight attempt per key,
 parallel requests cannot multiply guesses. Client keys group IPv6 addresses by
 /64 and IPv4 addresses by /32 after trusted-proxy resolution. The account
 throttle counts failures from every client but never blocks a client that

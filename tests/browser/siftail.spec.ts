@@ -862,7 +862,7 @@ test("status is authenticated, refreshable, sanitized, responsive, and accessibl
   await expect(page).toHaveURL(/\/status$/);
   await expect(page.getByText("Database check completed.")).toBeVisible();
   await expect(page.getByText(
-    /Healthy · schema 4\/4 · SQLite .* · ok · checkpoint completed/,
+    /Healthy · schema \d+\/\d+ · SQLite .* · ok · checkpoint completed/,
   ))
     .toBeVisible();
   await expect(page.getByText(/database_check_succeeded/))

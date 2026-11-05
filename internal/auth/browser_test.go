@@ -230,17 +230,24 @@ func TestLoginThrottleFifthFailureAndBoundedState(t *testing.T) {
 	now := time.Unix(1, 0)
 	throttle.now = func() time.Time { return now }
 	for i := 0; i < throttleCapacity+100; i++ {
-		throttle.Failure(clientThrottleKey(string(rune(i + 1))))
+		reservation, decision, _ := throttle.Check(
+			clientThrottleKey(string(rune(i+1))), accountThrottleKey(string(rune(i+1))),
+		)
+		if decision != throttleAllowed {
+			t.Fatalf("attempt %d decision = %d", i, decision)
+		}
+		throttle.Failure(reservation)
 		now = now.Add(time.Microsecond)
 	}
 	if len(throttle.entries) != throttleCapacity {
 		t.Fatalf("throttle entries = %d", len(throttle.entries))
 	}
 	now = now.Add(throttleIdle + time.Second)
-	throttle.Check("new")
-	if len(throttle.entries) != 0 {
-		t.Fatalf("idle throttle entries = %d", len(throttle.entries))
+	reservation, _, _ := throttle.Check("client:new", "account:new")
+	if len(throttle.entries) != 2 {
+		t.Fatalf("idle throttle entries = %d, want only the new reservation", len(throttle.entries))
 	}
+	throttle.Release(reservation)
 }
 
 func TestExpiredSessionAndSafeReturnPaths(t *testing.T) {

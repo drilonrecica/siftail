@@ -93,10 +93,11 @@ func TestArgon2idOperationsAreCappedAtTwo(t *testing.T) {
 			}
 			return
 		default:
-			if active := len(hashOperations); active > maximum {
+			active, _ := passwordHashing.snapshot()
+			if active > maximum {
 				maximum = active
 			}
-			if active := len(hashOperations); active > 2 {
+			if active > 2 {
 				t.Fatalf("active hash operations = %d", active)
 			}
 			time.Sleep(time.Millisecond)

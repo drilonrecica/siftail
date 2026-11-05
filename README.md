@@ -366,7 +366,11 @@ through `POST /session/logout`. Successful sign-in always rotates to a newly
 issued opaque session and continues to `/logs` or a validated local return path.
 Failures use uniform copy; the bounded in-memory client/account throttle begins
 temporary `429` responses on the fifth failure and never requires an external
-service.
+service. Each attempt is reserved before hashing, with one in flight per client
+(IPv6 grouped by /64) and per account. A bounded hash queue answers overload
+with an immediate `429`, and clients that signed in recently are exempt from
+the account lockout. See
+[`docs/security/sign-in-throttling.md`](docs/security/sign-in-throttling.md).
 
 Every authenticated browser mutation requires the session, an HMAC-derived CSRF
 token, form content type, and an exact allowed Origin or Referer. Authenticated

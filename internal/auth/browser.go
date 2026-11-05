@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
+	"errors"
 	"mime"
 	"net/http"
 	"net/url"
@@ -219,25 +220,46 @@ func (b *Browser) login(w http.ResponseWriter, r *http.Request) {
 	password := []byte(r.PostForm.Get("password"))
 	clientKey := clientThrottleKey(b.proxies.clientIdentity(r))
 	accountKey := accountThrottleKey(username)
-	if delay := b.throttle.Check(clientKey, accountKey); delay > 0 {
+	// Admission happens before any hashing or write (ADR 0010): the throttle
+	// reserves the attempt, so parallel requests cannot multiply guesses.
+	reservation, decision, delay := b.throttle.Check(clientKey, accountKey)
+	switch decision {
+	case throttleLimited:
+		// SFT-105 replaces this per-request row with a windowed aggregate.
 		if err := b.recordLoginAudit(r, audit.OutcomeRejected); err != nil {
 			http.Error(w, "Sign-in is temporarily unavailable.", http.StatusServiceUnavailable)
 			return
 		}
 		b.writeRateLimitedLogin(w, r, delay)
 		return
+	case throttleInFlight:
+		b.writeRateLimitedLogin(w, r, delay)
+		return
 	}
-	administrator, matched, err := b.administrators.Verify(r.Context(), username, password)
+	lane := hashLaneGeneral
+	if reservation.recent {
+		lane = hashLaneRecent
+	}
+	administrator, matched, err := b.administrators.Verify(
+		contextWithHashLane(r.Context(), lane), username, password,
+	)
+	if errors.Is(err, errHashOverloaded) {
+		b.throttle.Release(reservation)
+		b.writeRateLimitedLogin(w, r, hashQueueWait)
+		return
+	}
 	if err != nil {
+		b.throttle.Release(reservation)
 		http.Error(w, "Sign-in is temporarily unavailable.", http.StatusServiceUnavailable)
 		return
 	}
 	if !matched {
+		delay := b.throttle.Failure(reservation)
 		if err := b.recordLoginAudit(r, audit.OutcomeRejected); err != nil {
 			http.Error(w, "Sign-in is temporarily unavailable.", http.StatusServiceUnavailable)
 			return
 		}
-		if delay := b.throttle.Failure(clientKey, accountKey); delay > 0 {
+		if delay > 0 {
 			b.writeRateLimitedLogin(w, r, delay)
 			return
 		}
@@ -255,10 +277,11 @@ func (b *Browser) login(w http.ResponseWriter, r *http.Request) {
 		b.proxies.clientIdentity(r),
 	)
 	if err != nil {
+		b.throttle.Release(reservation)
 		http.Error(w, "Sign-in is temporarily unavailable.", http.StatusServiceUnavailable)
 		return
 	}
-	b.throttle.Success(clientKey, accountKey)
+	b.throttle.Success(reservation)
 	cookie, err := sessions.NewCookie(issued.Token, issued.Session.ExpiresAt, b.publicURL)
 	if err != nil {
 		_ = b.sessions.Revoke(r.Context(), issued.Token)
