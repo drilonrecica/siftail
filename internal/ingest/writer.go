@@ -41,6 +41,9 @@ type BatchWriter struct {
 	options     WriterOptions
 	sources     *boundedCache[sourceKey]
 	containers  *boundedCache[containerKey]
+	// beforeInsert is a test seam that runs inside the batch transaction
+	// after resolution; it simulates a cached row disappearing unseen.
+	beforeInsert func(*sql.Tx) error
 }
 
 func NewBatchWriter(coordinator *database.Coordinator, publisher Publisher) *BatchWriter {
@@ -117,10 +120,34 @@ type cacheUpdate[K comparable] struct {
 
 // Persist commits exactly one HTTP batch transaction. It does not complete the
 // queue result; the lifecycle-owned queue worker does that in SFT-013.
+//
+// The source and container caches are hints: every hit is confirmed inside the
+// transaction, because source removal, Clear logs, and retention pruning delete
+// rows the writer may still cache (audit DAT-02). Should a stale ID ever reach
+// an INSERT regardless, the foreign-key failure clears the batch's entries and
+// the batch is retried once, uncached, within the same request.
 func (w *BatchWriter) Persist(ctx context.Context, batch *WriteBatch) error {
 	if w == nil || w.coordinator == nil || batch == nil || len(batch.Events) == 0 {
 		return &Error{Category: CategoryUnavailable}
 	}
+	committed, err := w.persistAttempt(ctx, batch)
+	if database.IsForeignKeyViolation(err) {
+		w.forgetBatch(batch)
+		committed, err = w.persistAttempt(ctx, batch)
+	}
+	if err != nil {
+		return persistenceError(err)
+	}
+	sort.Slice(committed, func(i, j int) bool { return committed[i].ID < committed[j].ID })
+	if len(committed) > 0 && w.publisher != nil {
+		w.publisher.TryPublish(committed)
+	}
+	return nil
+}
+
+// persistAttempt runs one batch transaction and, only after it commits, records
+// the IDs it resolved in the caches.
+func (w *BatchWriter) persistAttempt(ctx context.Context, batch *WriteBatch) ([]logs.CommittedEvent, error) {
 	var committed []logs.CommittedEvent
 	var sourceUpdates []cacheUpdate[sourceKey]
 	var containerUpdates []cacheUpdate[containerKey]
@@ -134,7 +161,7 @@ func (w *BatchWriter) Persist(ctx context.Context, batch *WriteBatch) error {
 		return err
 	})
 	if err != nil {
-		return persistenceError(err)
+		return nil, err
 	}
 	for _, update := range sourceUpdates {
 		w.sources.Add(update.key, update.id)
@@ -142,11 +169,19 @@ func (w *BatchWriter) Persist(ctx context.Context, batch *WriteBatch) error {
 	for _, update := range containerUpdates {
 		w.containers.Add(update.key, update.id)
 	}
-	sort.Slice(committed, func(i, j int) bool { return committed[i].ID < committed[j].ID })
-	if len(committed) > 0 && w.publisher != nil {
-		w.publisher.TryPublish(committed)
+	return committed, nil
+}
+
+// forgetBatch drops every cache entry the batch could have used, so the retry
+// resolves each source and container from SQLite.
+func (w *BatchWriter) forgetBatch(batch *WriteBatch) {
+	for _, event := range batch.Events {
+		key := sourceCacheKey(event.Source)
+		if sourceID, ok := w.sources.Get(key); ok && event.Container != nil {
+			w.containers.Remove(containerCacheKey(sourceID, *event.Container))
+		}
+		w.sources.Remove(key)
 	}
-	return nil
 }
 
 func (w *BatchWriter) persistTransaction(
@@ -186,8 +221,16 @@ func (w *BatchWriter) persistTransaction(
 			continue
 		}
 		if id, ok := w.sources.Get(key); ok {
-			sourceIDs[key] = id
-			continue
+			// Source removal deletes rows the cache may still hold, and SQLite
+			// reuses a freed rowid, so the hit must still carry this identity.
+			found, err := cachedSourceExists(ctx, tx, id, key)
+			if err != nil {
+				return nil, nil, nil, err
+			}
+			if found {
+				sourceIDs[key] = id
+				continue
+			}
 		}
 		id, created, err := w.resolveSource(ctx, tx, event.Source, event.ReceivedAtUS)
 		if err != nil {
@@ -260,6 +303,11 @@ func (w *BatchWriter) persistTransaction(
 	}
 	if err := updateContainerLabels(ctx, tx, containerOrder, containers); err != nil {
 		return nil, nil, nil, err
+	}
+	if w.beforeInsert != nil {
+		if err := w.beforeInsert(tx); err != nil {
+			return nil, nil, nil, err
+		}
 	}
 
 	var committed []logs.CommittedEvent
@@ -350,6 +398,22 @@ func (w *BatchWriter) resolveSource(ctx context.Context, tx *sql.Tx, source logs
 		return 0, false, database.Classify("read source ID", err)
 	}
 	return id, true, nil
+}
+
+// cachedSourceExists confirms a cached source ID with one primary-key lookup.
+func cachedSourceExists(ctx context.Context, tx *sql.Tx, id int64, key sourceKey) (bool, error) {
+	var found int
+	err := tx.QueryRowContext(ctx, `SELECT 1 FROM sources
+		WHERE id=? AND server_id=? AND project_key=? AND environment_key=?
+		AND application_key=? AND service_key=?`,
+		id, key.serverID, key.project, key.environment, key.application, key.service).Scan(&found)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, database.Classify("verify cached source", err)
+	}
+	return true, nil
 }
 
 // resolveContainer applies ADR 0006: an event with a container ID resolves by
@@ -626,6 +690,15 @@ func (c *boundedCache[K]) Add(key K, id int64) {
 	oldest := c.order.Back()
 	delete(c.entries, oldest.Value.(cacheEntry[K]).key)
 	c.order.Remove(oldest)
+}
+
+func (c *boundedCache[K]) Remove(key K) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if element, ok := c.entries[key]; ok {
+		delete(c.entries, key)
+		c.order.Remove(element)
+	}
 }
 
 func (c *boundedCache[K]) Len() int {

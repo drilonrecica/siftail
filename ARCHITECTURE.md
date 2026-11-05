@@ -1030,7 +1030,14 @@ For each batch:
 - cache key uses stable normalized identity, never mutable display name;
 - the container cache key is `(source_id, container_id)` when an ID is present and
   `(source_id, container_name)` otherwise; a cached ID whose name changed still
-  updates the stored label.
+  updates the stored label;
+- a cache hit is a hint: the batch transaction confirms the cached row still
+  exists with the cached identity (one primary-key lookup), because source
+  removal, Clear logs, and retention pruning delete rows the writer may still
+  cache, and SQLite reuses a freed rowid for the next new row;
+- a foreign-key failure on an insert clears the batch's cache entries and the
+  batch is retried once, uncached, within the same request; a second failure
+  is returned as the batch outcome.
 
 ### 15.3 Discovery bounds
 

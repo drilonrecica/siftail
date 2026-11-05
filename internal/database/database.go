@@ -338,6 +338,10 @@ const (
 type CategoryError struct {
 	Category  Category
 	Operation string
+	// ForeignKey reports a CategoryConstraint failure caused by a foreign key
+	// (SQLITE_CONSTRAINT_FOREIGNKEY), which callers holding cached row IDs
+	// treat as a stale reference rather than a client error.
+	ForeignKey bool
 }
 
 func (e *CategoryError) Error() string {
@@ -369,7 +373,17 @@ func classify(operation string, err error) error {
 		case sqlite3.ErrConstraint:
 			category = CategoryConstraint
 		}
-		return &CategoryError{Category: category, Operation: operation}
+		return &CategoryError{
+			Category: category, Operation: operation,
+			ForeignKey: sqliteErr.ExtendedCode == sqlite3.ErrConstraintForeignKey,
+		}
 	}
 	return fmt.Errorf("%s: %w", operation, err)
+}
+
+// IsForeignKeyViolation reports whether err is a classified foreign-key
+// constraint failure.
+func IsForeignKeyViolation(err error) bool {
+	var categoryErr *CategoryError
+	return errors.As(err, &categoryErr) && categoryErr.ForeignKey
 }
