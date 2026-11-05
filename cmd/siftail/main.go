@@ -60,13 +60,13 @@ func run(args []string, stdout, stderr io.Writer) int {
 			return 1
 		}
 	case "server":
-		if err := runServerCommand(args[1:], stdout); err != nil {
+		if err := runServerCommand(args[1:], stdout, stderr); err != nil {
 			fmt.Fprintf(stderr, "siftail: %v\n", err)
 			return 1
 		}
 		return 0
 	case "token":
-		if err := runTokenCommand(args[1:], stdout); err != nil {
+		if err := runTokenCommand(args[1:], stdout, stderr); err != nil {
 			fmt.Fprintf(stderr, "siftail: %v\n", err)
 			return 1
 		}
@@ -78,7 +78,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		}
 		return 0
 	case "sessions":
-		if err := runSessionCommand(args[1:], stdout); err != nil {
+		if err := runSessionCommand(args[1:], stdout, stderr); err != nil {
 			fmt.Fprintf(stderr, "siftail: %v\n", err)
 			return 1
 		}

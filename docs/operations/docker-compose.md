@@ -156,6 +156,26 @@ The second command prints a one-time token to the current terminal. Prefer the
 authenticated UI when terminal capture or command-session recording is a
 concern.
 
+The CLI decides whether the server is running by connecting to the control
+socket (`/data/siftail-control.sock`), not by checking that the file exists.
+With no server listening, `server`, `token`, `admin`, and `sessions` commands
+write the database directly while holding the owner-only maintenance lock
+(`/data/.siftail-maintenance.lock`):
+
+- If a server is starting (it holds the lock before it opens the database and
+  creates the socket afterwards) or a restore is running, the command writes
+  nothing and exits non-zero with `the Siftail database is in use by a
+  starting server or a running restore; retry the command`. Retry once the
+  service is healthy or the restore has finished.
+- While an offline command holds the lock, a server starting at that moment
+  refuses with `database ownership: Siftail database is in use` and exits;
+  the Compose restart policy starts it again.
+- A socket left behind by a crash or `SIGKILL` is stale: nobody accepts on it.
+  Offline commands report it and continue. Commands that need the running
+  server (`backup`, `diagnostics`) stop and print the recovery. Starting the
+  server replaces a stale socket. You can also remove it with
+  `rm /data/siftail-control.sock` while the server is stopped.
+
 ## Health, restart, and shutdown
 
 Compose health invokes `/siftail healthcheck`, which performs a bounded,

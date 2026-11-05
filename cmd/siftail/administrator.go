@@ -34,7 +34,7 @@ func runAdministratorCommand(args []string, stdin io.Reader, stdout, prompt io.W
 			return err
 		}
 		var administrator auth.Administrator
-		if err := runAdminOperation(http.MethodPost, "/administrator", map[string]any{
+		if err := runAdminOperation(prompt, http.MethodPost, "/administrator", map[string]any{
 			"username": *username, "password": string(password),
 		}, &administrator); err != nil {
 			return err
@@ -52,7 +52,7 @@ func runAdministratorCommand(args []string, stdin io.Reader, stdout, prompt io.W
 			return err
 		}
 		var result struct{}
-		if err := runAdminOperation(http.MethodPost, "/administrator/reset-password", map[string]any{
+		if err := runAdminOperation(prompt, http.MethodPost, "/administrator/reset-password", map[string]any{
 			"password": string(password),
 		}, &result); err != nil {
 			return err

@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"path/filepath"
 	"time"
 
 	"github.com/drilonrecica/siftail/internal/backup"
@@ -33,13 +32,11 @@ func runBackupCommand(args []string, stdout io.Writer) error {
 	if err != nil {
 		return fmt.Errorf("configuration invalid: %w", err)
 	}
-	socket := filepath.Join(cfg.DataDir, "siftail-control.sock")
-	active, err := controlSocketActive(socket)
-	if err != nil {
+	socket := controlSocketPath(cfg.DataDir)
+	if err := requireActiveControlSocket(
+		socket, "backup creation requires the Siftail server to be active",
+	); err != nil {
 		return err
-	}
-	if !active {
-		return errors.New("backup creation requires the Siftail server to be active")
 	}
 	endpoint := "/backup/full"
 	if *configurationOnly {
@@ -64,7 +61,7 @@ func runBackupVerify(path string, stdout io.Writer) error {
 	if err != nil {
 		return fmt.Errorf("configuration invalid: %w", err)
 	}
-	socket := filepath.Join(cfg.DataDir, "siftail-control.sock")
+	socket := controlSocketPath(cfg.DataDir)
 	active, err := controlSocketActive(socket)
 	if err != nil {
 		return err

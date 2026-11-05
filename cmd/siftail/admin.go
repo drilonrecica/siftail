@@ -10,8 +10,6 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strconv"
 	"time"
 
@@ -24,7 +22,7 @@ import (
 	"github.com/drilonrecica/siftail/internal/sources"
 )
 
-func runServerCommand(args []string, stdout io.Writer) error {
+func runServerCommand(args []string, stdout, notice io.Writer) error {
 	if len(args) == 0 {
 		return errors.New("missing server subcommand")
 	}
@@ -38,7 +36,7 @@ func runServerCommand(args []string, stdout io.Writer) error {
 			return errors.New("usage: siftail server create --name <name> [--hostname <hostname>]")
 		}
 		var server sources.Server
-		if err := runAdminOperation(http.MethodPost, "/servers", map[string]any{
+		if err := runAdminOperation(notice, http.MethodPost, "/servers", map[string]any{
 			"name": *name, "hostname": *hostname,
 		}, &server); err != nil {
 			return err
@@ -50,7 +48,7 @@ func runServerCommand(args []string, stdout io.Writer) error {
 			return errors.New("usage: siftail server list")
 		}
 		var servers []sources.Server
-		if err := runAdminOperation(http.MethodGet, "/servers", nil, &servers); err != nil {
+		if err := runAdminOperation(notice, http.MethodGet, "/servers", nil, &servers); err != nil {
 			return err
 		}
 		for _, server := range servers {
@@ -62,7 +60,7 @@ func runServerCommand(args []string, stdout io.Writer) error {
 	}
 }
 
-func runTokenCommand(args []string, stdout io.Writer) error {
+func runTokenCommand(args []string, stdout, notice io.Writer) error {
 	if len(args) == 0 {
 		return errors.New("missing token subcommand")
 	}
@@ -100,7 +98,7 @@ func runTokenCommand(args []string, stdout io.Writer) error {
 			}
 		}
 		var token sources.CreatedToken
-		if err := runAdminOperation(http.MethodPost, "/tokens", map[string]any{
+		if err := runAdminOperation(notice, http.MethodPost, "/tokens", map[string]any{
 			"server_id": *serverID, "name": *name,
 		}, &token); err != nil {
 			return err
@@ -133,7 +131,7 @@ func runTokenCommand(args []string, stdout io.Writer) error {
 			return errors.New("usage: siftail token revoke --id <id>")
 		}
 		var result struct{}
-		if err := runAdminOperation(http.MethodPost, "/tokens/revoke", map[string]any{"id": *id}, &result); err != nil {
+		if err := runAdminOperation(notice, http.MethodPost, "/tokens/revoke", map[string]any{"id": *id}, &result); err != nil {
 			return err
 		}
 		fmt.Fprintf(stdout, "token %d revoked\n", *id)
@@ -143,19 +141,34 @@ func runTokenCommand(args []string, stdout io.Writer) error {
 	}
 }
 
-func runAdminOperation(method, path string, input, output any) error {
+func runAdminOperation(notice io.Writer, method, path string, input, output any) error {
 	cfg, err := config.Parse()
 	if err != nil {
 		return fmt.Errorf("configuration invalid: %w", err)
 	}
-	socket := filepath.Join(cfg.DataDir, "siftail-control.sock")
-	if info, statErr := os.Lstat(socket); statErr == nil {
-		if info.Mode()&os.ModeSocket == 0 {
-			return errors.New("control path exists but is not a socket")
-		}
+	socket := controlSocketPath(cfg.DataDir)
+	state, err := probeControlSocket(socket)
+	if err != nil {
+		return err
+	}
+	if state == controlSocketLive {
 		return controlRequest(method, socket, path, input, output)
-	} else if !errors.Is(statErr, os.ErrNotExist) {
-		return errors.New("cannot inspect control socket")
+	}
+
+	// No server is listening. Offline mutations write the database directly,
+	// so they must own it exclusively: the server holds this lock from before
+	// it opens SQLite until after it removes the socket, and a restore holds
+	// it for its whole run.
+	lock, err := database.AcquireMaintenanceLock(cfg.DataDir)
+	if err != nil {
+		if errors.Is(err, database.ErrMaintenanceActive) {
+			return errDatabaseBusy
+		}
+		return errors.New("cannot acquire the maintenance lock")
+	}
+	defer lock.Close()
+	if state == controlSocketStale {
+		fmt.Fprintf(notice, "siftail: %s; continuing offline\n", staleSocketMessage(socket))
 	}
 
 	db, err := database.Open(context.Background(), cfg.DatabasePath)
@@ -163,11 +176,6 @@ func runAdminOperation(method, path string, input, output any) error {
 		return fmt.Errorf("database unavailable: %w", err)
 	}
 	defer db.Close()
-	if _, err := os.Lstat(socket); err == nil {
-		return errors.New("server became active; retry the command")
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return errors.New("cannot inspect control socket")
-	}
 	store := sources.NewStore(db.Writer())
 	operationCtx := audit.ContextWithAttribution(
 		context.Background(),

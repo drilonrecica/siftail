@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"io"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -35,7 +36,7 @@ func TestSessionsRevokeAllCLIOffline(t *testing.T) {
 	}
 
 	var output bytes.Buffer
-	if err := runSessionCommand([]string{"revoke-all"}, &output); err != nil {
+	if err := runSessionCommand([]string{"revoke-all"}, &output, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(output.String(), "revoked 1") ||

@@ -2419,6 +2419,16 @@ No TCP administration API is exposed. Direct database maintenance and restore co
 require the server to be stopped; online backup and diagnostics use the control socket.
 `version` and `config validate` do not open the database.
 
+Server liveness is decided by connecting to the control socket. A socket file
+that refuses connections (left by a crash or SIGKILL) is stale and counts as
+stopped. Offline administrative mutations acquire the maintenance lock before
+opening the database and release it after closing it. The server holds that
+lock from before it opens SQLite until after it removes the socket, and a
+restore holds it for its whole run. So a CLI write can never overlap server
+startup, a running server, or a restore. A busy lock is refused with a retry
+message. Commands that need a running server report a stale socket together
+with its recovery.
+
 `database check` is special-cased as an active-safe bounded inspection. While
 the server is active it runs `quick_check` through the read pool and orders one
 passive WAL checkpoint through the maintenance coordinator. `database check

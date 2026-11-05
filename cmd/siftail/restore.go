@@ -6,7 +6,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"path/filepath"
 
 	"github.com/drilonrecica/siftail/internal/backup"
 	"github.com/drilonrecica/siftail/internal/config"
@@ -32,7 +31,7 @@ func runRestoreCommand(args []string, stdout io.Writer) error {
 	if err != nil {
 		return fmt.Errorf("configuration invalid: %w", err)
 	}
-	socket := filepath.Join(cfg.DataDir, "siftail-control.sock")
+	socket := controlSocketPath(cfg.DataDir)
 	active, err := controlSocketActive(socket)
 	if err != nil {
 		return err

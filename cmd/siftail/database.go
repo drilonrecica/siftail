@@ -6,9 +6,11 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
+	"syscall"
 	"time"
 
 	"github.com/drilonrecica/siftail/internal/config"
@@ -33,7 +35,7 @@ func runDatabaseCommand(args []string, stdout io.Writer) error {
 	if err != nil {
 		return fmt.Errorf("configuration invalid: %w", err)
 	}
-	socket := filepath.Join(cfg.DataDir, "siftail-control.sock")
+	socket := controlSocketPath(cfg.DataDir)
 	active, err := controlSocketActive(socket)
 	if err != nil {
 		return err
@@ -76,13 +78,11 @@ func runDiagnosticsCommand(args []string, stdout io.Writer) error {
 	if err != nil {
 		return fmt.Errorf("configuration invalid: %w", err)
 	}
-	socket := filepath.Join(cfg.DataDir, "siftail-control.sock")
-	active, err := controlSocketActive(socket)
-	if err != nil {
+	socket := controlSocketPath(cfg.DataDir)
+	if err := requireActiveControlSocket(
+		socket, "diagnostics require the Siftail server to be active",
+	); err != nil {
 		return err
-	}
-	if !active {
-		return errors.New("diagnostics require the Siftail server to be active")
 	}
 	var diagnostics []statusstate.Diagnostic
 	if err := controlRequest(
@@ -114,18 +114,92 @@ func runDiagnosticsCommand(args []string, stdout io.Writer) error {
 	return nil
 }
 
-func controlSocketActive(path string) (bool, error) {
+const controlSocketName = "siftail-control.sock"
+
+// controlProbeTimeout bounds the liveness probe. A listening server accepts
+// a Unix connection from its backlog without application work, so only a
+// wedged or overloaded process gets near this.
+const controlProbeTimeout = 2 * time.Second
+
+var errDatabaseBusy = errors.New(
+	"the Siftail database is in use by a starting server or a running restore; retry the command",
+)
+
+type controlSocketState int
+
+const (
+	controlSocketAbsent controlSocketState = iota
+	controlSocketLive
+	controlSocketStale
+)
+
+func controlSocketPath(dataDirectory string) string {
+	return filepath.Join(dataDirectory, controlSocketName)
+}
+
+// probeControlSocket decides server liveness by connecting to the control
+// socket. A socket file nobody accepts on (left behind by SIGKILL or a
+// crash) is stale, not live.
+func probeControlSocket(path string) (controlSocketState, error) {
 	info, err := os.Lstat(path)
 	if errors.Is(err, os.ErrNotExist) {
-		return false, nil
+		return controlSocketAbsent, nil
 	}
 	if err != nil {
-		return false, errors.New("cannot inspect control socket")
+		return controlSocketAbsent, errors.New("cannot inspect control socket")
 	}
 	if info.Mode()&os.ModeSocket == 0 {
-		return false, errors.New("control path exists but is not a socket")
+		return controlSocketAbsent, errors.New("control path exists but is not a socket")
 	}
-	return true, nil
+	conn, err := net.DialTimeout("unix", path, controlProbeTimeout)
+	if err == nil {
+		_ = conn.Close()
+		return controlSocketLive, nil
+	}
+	switch {
+	case errors.Is(err, syscall.ECONNREFUSED):
+		return controlSocketStale, nil
+	case errors.Is(err, syscall.ENOENT):
+		return controlSocketAbsent, nil
+	case errors.Is(err, os.ErrDeadlineExceeded):
+		return controlSocketAbsent, errors.New(
+			"control socket did not accept a connection; the server may be overloaded, retry the command",
+		)
+	default:
+		return controlSocketAbsent, errors.New("cannot connect to control socket")
+	}
+}
+
+// controlSocketActive reports whether a server is listening. A stale socket
+// counts as inactive, so stopped-server commands keep working after SIGKILL.
+func controlSocketActive(path string) (bool, error) {
+	state, err := probeControlSocket(path)
+	return state == controlSocketLive, err
+}
+
+// requireActiveControlSocket is for commands that only work through a
+// running server; a stale socket is reported with its recovery.
+func requireActiveControlSocket(path, requirement string) error {
+	state, err := probeControlSocket(path)
+	if err != nil {
+		return err
+	}
+	switch state {
+	case controlSocketLive:
+		return nil
+	case controlSocketStale:
+		return fmt.Errorf("%s; %s", requirement, staleSocketMessage(path))
+	default:
+		return errors.New(requirement)
+	}
+}
+
+func staleSocketMessage(path string) string {
+	return fmt.Sprintf(
+		"stale control socket (no Siftail server is listening): "+
+			"starting the server replaces it, or remove it with: rm %s",
+		path,
+	)
 }
 
 func safeDatabaseCheckError(err error) error {
