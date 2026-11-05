@@ -163,6 +163,7 @@ Recommended `/data` layout:
 ├── siftail-control.sock  # owner-only; exists only while the server is active
 ├── .siftail-maintenance.lock # owner-only advisory server/maintenance lock
 ├── restore-staging/       # exists only during controlled restore/recovery
+├── siftail.db.unhealthy-<UTC timestamp>/ # unhealthy files preserved by --replace-unhealthy
 └── backups/               # optional operator-mounted destination, not required
 ```
 
@@ -2321,7 +2322,7 @@ siftail database stats
 siftail backup --output <path>
 siftail backup --configuration-only --output <path>
 siftail backup verify <path>
-siftail restore <path>
+siftail restore --confirm RESTORE [--replace-unhealthy] <path>
 
 siftail diagnostics
 ```

@@ -238,3 +238,94 @@ func seedRestoreCLIState(db *sql.DB, marker string) error {
 	)
 	return err
 }
+
+func TestRestoreCLIReplaceUnhealthyRestoresLostVolume(t *testing.T) {
+	clearSiftailEnv(t)
+	dataDirectory := t.TempDir()
+	t.Setenv("SIFTAIL_DATA_DIR", dataDirectory)
+	artifact := createRestoreCLIArtifact(t)
+
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{
+		"restore", "--confirm", "RESTORE", artifact,
+	}, &stdout, &stderr); code == 0 ||
+		!strings.Contains(stderr.String(), "--replace-unhealthy") {
+		t.Fatalf("restore over missing database without flag = %d %q %q",
+			code, stdout.String(), stderr.String())
+	}
+	if _, err := os.Stat(
+		filepath.Join(dataDirectory, "siftail.db"),
+	); !os.IsNotExist(err) {
+		t.Fatalf("refused restore created a database: %v", err)
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	if code := run([]string{
+		"restore", "--confirm", "RESTORE", "--replace-unhealthy", artifact,
+	}, &stdout, &stderr); code != 0 {
+		t.Fatalf("restore = %d %q %q", code, stdout.String(), stderr.String())
+	}
+	for _, expected := range []string{
+		"restore complete", "current database: missing",
+		"rollback: none (no healthy current database to capture)",
+		"fresh login required: true",
+	} {
+		if !strings.Contains(stdout.String(), expected) {
+			t.Errorf("restore output lacks %q: %q", expected, stdout.String())
+		}
+	}
+	if strings.Contains(stdout.String(), "preserved:") ||
+		strings.Contains(stdout.String()+stderr.String(), dataDirectory) {
+		t.Fatalf("unexpected restore output: %q %q",
+			stdout.String(), stderr.String())
+	}
+	db, err := database.Open(
+		context.Background(), filepath.Join(dataDirectory, "siftail.db"),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	var name string
+	if err := db.Reader().QueryRow(
+		"SELECT name FROM servers WHERE id=1",
+	).Scan(&name); err != nil || name != "artifact" {
+		t.Fatalf("restored server = %q, %v", name, err)
+	}
+}
+
+func TestRestoreCLIReplaceUnhealthyReportsPreservedFiles(t *testing.T) {
+	clearSiftailEnv(t)
+	dataDirectory := t.TempDir()
+	t.Setenv("SIFTAIL_DATA_DIR", dataDirectory)
+	if err := os.WriteFile(
+		filepath.Join(dataDirectory, "siftail.db"),
+		[]byte("private-corrupt-current"), 0600,
+	); err != nil {
+		t.Fatal(err)
+	}
+	artifact := createRestoreCLIArtifact(t)
+
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{
+		"restore", "--confirm", "RESTORE", "--replace-unhealthy", artifact,
+	}, &stdout, &stderr); code != 0 {
+		t.Fatalf("restore = %d %q %q", code, stdout.String(), stderr.String())
+	}
+	output := stdout.String()
+	for _, expected := range []string{
+		"current database: unhealthy",
+		"rollback: none (no healthy current database to capture)",
+		"preserved: siftail.db.unhealthy-",
+	} {
+		if !strings.Contains(output, expected) {
+			t.Errorf("restore output lacks %q: %q", expected, output)
+		}
+	}
+	if strings.Contains(output+stderr.String(), "private-corrupt-current") ||
+		strings.Contains(output+stderr.String(), dataDirectory) {
+		t.Fatalf("restore exposed private detail: %q %q",
+			output, stderr.String())
+	}
+}

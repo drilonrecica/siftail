@@ -15,25 +15,62 @@ import (
 
 const RestoreConfirmation = "RESTORE"
 
+// Current database states classified before a restore changes anything
+// (ADR 0009, ARCHITECTURE.md §25.5.1).
+const (
+	CurrentHealthy   = "healthy"
+	CurrentMissing   = "missing"
+	CurrentUnhealthy = "unhealthy"
+)
+
+const (
+	RestoreErrCurrentMissing = "current database is missing; " +
+		"rerun with --replace-unhealthy to restore without a rollback copy"
+	RestoreErrCurrentUnhealthy = "current database is not a compatible rollback " +
+		"source; rerun with --replace-unhealthy to preserve it and restore " +
+		"without a rollback copy"
+	RestoreErrFailedNoDatabase = "restore failed; no database was installed"
+	unhealthyTimestampLayout   = "20060102T150405.000000Z"
+)
+
 type RestoreOptions struct {
 	DataDirectory string
 	DatabasePath  string
 	ArtifactPath  string
 	Confirmation  string
+	// ReplaceUnhealthy allows restore when the current database is missing
+	// or cannot become a verified rollback. It has no effect on a healthy
+	// current database.
+	ReplaceUnhealthy bool
 }
 
 type RestoreResult struct {
 	Type         string
 	ArtifactName string
+	CurrentState string
+	// RollbackName is empty when no healthy current database existed.
 	RollbackName string
-	SchemaBefore int
-	SchemaAfter  int
-	Migrated     bool
+	// PreservedName is the basename of the directory holding the moved
+	// unhealthy database files, or empty when nothing was preserved.
+	PreservedName string
+	SchemaBefore  int
+	SchemaAfter   int
+	Migrated      bool
 }
 
 func (r RestoreResult) Validate() error {
-	if !validBackupType(r.Type) || !safeBasename(r.ArtifactName) ||
-		!safeBasename(r.RollbackName) || r.SchemaBefore < 1 ||
+	var namesValid bool
+	switch r.CurrentState {
+	case CurrentHealthy:
+		namesValid = safeBasename(r.RollbackName) && r.PreservedName == ""
+	case CurrentMissing:
+		namesValid = r.RollbackName == "" &&
+			(r.PreservedName == "" || safeBasename(r.PreservedName))
+	case CurrentUnhealthy:
+		namesValid = r.RollbackName == "" && safeBasename(r.PreservedName)
+	}
+	if !namesValid || !validBackupType(r.Type) ||
+		!safeBasename(r.ArtifactName) || r.SchemaBefore < 1 ||
 		r.SchemaBefore > database.MaxSchemaVersion ||
 		r.SchemaAfter != database.MaxSchemaVersion ||
 		r.Migrated != (r.SchemaBefore < r.SchemaAfter) {
@@ -112,26 +149,24 @@ func (r *Restorer) Restore(
 	if err != nil {
 		return RestoreResult{}, errors.New("restore artifact verification failed")
 	}
-	currentInfo, err := os.Lstat(databasePath)
-	if err != nil || !currentInfo.Mode().IsRegular() {
-		return RestoreResult{}, errors.New(
-			"current database is not a regular owned file",
-		)
-	}
-	currentReport, err := database.CheckPath(ctx, databasePath, true)
-	if err != nil || !currentReport.Compatible ||
-		currentReport.SchemaVersion != database.MaxSchemaVersion ||
-		currentReport.Integrity != "ok" {
-		return RestoreResult{}, errors.New(
-			"current database is not a compatible rollback source",
-		)
-	}
-	if err := validateExistingRollback(rollbackPath); err != nil {
+	current, err := classifyCurrentDatabase(ctx, databasePath)
+	if err != nil {
 		return RestoreResult{}, err
 	}
+	healthy := current.state == CurrentHealthy
+	if !healthy && !options.ReplaceUnhealthy {
+		if current.state == CurrentMissing {
+			return RestoreResult{}, errors.New(RestoreErrCurrentMissing)
+		}
+		return RestoreResult{}, errors.New(RestoreErrCurrentUnhealthy)
+	}
+	if healthy {
+		if err := validateExistingRollback(rollbackPath); err != nil {
+			return RestoreResult{}, err
+		}
+	}
 	if err := ensureRestoreSpace(
-		options.DataDirectory, artifact.Bytes, currentReport.DatabaseBytes+
-			currentReport.WALBytes,
+		options.DataDirectory, artifact.Bytes, current.bytes,
 	); err != nil {
 		return RestoreResult{}, err
 	}
@@ -170,21 +205,53 @@ func (r *Restorer) Restore(
 			"staged restore artifact verification failed",
 		)
 	}
-	if err := createRollbackArtifact(
-		ctx, databasePath, rollbackCandidate,
-	); err != nil {
-		return RestoreResult{}, err
+	preservedName := ""
+	if healthy {
+		if err := createRollbackArtifact(
+			ctx, databasePath, rollbackCandidate,
+		); err != nil {
+			return RestoreResult{}, err
+		}
+		if err := removeDatabaseSidecars(databasePath); err != nil {
+			return RestoreResult{}, err
+		}
+	} else {
+		preservedName, err = preserveUnhealthyDatabase(
+			databasePath, time.Now().UTC(),
+		)
+		if err != nil {
+			return RestoreResult{
+				CurrentState: current.state, PreservedName: preservedName,
+			}, err
+		}
+	}
+	// failed keeps the classification and preserved location visible to the
+	// operator once preservation has moved files.
+	failed := func(err error) (RestoreResult, error) {
+		return RestoreResult{
+			CurrentState: current.state, PreservedName: preservedName,
+		}, err
 	}
 
-	if err := removeDatabaseSidecars(databasePath); err != nil {
-		return RestoreResult{}, err
-	}
 	if err := os.Rename(restoredCandidate, databasePath); err != nil {
-		return RestoreResult{}, errors.New("install restored database")
+		return failed(errors.New("install restored database"))
 	}
 	installed := true
 	rollbackSource := rollbackCandidate
 	rollbackInstalled := func(cause error) (RestoreResult, error) {
+		if installed && !healthy {
+			// No verified pre-restore state exists to reinstall. Remove the
+			// installed copy of the untouched input artifact; preserved
+			// unhealthy files stay where they are.
+			if err := removeInstalledDatabase(databasePath); err != nil {
+				cleanup = false
+				return failed(errors.New(
+					"restore failed and rollback requires manual recovery",
+				))
+			}
+			installed = false
+			return failed(errors.New(RestoreErrFailedNoDatabase))
+		}
 		if installed {
 			if rollbackErr := restoreRollbackCandidate(
 				ctx, databasePath, rollbackSource, artifact.Type,
@@ -264,38 +331,43 @@ func (r *Restorer) Restore(
 			))
 		}
 	}
-	if err := os.Rename(rollbackCandidate, rollbackPath); err != nil {
-		return rollbackInstalled(errors.New(
-			"publish managed restore rollback",
-		))
-	}
-	rollbackSource = rollbackPath
-	if err := syncDirectory(filepath.Dir(rollbackPath)); err != nil {
-		return rollbackInstalled(errors.New(
-			"synchronize managed restore rollback",
-		))
-	}
-	if _, err := Verify(ctx, rollbackPath); err != nil {
-		return rollbackInstalled(errors.New(
-			"verify published managed restore rollback",
-		))
+	rollbackName := ""
+	if healthy {
+		if err := os.Rename(rollbackCandidate, rollbackPath); err != nil {
+			return rollbackInstalled(errors.New(
+				"publish managed restore rollback",
+			))
+		}
+		rollbackSource = rollbackPath
+		if err := syncDirectory(filepath.Dir(rollbackPath)); err != nil {
+			return rollbackInstalled(errors.New(
+				"synchronize managed restore rollback",
+			))
+		}
+		if _, err := Verify(ctx, rollbackPath); err != nil {
+			return rollbackInstalled(errors.New(
+				"verify published managed restore rollback",
+			))
+		}
+		rollbackName = filepath.Base(rollbackPath)
 	}
 	installed = false
 	if err := cleanupRestoreStaging(
 		stagingDirectory, restoredCandidate, rollbackCandidate,
 	); err != nil {
 		cleanup = false
-		return RestoreResult{}, errors.New(
+		return failed(errors.New(
 			"restore completed but staging cleanup requires manual recovery",
-		)
+		))
 	}
 	cleanup = false
 	result := RestoreResult{
 		Type: artifact.Type, ArtifactName: artifact.Name,
-		RollbackName: filepath.Base(rollbackPath),
-		SchemaBefore: artifact.SchemaVersion,
-		SchemaAfter:  database.MaxSchemaVersion,
-		Migrated:     artifact.SchemaVersion < database.MaxSchemaVersion,
+		CurrentState: current.state, RollbackName: rollbackName,
+		PreservedName: preservedName,
+		SchemaBefore:  artifact.SchemaVersion,
+		SchemaAfter:   database.MaxSchemaVersion,
+		Migrated:      artifact.SchemaVersion < database.MaxSchemaVersion,
 	}
 	if err := result.Validate(); err != nil {
 		return RestoreResult{}, err
@@ -335,6 +407,118 @@ func validateRestorePaths(
 	return databasePath, artifactPath, rollbackPath, nil
 }
 
+type currentDatabase struct {
+	state string
+	// bytes is the logical database plus WAL size a healthy rollback
+	// snapshot needs; preserving by rename needs no extra space.
+	bytes int64
+}
+
+// classifyCurrentDatabase inspects the stopped current database read-only.
+// A missing main file is missing; a regular file that fails the full check or
+// is not at this binary's current schema is unhealthy. A non-regular entry is
+// refused in every mode because it is not a file Siftail owns.
+func classifyCurrentDatabase(
+	ctx context.Context,
+	databasePath string,
+) (currentDatabase, error) {
+	info, err := os.Lstat(databasePath)
+	if errors.Is(err, os.ErrNotExist) {
+		return currentDatabase{state: CurrentMissing}, nil
+	}
+	if err != nil {
+		return currentDatabase{}, errors.New("inspect current database")
+	}
+	if !info.Mode().IsRegular() {
+		return currentDatabase{}, errors.New(
+			"current database is not a regular owned file",
+		)
+	}
+	report, err := database.CheckPath(ctx, databasePath, true)
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return currentDatabase{}, ctxErr
+	}
+	if err != nil || !report.Compatible ||
+		report.SchemaVersion != database.MaxSchemaVersion ||
+		report.Integrity != "ok" {
+		return currentDatabase{state: CurrentUnhealthy}, nil
+	}
+	return currentDatabase{
+		state: CurrentHealthy, bytes: report.DatabaseBytes + report.WALBytes,
+	}, nil
+}
+
+var databaseFileSuffixes = []string{"", "-wal", "-shm", "-journal"}
+
+// preserveUnhealthyDatabase moves the main database file and any sidecars,
+// unmodified, into a new owner-private <database>.unhealthy-<UTC timestamp>
+// directory beside it. It returns the directory's basename, or "" when there
+// was nothing to preserve. On failure it moves already-moved files back so a
+// main file and its sidecars are never separated.
+func preserveUnhealthyDatabase(databasePath string, now time.Time) (string, error) {
+	var present []string
+	for _, suffix := range databaseFileSuffixes {
+		name := filepath.Base(databasePath) + suffix
+		if _, err := os.Lstat(databasePath + suffix); err == nil {
+			present = append(present, name)
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return "", errors.New("inspect unhealthy current database")
+		}
+	}
+	if len(present) == 0 {
+		return "", nil
+	}
+	parent := filepath.Dir(databasePath)
+	directoryName := filepath.Base(databasePath) + ".unhealthy-" +
+		now.UTC().Format(unhealthyTimestampLayout)
+	directory := filepath.Join(parent, directoryName)
+	if err := os.Mkdir(directory, 0700); err != nil {
+		return "", errors.New("create unhealthy database preservation directory")
+	}
+	var moved []string
+	for _, name := range present {
+		if err := os.Rename(
+			filepath.Join(parent, name), filepath.Join(directory, name),
+		); err != nil {
+			for _, back := range moved {
+				if os.Rename(
+					filepath.Join(directory, back), filepath.Join(parent, back),
+				) != nil {
+					return directoryName, errors.New(
+						"preserving the unhealthy database requires manual recovery",
+					)
+				}
+			}
+			_ = os.Remove(directory)
+			return "", errors.New("preserve unhealthy current database")
+		}
+		moved = append(moved, name)
+	}
+	if err := syncDirectory(directory); err != nil {
+		return directoryName, errors.New(
+			"synchronize unhealthy database preservation directory",
+		)
+	}
+	if err := syncDirectory(parent); err != nil {
+		return directoryName, errors.New(
+			"synchronize unhealthy database preservation directory",
+		)
+	}
+	return directoryName, nil
+}
+
+// removeInstalledDatabase removes a restored copy installed where no healthy
+// pre-restore database existed. The input artifact it came from is untouched.
+func removeInstalledDatabase(databasePath string) error {
+	for _, suffix := range databaseFileSuffixes {
+		if err := os.Remove(databasePath + suffix); err != nil &&
+			!errors.Is(err, os.ErrNotExist) {
+			return errors.New("remove installed restored database")
+		}
+	}
+	return syncDirectory(filepath.Dir(databasePath))
+}
+
 func validateExistingRollback(path string) error {
 	info, err := os.Lstat(path)
 	if errors.Is(err, os.ErrNotExist) {
@@ -348,7 +532,7 @@ func validateExistingRollback(path string) error {
 }
 
 func ensureRestoreSpace(directory string, artifactBytes, currentBytes int64) error {
-	if artifactBytes <= 0 || currentBytes <= 0 ||
+	if artifactBytes <= 0 || currentBytes < 0 ||
 		artifactBytes > int64(^uint64(0)>>1)-currentBytes {
 		return errors.New("restore size is unsupported")
 	}

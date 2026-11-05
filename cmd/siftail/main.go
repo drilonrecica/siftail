@@ -182,5 +182,5 @@ func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "  diagnostics      Print the latest sanitized operational diagnostics")
 	fmt.Fprintln(w, "  backup [--configuration-only] --output <path> Create and verify a backup")
 	fmt.Fprintln(w, "  backup verify <path> Verify a backup without applying changes")
-	fmt.Fprintln(w, "  restore --confirm RESTORE <path> Replace the stopped-server database")
+	fmt.Fprintln(w, "  restore --confirm RESTORE [--replace-unhealthy] <path> Replace the stopped-server database")
 }

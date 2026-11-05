@@ -16,9 +16,11 @@ func runRestoreCommand(args []string, stdout io.Writer) error {
 	flags := flag.NewFlagSet("restore", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	confirmation := flags.String("confirm", "", "")
+	replaceUnhealthy := flags.Bool("replace-unhealthy", false, "")
 	if err := flags.Parse(args); err != nil || flags.NArg() != 1 {
 		return errors.New(
-			"usage: siftail restore --confirm RESTORE <backup-path>",
+			"usage: siftail restore --confirm RESTORE " +
+				"[--replace-unhealthy] <backup-path>",
 		)
 	}
 	if *confirmation != backup.RestoreConfirmation {
@@ -42,19 +44,36 @@ func runRestoreCommand(args []string, stdout io.Writer) error {
 	}
 	result, err := backup.NewRestorer().Restore(
 		context.Background(), backup.RestoreOptions{
-			DataDirectory: cfg.DataDir,
-			DatabasePath:  cfg.DatabasePath,
-			ArtifactPath:  flags.Arg(0),
-			Confirmation:  *confirmation,
+			DataDirectory:    cfg.DataDir,
+			DatabasePath:     cfg.DatabasePath,
+			ArtifactPath:     flags.Arg(0),
+			Confirmation:     *confirmation,
+			ReplaceUnhealthy: *replaceUnhealthy,
 		},
 	)
 	if err != nil {
-		return safeRestoreError(err)
+		err = safeRestoreError(err)
+		if result.PreservedName != "" {
+			return fmt.Errorf(
+				"%w; preserved current database files: %s",
+				err, result.PreservedName,
+			)
+		}
+		return err
 	}
 	fmt.Fprintln(stdout, "restore complete")
 	fmt.Fprintf(stdout, "type: %s\n", result.Type)
 	fmt.Fprintf(stdout, "artifact: %s\n", result.ArtifactName)
-	fmt.Fprintf(stdout, "rollback: %s\n", result.RollbackName)
+	fmt.Fprintf(stdout, "current database: %s\n", result.CurrentState)
+	if result.RollbackName != "" {
+		fmt.Fprintf(stdout, "rollback: %s\n", result.RollbackName)
+	} else {
+		fmt.Fprintln(stdout,
+			"rollback: none (no healthy current database to capture)")
+	}
+	if result.PreservedName != "" {
+		fmt.Fprintf(stdout, "preserved: %s\n", result.PreservedName)
+	}
 	fmt.Fprintf(stdout, "schema: %d\n", result.SchemaAfter)
 	fmt.Fprintf(stdout, "migrated: %t\n", result.Migrated)
 	fmt.Fprintln(stdout, "fresh login required: true")
@@ -66,7 +85,10 @@ func safeRestoreError(err error) error {
 	case "restore requires the Siftail server to be stopped",
 		"restore requires exact RESTORE confirmation",
 		"restore artifact verification failed",
-		"current database is not a compatible rollback source",
+		backup.RestoreErrCurrentMissing,
+		backup.RestoreErrCurrentUnhealthy,
+		backup.RestoreErrFailedNoDatabase,
+		"current database is not a regular owned file",
 		"restore has insufficient destination capacity",
 		"an incomplete restore staging directory requires recovery",
 		"restore completed but staging cleanup requires manual recovery",

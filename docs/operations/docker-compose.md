@@ -244,8 +244,10 @@ the binary.
 To roll back when no incompatible schema change occurred, restore the previous
 image selection and recreate the service. If the newer binary advanced the
 schema, the older binary will refuse startup. Stop the service and restore the
-compatible verified pre-upgrade backup through the documented restore flow;
-Siftail never performs a down-migration.
+compatible verified pre-upgrade backup through the documented restore flow
+with `--replace-unhealthy`, because a newer-schema database cannot become the
+older binary's verified rollback; restore preserves it unmodified in a
+`siftail.db.unhealthy-*` directory. Siftail never performs a down-migration.
 
 ## Stop or remove
 

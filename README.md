@@ -729,6 +729,12 @@ Restoring configuration replaces the complete database with empty log history;
 it does not merge. Password and ingestion-token state roll back to the artifact
 point, so review credentials afterward. A fresh login is always required. Copy
 the managed rollback to a separate protected path before restoring that copy.
+
+When the current database is missing (lost volume) or unhealthy (corrupt, not
+SQLite, or at a schema this binary cannot use), restore refuses unless you add
+`--replace-unhealthy`. With the flag it restores without a rollback copy and
+moves any unhealthy files, unmodified, into a new owner-private
+`siftail.db.unhealthy-<UTC timestamp>/` directory that Siftail never deletes.
 See [`docs/operations/restores.md`](docs/operations/restores.md).
 
 ### Current dependency rationale
