@@ -17,7 +17,7 @@ import (
 )
 
 const (
-	MaxSchemaVersion = 4
+	MaxSchemaVersion = 5
 	readConnections  = 4
 	writerDriverName = "siftail-sqlite-writer"
 	readerDriverName = "siftail-sqlite-reader"

@@ -141,6 +141,10 @@ func assertRestoredUpgradeFixture(
 	events := count("SELECT count(*) FROM log_events")
 	containers := count("SELECT count(*) FROM container_instances")
 	wantEvents, wantContainers := 1, 1
+	if origin >= 5 {
+		// Schema 5 adds a recreated container (same name, new ID).
+		wantContainers = 2
+	}
 	if backupType == TypeConfiguration {
 		wantEvents, wantContainers = 0, 0
 	}

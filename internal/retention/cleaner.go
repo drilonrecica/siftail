@@ -9,12 +9,16 @@ import (
 	"time"
 
 	"github.com/drilonrecica/siftail/internal/database"
+	"github.com/drilonrecica/siftail/internal/logs"
 )
 
 const (
 	DefaultCleanupInterval = time.Hour
 	defaultDeleteChunk     = 10_000
 	defaultVacuumPages     = 8_192
+	// Container instances are small rows; the chunk bounds how many
+	// NOT EXISTS probes one writer turn performs.
+	defaultContainerPruneChunk = 1_000
 )
 
 type CleanupResult struct {
@@ -26,6 +30,7 @@ type CleanupResult struct {
 	SizeTargetReached bool
 	EventsExhausted   bool
 	CheckpointBusy    bool
+	ContainersPruned  int64
 }
 
 type CleanerOptions struct {
@@ -34,6 +39,10 @@ type CleanerOptions struct {
 	Now              func() time.Time
 	AfterDelete      func(int64)
 	MeasureFootprint func(string) (int64, error)
+	// ContainerLimit is the per-server container-instance cap the writer
+	// enforces; it defaults to logs.MaxContainerInstancesPerServer.
+	ContainerLimit      int
+	ContainerPruneChunk int
 }
 
 type Cleaner struct {
@@ -46,6 +55,8 @@ type Cleaner struct {
 	now              func() time.Time
 	afterDelete      func(int64)
 	measureFootprint func(string) (int64, error)
+	containerLimit   int
+	containerChunk   int
 }
 
 func NewCleaner(
@@ -67,11 +78,19 @@ func NewCleaner(
 	if options.MeasureFootprint == nil {
 		options.MeasureFootprint = ActiveFootprint
 	}
+	if options.ContainerLimit <= 0 {
+		options.ContainerLimit = logs.MaxContainerInstancesPerServer
+	}
+	if options.ContainerPruneChunk <= 0 {
+		options.ContainerPruneChunk = defaultContainerPruneChunk
+	}
 	return &Cleaner{
 		db: db, coordinator: coordinator, path: path, settings: settings,
 		deleteChunk: options.DeleteChunk, vacuumPages: options.VacuumPages,
 		now: options.Now, afterDelete: options.AfterDelete,
 		measureFootprint: options.MeasureFootprint,
+		containerLimit:   options.ContainerLimit,
+		containerChunk:   options.ContainerPruneChunk,
 	}
 }
 
@@ -86,10 +105,22 @@ func (c *Cleaner) RunOnce(ctx context.Context) (CleanupResult, error) {
 	}
 	result := CleanupResult{}
 	cutoff := c.now().UTC().AddDate(0, 0, -settings.AgeDays).UnixMicro()
+	if err := c.deleteEvents(ctx, settings, cutoff, &result); err != nil {
+		return result, err
+	}
+	// Event deletion is what leaves container instances unreferenced, so
+	// pruning follows it in the same cycle.
+	pruned, err := c.pruneContainers(ctx, cutoff)
+	result.ContainersPruned = pruned
+	return result, err
+}
+
+func (c *Cleaner) deleteEvents(ctx context.Context, settings Settings, cutoff int64, result *CleanupResult) error {
+	var err error
 	for {
 		deleted, err := c.deleteOldest(ctx, &cutoff)
 		if err != nil {
-			return result, err
+			return err
 		}
 		result.AgeDeleted += deleted
 		c.notifyDeleted(deleted)
@@ -100,30 +131,30 @@ func (c *Cleaner) RunOnce(ctx context.Context) (CleanupResult, error) {
 	if result.AgeDeleted > 0 {
 		busy, err := c.reclaim(ctx)
 		if err != nil {
-			return result, err
+			return err
 		}
 		result.CheckpointBusy = busy
 	}
 
 	result.FootprintBefore, err = c.measureFootprint(c.path)
 	if err != nil {
-		return result, err
+		return err
 	}
 	trigger := settings.MaxDatabaseBytes * 95 / 100
 	target := settings.MaxDatabaseBytes * 90 / 100
 	result.FootprintAfter = result.FootprintBefore
 	if result.FootprintBefore < trigger {
 		result.SizeTargetReached = true
-		return result, nil
+		return nil
 	}
 	result.SizeTriggered = true
 	if result.CheckpointBusy {
-		return result, nil
+		return nil
 	}
 	for result.FootprintAfter > target {
 		deleted, err := c.deleteOldest(ctx, nil)
 		if err != nil {
-			return result, err
+			return err
 		}
 		if deleted == 0 {
 			result.EventsExhausted = true
@@ -133,7 +164,7 @@ func (c *Cleaner) RunOnce(ctx context.Context) (CleanupResult, error) {
 		c.notifyDeleted(deleted)
 		busy, err := c.reclaim(ctx)
 		if err != nil {
-			return result, err
+			return err
 		}
 		if busy {
 			result.CheckpointBusy = true
@@ -141,11 +172,138 @@ func (c *Cleaner) RunOnce(ctx context.Context) (CleanupResult, error) {
 		}
 		result.FootprintAfter, err = c.measureFootprint(c.path)
 		if err != nil {
-			return result, err
+			return err
 		}
 	}
 	result.SizeTargetReached = result.FootprintAfter <= target
-	return result, nil
+	return nil
+}
+
+// pruneContainers is the bounded container-instance cleanup of ADR 0006 and
+// DOMAIN.md §14. An instance a retained event still references is never
+// deleted; the log_events foreign key (no cascade) enforces that as well.
+//
+//  1. Unreferenced instances last seen before the age cutoff, oldest first.
+//  2. Per Server above its prune target, its oldest unreferenced instances by
+//     (last_seen_at_us, id) until it is back at the target. The writer rejects
+//     any batch that would exceed the cap, so a Server can never hold more than
+//     the cap; the target therefore sits one tenth below it, leaving room for
+//     new containers until the next cycle.
+//
+// Each chunk is one coordinator transaction, so ingestion interleaves.
+func (c *Cleaner) pruneContainers(ctx context.Context, cutoff int64) (int64, error) {
+	var total int64
+	for {
+		deleted, err := c.pruneChunk(ctx, func(tx *sql.Tx) (sql.Result, error) {
+			return tx.ExecContext(ctx, `DELETE FROM container_instances WHERE id IN (
+				SELECT c.id FROM container_instances AS c
+				WHERE c.last_seen_at_us < ?
+				AND NOT EXISTS (
+					SELECT 1 FROM log_events AS e WHERE e.container_instance_id = c.id
+				)
+				ORDER BY c.last_seen_at_us, c.id LIMIT ?)`, cutoff, c.containerChunk)
+		})
+		total += deleted
+		if err != nil {
+			return total, err
+		}
+		if deleted < int64(c.containerChunk) {
+			break
+		}
+	}
+
+	target := c.containerLimit - c.containerLimit/10
+	servers, err := c.serversAboveContainerTarget(ctx, target)
+	if err != nil {
+		return total, err
+	}
+	for _, serverID := range servers {
+		for {
+			deleted, err := c.pruneChunk(ctx, func(tx *sql.Tx) (sql.Result, error) {
+				var count int
+				if err := tx.QueryRowContext(ctx, `SELECT count(*)
+					FROM container_instances AS c JOIN sources AS s ON s.id = c.source_id
+					WHERE s.server_id = ?`, serverID).Scan(&count); err != nil {
+					return nil, err
+				}
+				excess := min(count-target, c.containerChunk)
+				if excess <= 0 {
+					return nil, nil
+				}
+				return tx.ExecContext(ctx, `DELETE FROM container_instances WHERE id IN (
+					SELECT c.id FROM container_instances AS c
+					JOIN sources AS s ON s.id = c.source_id
+					WHERE s.server_id = ?
+					AND NOT EXISTS (
+						SELECT 1 FROM log_events AS e WHERE e.container_instance_id = c.id
+					)
+					ORDER BY c.last_seen_at_us, c.id LIMIT ?)`, serverID, excess)
+			})
+			total += deleted
+			if err != nil {
+				return total, err
+			}
+			// Zero means the Server is at its target or every remaining
+			// instance still has retained events.
+			if deleted == 0 {
+				break
+			}
+		}
+	}
+	return total, nil
+}
+
+// pruneChunk runs one bounded deletion in a writer transaction. A nil result
+// means there was nothing to delete.
+func (c *Cleaner) pruneChunk(ctx context.Context, remove func(*sql.Tx) (sql.Result, error)) (int64, error) {
+	var deleted int64
+	err := c.coordinator.Do(ctx, func(tx *sql.Tx) error {
+		result, err := remove(tx)
+		if err != nil {
+			return database.Classify("prune container instances", err)
+		}
+		if result == nil {
+			return nil
+		}
+		deleted, err = result.RowsAffected()
+		if err != nil {
+			return database.Classify("read container prune result", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return 0, fmt.Errorf("container instance pruning: %w", err)
+	}
+	return deleted, nil
+}
+
+// serversAboveContainerTarget reads candidates from the reader pool; every
+// chunk recounts inside its writer transaction, so a stale list only costs a
+// no-op transaction.
+func (c *Cleaner) serversAboveContainerTarget(ctx context.Context, target int) ([]int64, error) {
+	rows, err := c.db.QueryContext(ctx, `SELECT s.server_id
+		FROM container_instances AS c JOIN sources AS s ON s.id = c.source_id
+		GROUP BY s.server_id HAVING count(*) > ?
+		ORDER BY s.server_id`, target)
+	if err != nil {
+		return nil, fmt.Errorf("container instance pruning: %w",
+			database.Classify("list servers above container target", err))
+	}
+	defer rows.Close()
+	var servers []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("container instance pruning: %w",
+				database.Classify("scan server above container target", err))
+		}
+		servers = append(servers, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("container instance pruning: %w",
+			database.Classify("list servers above container target", err))
+	}
+	return servers, nil
 }
 
 func (c *Cleaner) deleteOldest(ctx context.Context, cutoff *int64) (int64, error) {

@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -20,13 +21,15 @@ var upgradeFixtureDigests = map[string]string{
 	"schema-2.db": "3d12a740144c0c1a08dff3b8a629a9d79180f2c0a4ab2d5f5180e45f8dbce9d4",
 	"schema-3.db": "feaef12f35a3a01256eebce642c6679960dc4219ddb1df9d1952143e0056320b",
 	"schema-4.db": "5c9926b8c354e9622147acb0f10454e81db764068677776bd31fcddac92e4fe2",
+	"schema-5.db": "3e051e348460e4ceb851028a93a998032d295a3865c770ac35c478ab7a840870",
 }
 
 var releasedMigrationDigests = map[string]string{
-	"0001_initial_ingestion.sql": "0ab04b3124455d3a85506240e78ecebcb16d55efd582499aa91866ac6a931083",
-	"0002_administrator.sql":     "462a28b4f485b3e3f2f1c1dc0865b679d5b320cdcf0f9e01b8f0cb81c995cc41",
-	"0003_sessions.sql":          "ff06187d1d558e1a454487293d40733d4eb0ba445909fc42e48f51f9c8a0af31",
-	"0004_security_audit.sql":    "713a2f0114794fadd13e14809a8d8c7682d180bc4c804dd1b517ecc83dbef6b2",
+	"0001_initial_ingestion.sql":  "0ab04b3124455d3a85506240e78ecebcb16d55efd582499aa91866ac6a931083",
+	"0002_administrator.sql":      "462a28b4f485b3e3f2f1c1dc0865b679d5b320cdcf0f9e01b8f0cb81c995cc41",
+	"0003_sessions.sql":           "ff06187d1d558e1a454487293d40733d4eb0ba445909fc42e48f51f9c8a0af31",
+	"0004_security_audit.sql":     "713a2f0114794fadd13e14809a8d8c7682d180bc4c804dd1b517ecc83dbef6b2",
+	"0005_container_identity.sql": "58e29550ad535fab6890a6aa437c717d5d8b9e7eba0a4efd07026c83b497be5d",
 }
 
 func TestReleasedMigrationsAndHistoricalFixturesAreImmutable(t *testing.T) {
@@ -81,7 +84,7 @@ func TestHistoricalFixtureFailedNextMigrationRollsBackOnlyFailedVersion(t *testi
 	}
 	migrations = append(migrations, migration{
 		version: MaxSchemaVersion + 1,
-		name:    "0005_synthetic_failure.sql",
+		name:    fmt.Sprintf("%04d_synthetic_failure.sql", MaxSchemaVersion+1),
 		sql: `CREATE TABLE migration_must_rollback(id INTEGER) STRICT;
 			THIS IS NOT VALID SQL;`,
 	})
@@ -127,7 +130,9 @@ func TestProductionOpenRefusesNewerHistoricalFixtureWithoutDownMigration(t *test
 	}
 	if _, err := raw.Exec(`INSERT INTO schema_migrations(
 		version,name,applied_at_us
-	) VALUES(5,'0005_future.sql',1785196800000005)`); err != nil {
+	) VALUES(?,?,1785196800000005)`,
+		MaxSchemaVersion+1, fmt.Sprintf("%04d_future.sql", MaxSchemaVersion+1),
+	); err != nil {
 		t.Fatal(err)
 	}
 	if err := raw.Close(); err != nil {
@@ -141,7 +146,7 @@ func TestProductionOpenRefusesNewerHistoricalFixtureWithoutDownMigration(t *test
 	}
 	var tooNew *SchemaTooNewError
 	if !errors.As(err, &tooNew) ||
-		tooNew.Actual != 5 || tooNew.Supported != MaxSchemaVersion {
+		tooNew.Actual != MaxSchemaVersion+1 || tooNew.Supported != MaxSchemaVersion {
 		t.Fatalf("newer schema error = %#v", err)
 	}
 	raw, err = sql.Open("sqlite3", path)
@@ -149,7 +154,7 @@ func TestProductionOpenRefusesNewerHistoricalFixtureWithoutDownMigration(t *test
 		t.Fatal(err)
 	}
 	defer raw.Close()
-	assertSchemaVersion(t, raw, 5)
+	assertSchemaVersion(t, raw, MaxSchemaVersion+1)
 	assertRepresentativeFixtureRows(t, raw, MaxSchemaVersion)
 }
 

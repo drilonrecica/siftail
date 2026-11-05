@@ -15,7 +15,7 @@ import (
 
 const (
 	defaultSourceLimit     = 10_000
-	defaultContainerLimit  = 100_000
+	defaultContainerLimit  = logs.MaxContainerInstancesPerServer
 	sourceCacheCapacity    = 4_096
 	containerCacheCapacity = 8_192
 )
@@ -77,10 +77,37 @@ type sourceKey struct {
 	service     string
 }
 
+// containerKey is the writer's container identity (ADR 0006): the container
+// ID when the producer supplies one, otherwise the name. Exactly one of id and
+// name is set, so a renamed container keeps its key.
 type containerKey struct {
 	sourceID int64
 	id       string
 	name     string
+}
+
+func containerCacheKey(sourceID int64, container logs.ContainerIdentity) containerKey {
+	if container.ID != "" {
+		return containerKey{sourceID: sourceID, id: container.ID}
+	}
+	return containerKey{sourceID: sourceID, name: container.Name}
+}
+
+// containerResolution is one container instance as seen inside a batch
+// transaction: its stored label and last-seen time, and the newest label the
+// batch carries for it.
+type containerResolution struct {
+	instanceID int64
+	storedName string
+	storedSeen int64
+	label      string
+	labelSeen  int64
+}
+
+func (r *containerResolution) observe(name string, seen int64) {
+	if seen >= r.labelSeen {
+		r.label, r.labelSeen = name, seen
+	}
 }
 
 type cacheUpdate[K comparable] struct {
@@ -179,38 +206,60 @@ func (w *BatchWriter) persistTransaction(
 		sourceUpdates = append(sourceUpdates, cacheUpdate[sourceKey]{key: key, id: id})
 	}
 
-	containerIDs := make(map[containerKey]int64)
+	containers := make(map[containerKey]*containerResolution)
+	var containerOrder []containerKey
 	var containerUpdates []cacheUpdate[containerKey]
+	containerCreated := false
 	for _, event := range batch.Events {
 		if event.Container == nil {
 			continue
 		}
 		sourceID := sourceIDs[sourceCacheKey(event.Source)]
-		key := containerKey{sourceID: sourceID, id: event.Container.ID, name: event.Container.Name}
-		if _, ok := containerIDs[key]; ok {
+		key := containerCacheKey(sourceID, *event.Container)
+		if resolved, ok := containers[key]; ok {
+			resolved.observe(event.Container.Name, event.ReceivedAtUS)
 			continue
 		}
+		var resolved *containerResolution
 		if id, ok := w.containers.Get(key); ok {
-			containerIDs[key] = id
-			continue
-		}
-		id, created, err := w.resolveContainer(ctx, tx, sourceID, *event.Container, event.ReceivedAtUS)
-		if err != nil {
-			return nil, nil, nil, err
-		}
-		if created {
-			var count int
-			if err := tx.QueryRowContext(ctx, `SELECT count(*)
-				FROM container_instances c JOIN sources s ON s.id=c.source_id
-				WHERE s.server_id=?`, event.Source.ServerID).Scan(&count); err != nil {
-				return nil, nil, nil, database.Classify("count server containers", err)
+			// Retention pruning and source cleanup delete unreferenced
+			// instances, so a cached ID is a hint that SQLite confirms.
+			cached, found, err := loadCachedContainer(ctx, tx, id, key)
+			if err != nil {
+				return nil, nil, nil, err
 			}
-			if count > w.options.ContainerLimit {
-				return nil, nil, nil, &Error{Category: CategoryForbidden}
+			if found {
+				resolved = &cached
 			}
 		}
-		containerIDs[key] = id
-		containerUpdates = append(containerUpdates, cacheUpdate[containerKey]{key: key, id: id})
+		if resolved == nil {
+			fresh, created, err := w.resolveContainer(ctx, tx, sourceID, *event.Container, event.ReceivedAtUS)
+			if err != nil {
+				return nil, nil, nil, err
+			}
+			containerCreated = containerCreated || created
+			resolved = &fresh
+			containerUpdates = append(containerUpdates, cacheUpdate[containerKey]{key: key, id: fresh.instanceID})
+		}
+		resolved.observe(event.Container.Name, event.ReceivedAtUS)
+		containers[key] = resolved
+		containerOrder = append(containerOrder, key)
+	}
+	if containerCreated {
+		// One count per batch: the rejection is atomic for the whole batch,
+		// so the final total is the only one that matters.
+		var count int
+		if err := tx.QueryRowContext(ctx, `SELECT count(*)
+			FROM container_instances c JOIN sources s ON s.id=c.source_id
+			WHERE s.server_id=?`, batch.AuthenticatedServerID).Scan(&count); err != nil {
+			return nil, nil, nil, database.Classify("count server containers", err)
+		}
+		if count > w.options.ContainerLimit {
+			return nil, nil, nil, &Error{Category: CategoryForbidden}
+		}
+	}
+	if err := updateContainerLabels(ctx, tx, containerOrder, containers); err != nil {
+		return nil, nil, nil, err
 	}
 
 	var committed []logs.CommittedEvent
@@ -219,7 +268,7 @@ func (w *BatchWriter) persistTransaction(
 		var containerID int64
 		var databaseContainerID any
 		if event.Container != nil {
-			containerID = containerIDs[containerKey{sourceID: sourceID, id: event.Container.ID, name: event.Container.Name}]
+			containerID = containers[containerCacheKey(sourceID, *event.Container)].instanceID
 			databaseContainerID = containerID
 		}
 		if event.SourceEventID != "" {
@@ -258,7 +307,7 @@ func (w *BatchWriter) persistTransaction(
 		})
 	}
 
-	if err := updateLastSeen(ctx, tx, batch.Events, sourceIDs, containerIDs); err != nil {
+	if err := updateLastSeen(ctx, tx, batch.Events, sourceIDs, containers); err != nil {
 		return nil, nil, nil, err
 	}
 	return committed, sourceUpdates, containerUpdates, nil
@@ -303,35 +352,99 @@ func (w *BatchWriter) resolveSource(ctx context.Context, tx *sql.Tx, source logs
 	return id, true, nil
 }
 
+// resolveContainer applies ADR 0006: an event with a container ID resolves by
+// (source, container ID); a name-only event resolves only to an ID-less
+// instance with that name, because attaching it to an instance with an ID would
+// guess identity. Neither is unique in the schema; should a defect ever store
+// two candidates, the most recently seen wins rather than blocking ingestion.
 func (w *BatchWriter) resolveContainer(
 	ctx context.Context,
 	tx *sql.Tx,
 	sourceID int64,
 	container logs.ContainerIdentity,
 	seen int64,
-) (int64, bool, error) {
-	var id int64
-	err := tx.QueryRowContext(ctx, `SELECT id FROM container_instances
-		WHERE source_id=? AND container_id IS ? AND container_name IS ?`,
-		sourceID, nullable(container.ID), nullable(container.Name)).Scan(&id)
+) (containerResolution, bool, error) {
+	query := `SELECT id, coalesce(container_name, ''), last_seen_at_us
+		FROM container_instances
+		WHERE source_id=? AND container_id=?
+		ORDER BY last_seen_at_us DESC, id DESC LIMIT 1`
+	match := container.ID
+	if container.ID == "" {
+		query = `SELECT id, coalesce(container_name, ''), last_seen_at_us
+			FROM container_instances
+			WHERE source_id=? AND container_id IS NULL AND container_name=?
+			ORDER BY last_seen_at_us DESC, id DESC LIMIT 1`
+		match = container.Name
+	}
+	var resolved containerResolution
+	err := tx.QueryRowContext(ctx, query, sourceID, match).Scan(
+		&resolved.instanceID, &resolved.storedName, &resolved.storedSeen)
 	if err == nil {
-		return id, false, nil
+		return resolved, false, nil
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
-		return 0, false, database.Classify("resolve container", err)
+		return containerResolution{}, false, database.Classify("resolve container", err)
 	}
 	result, err := tx.ExecContext(ctx, `INSERT INTO container_instances(
 		source_id, container_id, container_name, first_seen_at_us, last_seen_at_us
 	) VALUES (?, nullif(?, ''), nullif(?, ''), ?, ?)`,
 		sourceID, container.ID, container.Name, seen, seen)
 	if err != nil {
-		return 0, false, database.Classify("create container", err)
+		return containerResolution{}, false, database.Classify("create container", err)
 	}
-	id, err = result.LastInsertId()
+	id, err := result.LastInsertId()
 	if err != nil {
-		return 0, false, database.Classify("read container ID", err)
+		return containerResolution{}, false, database.Classify("read container ID", err)
 	}
-	return id, true, nil
+	return containerResolution{instanceID: id, storedName: container.Name, storedSeen: seen}, true, nil
+}
+
+// loadCachedContainer confirms a cached instance ID. SQLite reuses the largest
+// rowid after a deletion, so the row must still carry the cached identity, not
+// merely the cached ID.
+func loadCachedContainer(ctx context.Context, tx *sql.Tx, id int64, key containerKey) (containerResolution, bool, error) {
+	query := `SELECT coalesce(container_name, ''), last_seen_at_us
+		FROM container_instances WHERE id=? AND source_id=? AND container_id=?`
+	match := key.id
+	if key.id == "" {
+		query = `SELECT coalesce(container_name, ''), last_seen_at_us
+			FROM container_instances
+			WHERE id=? AND source_id=? AND container_id IS NULL AND container_name=?`
+		match = key.name
+	}
+	resolved := containerResolution{instanceID: id}
+	err := tx.QueryRowContext(ctx, query, id, key.sourceID, match).Scan(
+		&resolved.storedName, &resolved.storedSeen)
+	if errors.Is(err, sql.ErrNoRows) {
+		return containerResolution{}, false, nil
+	}
+	if err != nil {
+		return containerResolution{}, false, database.Classify("verify cached container", err)
+	}
+	return resolved, true, nil
+}
+
+// updateContainerLabels records a changed container name on its instance. The
+// name is a mutable label (ADR 0006); a label older than the instance's last
+// observation (a redelivered chunk) does not overwrite a newer one.
+func updateContainerLabels(
+	ctx context.Context,
+	tx *sql.Tx,
+	order []containerKey,
+	containers map[containerKey]*containerResolution,
+) error {
+	for _, key := range order {
+		resolved := containers[key]
+		if resolved.label == resolved.storedName || resolved.labelSeen < resolved.storedSeen {
+			continue
+		}
+		if _, err := tx.ExecContext(ctx,
+			"UPDATE container_instances SET container_name=nullif(?, '') WHERE id=?",
+			resolved.label, resolved.instanceID); err != nil {
+			return database.Classify("update container label", err)
+		}
+	}
+	return nil
 }
 
 func updateLastSeen(
@@ -339,7 +452,7 @@ func updateLastSeen(
 	tx *sql.Tx,
 	events []logs.CanonicalEvent,
 	sourceIDs map[sourceKey]int64,
-	containerIDs map[containerKey]int64,
+	containers map[containerKey]*containerResolution,
 ) error {
 	sourceSeen := make(map[int64]int64)
 	containerSeen := make(map[int64]int64)
@@ -351,7 +464,7 @@ func updateLastSeen(
 			sourceLabels[sourceID] = event.Source
 		}
 		if event.Container != nil {
-			containerID := containerIDs[containerKey{sourceID: sourceID, id: event.Container.ID, name: event.Container.Name}]
+			containerID := containers[containerCacheKey(sourceID, *event.Container)].instanceID
 			if event.ReceivedAtUS > containerSeen[containerID] {
 				containerSeen[containerID] = event.ReceivedAtUS
 			}

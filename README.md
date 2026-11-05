@@ -466,7 +466,12 @@ rows by default and at most 200; they do not run an event count.
 
 Source detail keeps stable identity keys separate from display labels and
 aliases. Container IDs and names appear only as ephemeral observations under
-their source. At most the 200 most recently seen container observations are
+their source. A container instance is identified by its container ID; its name
+is a mutable label that follows the latest observation, and an event with only
+a name matches only an instance that has no ID (ADR 0006). A recreated
+container (the same name with a new ID, as after `docker compose up
+--force-recreate` or a Coolify redeploy) is a new instance and never blocks
+ingestion. At most the 200 most recently seen container observations are
 loaded, with an explicit notice when older observations exist. “Open logs”
 returns to History with the exact Server and four stable source-key dimensions.
 The measured 10,000-source plan and latency baseline is recorded in
@@ -539,7 +544,12 @@ Whichever threshold is reached first is authoritative. Cleanup is oldest-first
 by the earlier of event time and receive time, then event ID, and size cleanup
 measures the main database plus WAL and shared-memory files. These controls
 apply only to application events: they do not remove Servers, tokens, aliases,
-sessions, settings, or security audit history. Retention is not forensic
+sessions, settings, or security audit history. The same cycle then prunes
+container observations that no retained event references, in transactions of
+at most 1,000: first those last seen before the age cutoff, then, for a Server
+holding more than 90,000 of its 100,000-instance cap, its oldest unreferenced
+instances until it is back at 90,000. An observation with retained events is
+never pruned. Retention is not forensic
 erasure and does not control backups, snapshots, or unrelated host files.
 
 The lifecycle-owned cleanup worker runs at startup and hourly. It deletes no

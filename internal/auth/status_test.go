@@ -119,7 +119,7 @@ func TestBrowserRunsAuthenticatedCorrelatedSafeDatabaseCheck(t *testing.T) {
 	body := page.Body.String()
 	if page.Code != http.StatusOK ||
 		!strings.Contains(body, "Database check completed.") ||
-		!strings.Contains(body, "Healthy · schema 4/4 · SQLite ") ||
+		!strings.Contains(body, "Healthy · schema 5/5 · SQLite ") ||
 		!strings.Contains(body, "· ok · checkpoint completed") ||
 		!strings.Contains(body, "database_check_succeeded") ||
 		!strings.Contains(body, "The bounded database check completed successfully.") ||

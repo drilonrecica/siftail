@@ -1,7 +1,7 @@
 # SQLite upgrade fixtures
 
 These databases are immutable, synthetic historical snapshots for Siftail
-schema versions 1 through 4. They contain no production credentials or
+schema versions 1 through 5. They contain no production credentials or
 application payloads. Names, tokens, password/session material, addresses, and
 events are deliberately recognizable test values.
 
@@ -9,7 +9,9 @@ events are deliberately recognizable test values.
 then inserts representative settings, trusted Server/token state, source and
 container identity, and an immutable event. Later schemas additionally carry
 the administrator, session, and security-audit state introduced by that
-version. Fixed timestamps and deterministic synthetic hashes make provenance
+version. Schema 5 additionally carries a recreated container (the same name
+with a new container ID), which schema 4's uniqueness constraints could not
+hold. Fixed timestamps and deterministic synthetic hashes make provenance
 reviewable.
 
 The compatibility tests pin each database's SHA-256 digest. Do not regenerate
@@ -24,13 +26,14 @@ schema-1.db  fa41df2de53d37597eedf87dba7e854539c0a61197f25f2d8f98d76e8a74d0a3
 schema-2.db  3d12a740144c0c1a08dff3b8a629a9d79180f2c0a4ab2d5f5180e45f8dbce9d4
 schema-3.db  feaef12f35a3a01256eebce642c6679960dc4219ddb1df9d1952143e0056320b
 schema-4.db  5c9926b8c354e9622147acb0f10454e81db764068677776bd31fcddac92e4fe2
+schema-5.db  3e051e348460e4ceb851028a93a998032d295a3865c770ac35c478ab7a840870
 ```
 
 After adding a migration, update the generator's ordered name list and current
 version, then generate only the new fixture from the repository root:
 
 ```bash
-go run ./internal/database/testdata/upgrades/generate.go -version 5
+go run ./internal/database/testdata/upgrades/generate.go -version 6
 ```
 
 An intentional correction to one existing fixture is explicit:

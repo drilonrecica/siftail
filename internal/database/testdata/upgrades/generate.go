@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -22,7 +23,7 @@ import (
 )
 
 const (
-	currentSchema = 4
+	currentSchema = 5
 	fixtureTimeUS = int64(1785196800000000)
 )
 
@@ -31,7 +32,13 @@ var migrationNames = []string{
 	"0002_administrator.sql",
 	"0003_sessions.sql",
 	"0004_security_audit.sql",
+	"0005_container_identity.sql",
 }
+
+// foreignKeysOffDirective mirrors internal/database/migrate.go: such a
+// migration runs with enforcement disabled outside its transaction and is
+// checked with PRAGMA foreign_key_check before commit.
+const foreignKeysOffDirective = "-- siftail:foreign-keys-off"
 
 func main() {
 	overwrite := flag.Bool("overwrite", false, "replace existing immutable fixtures")
@@ -115,6 +122,16 @@ func createFixture(output string, version int, overwrite bool) error {
 			_ = db.Close()
 			return fmt.Errorf("read %s: %w", name, err)
 		}
+		firstLine, _, _ := strings.Cut(string(body), "\n")
+		foreignKeysOff := strings.TrimSpace(firstLine) == foreignKeysOffDirective
+		if foreignKeysOff {
+			// The fixture pool has exactly one connection, so the pragma
+			// applies to the transaction below.
+			if _, err := db.Exec("PRAGMA foreign_keys=OFF"); err != nil {
+				_ = db.Close()
+				return fmt.Errorf("disable foreign keys for %s: %w", name, err)
+			}
+		}
 		tx, err := db.BeginTx(context.Background(), nil)
 		if err != nil {
 			_ = db.Close()
@@ -124,6 +141,20 @@ func createFixture(output string, version int, overwrite bool) error {
 			_ = tx.Rollback()
 			_ = db.Close()
 			return fmt.Errorf("apply %s: %w", name, err)
+		}
+		if foreignKeysOff {
+			var violation string
+			err := tx.QueryRow("SELECT \"table\" FROM pragma_foreign_key_check").Scan(&violation)
+			if err == nil {
+				_ = tx.Rollback()
+				_ = db.Close()
+				return fmt.Errorf("%s left a foreign-key violation in %s", name, violation)
+			}
+			if err != sql.ErrNoRows {
+				_ = tx.Rollback()
+				_ = db.Close()
+				return fmt.Errorf("check foreign keys for %s: %w", name, err)
+			}
 		}
 		if _, err := tx.Exec(
 			`INSERT INTO schema_migrations(version,name,applied_at_us)
@@ -137,6 +168,12 @@ func createFixture(output string, version int, overwrite bool) error {
 		if err := tx.Commit(); err != nil {
 			_ = db.Close()
 			return fmt.Errorf("commit %s: %w", name, err)
+		}
+		if foreignKeysOff {
+			if _, err := db.Exec("PRAGMA foreign_keys=ON"); err != nil {
+				_ = db.Close()
+				return fmt.Errorf("restore foreign keys after %s: %w", name, err)
+			}
 		}
 	}
 	if err := seedFixture(db, version); err != nil {
@@ -261,6 +298,18 @@ func seedFixture(db *sql.DB, version int) error {
 			17,?,'authentication','fixture.upgrade','succeeded','system',
 			NULL,11,13,'{"setting_name":"synthetic_fixture"}','fixture-audit-request'
 		)`, fixtureTimeUS+3); err != nil {
+			return err
+		}
+	}
+	if version >= 5 {
+		// A recreated container: the same name with a new container ID, which
+		// schema 4's UNIQUE (source_id, container_name) could not hold. It
+		// has no retained event, so it is also a prunable instance.
+		if _, err := tx.Exec(`INSERT INTO container_instances(
+			id,source_id,container_id,container_name,first_seen_at_us,last_seen_at_us
+		) VALUES(18,13,'synthetic-container-id-recreated','synthetic-container',?,?)`,
+			fixtureTimeUS+4, fixtureTimeUS+4,
+		); err != nil {
 			return err
 		}
 	}

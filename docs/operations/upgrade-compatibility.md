@@ -1,12 +1,12 @@
 # Database upgrade compatibility
 
-**Reviewed:** 2026-07-28
-**Scope:** SFT-047 schema 1–4 fixture and recovery matrix
+**Reviewed:** 2026-11-05
+**Scope:** SFT-047 schema 1–4 fixture and recovery matrix; SFT-087 schema 5
 
 ## Supported window
 
 The current pre-public binary supports automatic forward migration from every
-checked-in historical schema fixture, versions 1 through 4. It supports a
+checked-in historical schema fixture, versions 1 through 5. It supports a
 fresh database through the same production open path. Before `1.0`, only the
 latest stable Siftail release receives ordinary support, but that release must
 continue to open every schema fixture retained in this repository.
@@ -26,7 +26,8 @@ Immutable SQLite snapshots live in
 settings, trusted Server/token, source/container, and immutable application
 event state. Schema 2 adds a deterministic synthetic Argon2id administrator;
 schema 3 adds a hashed synthetic browser session; schema 4 adds a sanitized
-immutable security-audit event.
+immutable security-audit event; schema 5 adds a recreated container instance
+(the same name with a new container ID), which schema 4 could not hold.
 
 Every name, address, token, credential, timestamp, and payload is an obvious
 synthetic test value. The generator contains no production data and makes no
@@ -45,9 +46,30 @@ removal requires an authoritative minimum-upgrade policy, release notes,
 continued support for every schema inside that window, and a documented
 intermediate upgrade path where necessary.
 
+## Schema 5: container identity
+
+Migration `0005_container_identity.sql` (ADR 0006) rebuilds
+`container_instances` without `UNIQUE (source_id, container_id)` and
+`UNIQUE (source_id, container_name)`, keeping the source foreign key, the
+column checks, and `UNIQUE (id, source_id)`, and adds two non-unique lookup
+indexes. Every row is copied with its `id`, so every event keeps its container
+reference. Because `log_events` references the rebuilt table, the migration
+runs with foreign-key enforcement disabled outside its transaction (SQLite's
+documented rebuild procedure) and commits only after `PRAGMA
+foreign_key_check` reports no violation; enforcement is restored before the
+connection is used again. The rebuild copies only the bounded container table,
+but the foreign-key check reads every retained event once, so the first open
+after upgrade grows with database size: about 0.3 seconds for 2,000,000
+events (515 MB) on btrfs on a SATA SSD (`sqlite3` 3.50, measured 2026-11-05).
+
+The migration is forward-only. A binary that supports only schema 4 refuses
+the upgraded database with its actual and supported versions and changes
+nothing. Downgrading requires restoring a backup taken before the upgrade;
+there is no down-migration.
+
 ## Matrix guarantees
 
-For each schema 1–4 fixture, tests:
+For each schema 1–5 fixture, tests:
 
 1. copy the immutable file and verify its pinned digest;
 2. open it through production pragmas, compatibility checks, migrations,

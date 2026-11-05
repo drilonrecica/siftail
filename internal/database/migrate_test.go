@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -12,7 +13,7 @@ import (
 
 func TestInitialMigrationAndNoOpReopen(t *testing.T) {
 	db := openTestDB(t)
-	assertSchemaVersion(t, db.Writer(), 4)
+	assertSchemaVersion(t, db.Writer(), MaxSchemaVersion)
 	for _, table := range []string{"settings", "servers", "ingestion_tokens", "sources", "container_instances", "log_events", "administrators", "sessions", "security_audit_events"} {
 		var found int
 		if err := db.Writer().QueryRow("SELECT count(*) FROM sqlite_schema WHERE type='table' AND name=?", table).Scan(&found); err != nil {
@@ -25,7 +26,7 @@ func TestInitialMigrationAndNoOpReopen(t *testing.T) {
 	if err := Migrate(context.Background(), db.Writer()); err != nil {
 		t.Fatal(err)
 	}
-	assertSchemaVersion(t, db.Writer(), 4)
+	assertSchemaVersion(t, db.Writer(), MaxSchemaVersion)
 }
 
 func TestAdministratorMigrationPreservesPreviousSchemaData(t *testing.T) {
@@ -51,7 +52,7 @@ func TestAdministratorMigrationPreservesPreviousSchemaData(t *testing.T) {
 	if err := applyMigrations(context.Background(), db, migrations); err != nil {
 		t.Fatal(err)
 	}
-	assertSchemaVersion(t, db, 4)
+	assertSchemaVersion(t, db, MaxSchemaVersion)
 	var name string
 	if err := db.QueryRow("SELECT name FROM servers WHERE id=7").Scan(&name); err != nil || name != "preserved" {
 		t.Fatalf("preserved server = %q, err=%v", name, err)
@@ -65,7 +66,7 @@ func TestAdministratorMigrationPreservesPreviousSchemaData(t *testing.T) {
 	}
 	var tooNew *SchemaTooNewError
 	if err := checkSchemaCompatible(context.Background(), db, 2); !errors.As(err, &tooNew) ||
-		tooNew.Actual != 4 || tooNew.Supported != 2 {
+		tooNew.Actual != MaxSchemaVersion || tooNew.Supported != 2 {
 		t.Fatalf("older compatibility error = %#v", err)
 	}
 }
@@ -92,7 +93,7 @@ func TestSessionMigrationPreservesAdministrator(t *testing.T) {
 	if err := applyMigrations(context.Background(), db, migrations); err != nil {
 		t.Fatal(err)
 	}
-	assertSchemaVersion(t, db, 4)
+	assertSchemaVersion(t, db, MaxSchemaVersion)
 	var username string
 	if err := db.QueryRow("SELECT username FROM administrators WHERE id=1").Scan(&username); err != nil ||
 		username != "Admin" {
@@ -140,7 +141,7 @@ func TestSecurityAuditMigrationPreservesSchemaThreeData(t *testing.T) {
 	if err := applyMigrations(context.Background(), db, migrations); err != nil {
 		t.Fatal(err)
 	}
-	assertSchemaVersion(t, db, 4)
+	assertSchemaVersion(t, db, MaxSchemaVersion)
 	var administrator, server, message string
 	if err := db.QueryRow("SELECT username FROM administrators WHERE id=1").
 		Scan(&administrator); err != nil {
@@ -167,7 +168,7 @@ func TestSecurityAuditMigrationPreservesSchemaThreeData(t *testing.T) {
 	}
 	var tooNew *SchemaTooNewError
 	if err := checkSchemaCompatible(context.Background(), db, 3); !errors.As(err, &tooNew) ||
-		tooNew.Actual != 4 || tooNew.Supported != 3 {
+		tooNew.Actual != MaxSchemaVersion || tooNew.Supported != 3 {
 		t.Fatalf("older compatibility error = %#v", err)
 	}
 }
@@ -368,6 +369,8 @@ func TestCriticalIndexesAreUsed(t *testing.T) {
 		{"SELECT id FROM log_events WHERE source_id=1 AND level_normalized='error' ORDER BY event_at_us DESC, id DESC LIMIT 10", "log_events_source_level_time_idx"},
 		{"SELECT id FROM log_events WHERE request_id='r'", "log_events_request_id_idx"},
 		{"SELECT id FROM log_events ORDER BY retention_at_us, id LIMIT 10", "log_events_retention_idx"},
+		{"SELECT id FROM container_instances WHERE source_id=1 AND container_id='c' ORDER BY last_seen_at_us DESC, id DESC LIMIT 1", "container_instances_source_container_id_idx"},
+		{"SELECT id FROM container_instances WHERE source_id=1 AND container_id IS NULL AND container_name='n' ORDER BY last_seen_at_us DESC, id DESC LIMIT 1", "container_instances_source_name_idx"},
 	}
 	for _, tt := range tests {
 		var id, parent, unused int
@@ -378,6 +381,158 @@ func TestCriticalIndexesAreUsed(t *testing.T) {
 		if !contains(detail, tt.index) {
 			t.Errorf("%s plan %q does not use %s", tt.query, detail, tt.index)
 		}
+	}
+}
+
+func TestContainerIdentityMigrationPreservesSchemaFourInstances(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "schema-4.db")
+	db, err := sql.Open("sqlite3", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	db.SetMaxOpenConns(1)
+	if _, err := db.Exec("PRAGMA foreign_keys=ON"); err != nil {
+		t.Fatal(err)
+	}
+	migrations, err := loadMigrations(migrationFiles)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !migrations[4].foreignKeysOff || migrations[0].foreignKeysOff {
+		t.Fatal("only migration 0005 runs with foreign keys disabled")
+	}
+	if err := applyMigrations(context.Background(), db, migrations[:4]); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO servers(id,name,created_at_us) VALUES(1,'s',1);
+		INSERT INTO sources(id,server_id,project_key,environment_key,application_key,service_key,project_label,environment_label,application_label,service_label,first_seen_at_us,last_seen_at_us)
+		VALUES(1,1,'p','e','a','x','p','e','a','x',1,1);
+		INSERT INTO container_instances(id,source_id,container_id,container_name,first_seen_at_us,last_seen_at_us) VALUES
+			(7,1,'id-a','web-1',1,5),(8,1,NULL,'worker',2,6),(9,1,'id-c',NULL,3,7);
+		INSERT INTO log_events(id,event_at_us,received_at_us,source_id,container_instance_id,stream,level_normalized,message_raw,message_text)
+		VALUES(20,1,1,1,7,'stdout','info',x'61','a'),(21,1,1,1,8,'stdout','info',x'62','b')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO container_instances(source_id,container_id,container_name,first_seen_at_us,last_seen_at_us)
+		VALUES(1,'id-new','web-1',8,8)`); err == nil {
+		t.Fatal("schema 4 accepted a reused container name")
+	}
+
+	if err := applyMigrations(context.Background(), db, migrations); err != nil {
+		t.Fatal(err)
+	}
+	assertSchemaVersion(t, db, MaxSchemaVersion)
+
+	rows, err := db.Query(`SELECT id, source_id, coalesce(container_id,'-'), coalesce(container_name,'-'),
+		first_seen_at_us, last_seen_at_us FROM container_instances ORDER BY id`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for rows.Next() {
+		var id, source, first, last int64
+		var containerID, name string
+		if err := rows.Scan(&id, &source, &containerID, &name, &first, &last); err != nil {
+			t.Fatal(err)
+		}
+		got = append(got, strings.Join([]string{
+			strconv.FormatInt(id, 10), strconv.FormatInt(source, 10), containerID, name,
+			strconv.FormatInt(first, 10), strconv.FormatInt(last, 10),
+		}, "|"))
+	}
+	if err := rows.Close(); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"7|1|id-a|web-1|1|5", "8|1|-|worker|2|6", "9|1|id-c|-|3|7"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("preserved container instances = %v, want %v", got, want)
+	}
+	var joined int
+	if err := db.QueryRow(`SELECT count(*) FROM log_events e
+		JOIN container_instances c ON c.id=e.container_instance_id AND c.source_id=e.source_id`).Scan(&joined); err != nil || joined != 2 {
+		t.Fatalf("events still referencing preserved instances = %d, err=%v", joined, err)
+	}
+
+	var enabled int
+	if err := db.QueryRow("PRAGMA foreign_keys").Scan(&enabled); err != nil || enabled != 1 {
+		t.Fatalf("foreign keys after migration = %d, err=%v", enabled, err)
+	}
+	if _, err := db.Exec(`INSERT INTO container_instances(source_id,container_id,container_name,first_seen_at_us,last_seen_at_us)
+		VALUES(1,'id-new','web-1',8,8),(1,'id-a','web-1-renamed-twin',8,8),(1,NULL,'worker',8,8)`); err != nil {
+		t.Fatalf("producer metadata is still a uniqueness constraint: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO container_instances(source_id,first_seen_at_us,last_seen_at_us) VALUES(1,1,1)`); err == nil {
+		t.Fatal("container instance without ID or name accepted")
+	}
+	if _, err := db.Exec(`INSERT INTO log_events(event_at_us,received_at_us,source_id,container_instance_id,stream,level_normalized,message_raw,message_text)
+		VALUES(1,1,1,999,'stdout','info',x'63','c')`); err == nil {
+		t.Fatal("event referencing a missing container instance accepted")
+	}
+	if _, err := db.Exec("DELETE FROM container_instances WHERE id=7"); err == nil {
+		t.Fatal("referenced container instance deleted")
+	}
+	var uniques int
+	if err := db.QueryRow(`SELECT count(*) FROM pragma_index_list('container_instances') WHERE "unique"=1`).Scan(&uniques); err != nil || uniques != 1 {
+		t.Fatalf("unique indexes on container_instances = %d (want only UNIQUE (id, source_id)), err=%v", uniques, err)
+	}
+	if err := IntegrityCheck(context.Background(), db); err != nil {
+		t.Fatal(err)
+	}
+	// The rebuilt table keeps ON DELETE CASCADE from its source.
+	if _, err := db.Exec("DELETE FROM sources WHERE id=1"); err != nil {
+		t.Fatal(err)
+	}
+	var remaining int
+	if err := db.QueryRow("SELECT count(*) FROM container_instances").Scan(&remaining); err != nil || remaining != 0 {
+		t.Fatalf("container instances after source cascade = %d, err=%v", remaining, err)
+	}
+}
+
+func TestForeignKeysOffMigrationRefusesDanglingReference(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "dangling.db")
+	db, err := sql.Open("sqlite3", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	db.SetMaxOpenConns(1)
+	if _, err := db.Exec("PRAGMA foreign_keys=ON"); err != nil {
+		t.Fatal(err)
+	}
+	migrations := []migration{
+		{version: 1, name: "0001_parent.sql", sql: `CREATE TABLE parent(id INTEGER PRIMARY KEY) STRICT;
+			CREATE TABLE child(id INTEGER PRIMARY KEY, parent_id INTEGER REFERENCES parent(id)) STRICT;
+			INSERT INTO parent VALUES(1); INSERT INTO child VALUES(1,1);`},
+		{version: 2, name: "0002_dangling.sql", foreignKeysOff: true, sql: `CREATE TABLE parent_new(id INTEGER PRIMARY KEY) STRICT;
+			DROP TABLE parent; ALTER TABLE parent_new RENAME TO parent;`},
+	}
+	err = applyMigrations(context.Background(), db, migrations)
+	if err == nil || !strings.Contains(err.Error(), "foreign-key violation") {
+		t.Fatalf("dangling-reference migration error = %v", err)
+	}
+	assertSchemaVersion(t, db, 1)
+	var parents int
+	if err := db.QueryRow("SELECT count(*) FROM parent WHERE id=1").Scan(&parents); err != nil || parents != 1 {
+		t.Fatalf("rolled-back parent rows = %d, err=%v", parents, err)
+	}
+	var enabled int
+	if err := db.QueryRow("PRAGMA foreign_keys").Scan(&enabled); err != nil || enabled != 1 {
+		t.Fatalf("foreign keys after failed migration = %d, err=%v", enabled, err)
+	}
+}
+
+func TestForeignKeysOffDirectiveMustBeFirstLine(t *testing.T) {
+	files := fstest.MapFS{
+		"migrations/0001_one.sql": {Data: []byte("-- siftail:foreign-keys-off\nSELECT 1")},
+		"migrations/0002_two.sql": {Data: []byte("SELECT 1;\n-- siftail:foreign-keys-off\n")},
+	}
+	migrations, err := loadMigrations(files)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !migrations[0].foreignKeysOff || migrations[1].foreignKeysOff {
+		t.Fatalf("directive parsing = %t %t", migrations[0].foreignKeysOff, migrations[1].foreignKeysOff)
 	}
 }
 

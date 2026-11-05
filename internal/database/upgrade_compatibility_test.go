@@ -65,6 +65,7 @@ func assertCurrentMigrationHistory(t *testing.T, db *sql.DB) {
 		"0002_administrator.sql",
 		"0003_sessions.sql",
 		"0004_security_audit.sql",
+		"0005_container_identity.sql",
 	}
 	var got []string
 	for rows.Next() {

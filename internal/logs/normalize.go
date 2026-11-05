@@ -65,6 +65,12 @@ type SourceIdentity struct {
 	ServiceLabel string
 }
 
+// MaxContainerInstancesPerServer bounds retained container instances per
+// Server (DOMAIN.md §14). Ingestion rejects a batch that would exceed it;
+// retention prunes unreferenced instances so only instances with retained
+// events can reach it.
+const MaxContainerInstancesPerServer = 100_000
+
 type ContainerIdentity struct {
 	ID   string
 	Name string

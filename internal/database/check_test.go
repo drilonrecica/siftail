@@ -194,7 +194,7 @@ func TestActiveDatabaseCheckUsesCoordinatorAndReportsBusyCheckpoint(t *testing.T
 
 func TestDatabaseCheckSummaryIsFixedAndPathFree(t *testing.T) {
 	report := CheckReport{
-		Mode: "quick", SchemaVersion: 4, SupportedSchema: 4,
+		Mode: "quick", SchemaVersion: MaxSchemaVersion, SupportedSchema: MaxSchemaVersion,
 		SQLiteVersion: "3.51.2", Compatible: true, Integrity: "ok", JournalMode: "wal",
 		Synchronous: "2", ForeignKeys: true, AutoVacuum: "incremental",
 		Writable: true, WritabilitySource: "operational_state",

@@ -442,3 +442,223 @@ func assertCategory(t *testing.T, err error, want ErrorCategory) {
 		t.Fatalf("error = %#v, want category %s", err, want)
 	}
 }
+
+type containerRow struct {
+	id          int64
+	containerID string
+	name        string
+}
+
+func containerRows(t *testing.T, db *sql.DB) []containerRow {
+	t.Helper()
+	rows, err := db.Query(`SELECT id, coalesce(container_id, ''), coalesce(container_name, '')
+		FROM container_instances ORDER BY id`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var result []containerRow
+	for rows.Next() {
+		var row containerRow
+		if err := rows.Scan(&row.id, &row.containerID, &row.name); err != nil {
+			t.Fatal(err)
+		}
+		result = append(result, row)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return result
+}
+
+func eventContainer(t *testing.T, db *sql.DB, message string) int64 {
+	t.Helper()
+	var id int64
+	if err := db.QueryRow("SELECT container_instance_id FROM log_events WHERE message_text=?", message).Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	return id
+}
+
+func persistEvents(t *testing.T, writer *BatchWriter, serverID int64, events ...logs.CanonicalEvent) {
+	t.Helper()
+	if err := writer.Persist(context.Background(), &WriteBatch{
+		Events: events, AuthenticatedServerID: serverID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// DAT-01: `docker compose up --force-recreate` and Coolify redeploys reuse the
+// container name with a new container ID. Before migration 0005 the INSERT
+// violated UNIQUE (source_id, container_name) and blocked the server forever.
+func TestBatchWriterRecreatedContainerSameNameNewIDNeverBlocks(t *testing.T) {
+	db, _, writer := newWriterTest(t, WriterOptions{})
+	serverID := insertTestServer(t, db.Writer())
+	before := canonicalEvent(serverID, "", "before recreate", 1)
+	before.Container = &logs.ContainerIdentity{ID: "old-id", Name: "app-web-1"}
+	persistEvents(t, writer, serverID, before)
+
+	// Fluent Bit chunks mix the tail of the old container with the head of
+	// the new one.
+	oldTail := canonicalEvent(serverID, "", "old tail", 2)
+	oldTail.Container = &logs.ContainerIdentity{ID: "old-id", Name: "app-web-1"}
+	newHead := canonicalEvent(serverID, "", "new head", 3)
+	newHead.Container = &logs.ContainerIdentity{ID: "new-id", Name: "app-web-1"}
+	persistEvents(t, writer, serverID, oldTail, newHead)
+
+	again := canonicalEvent(serverID, "", "after recreate", 4)
+	again.Container = &logs.ContainerIdentity{ID: "new-id", Name: "app-web-1"}
+	persistEvents(t, writer, serverID, again)
+
+	rows := containerRows(t, db.Reader())
+	if len(rows) != 2 || rows[0].containerID != "old-id" || rows[1].containerID != "new-id" ||
+		rows[0].name != "app-web-1" || rows[1].name != "app-web-1" {
+		t.Fatalf("container instances = %#v", rows)
+	}
+	if eventContainer(t, db.Reader(), "before recreate") != rows[0].id ||
+		eventContainer(t, db.Reader(), "old tail") != rows[0].id ||
+		eventContainer(t, db.Reader(), "new head") != rows[1].id ||
+		eventContainer(t, db.Reader(), "after recreate") != rows[1].id {
+		t.Fatal("events attached to the wrong container instance")
+	}
+	assertCounts(t, db.Reader(), 1, 2, 4)
+}
+
+func TestBatchWriterRenamedContainerSameIDUpdatesLabel(t *testing.T) {
+	db, _, writer := newWriterTest(t, WriterOptions{})
+	serverID := insertTestServer(t, db.Writer())
+	first := canonicalEvent(serverID, "", "first", 10)
+	first.Container = &logs.ContainerIdentity{ID: "stable-id", Name: "old-name"}
+	persistEvents(t, writer, serverID, first)
+
+	// The cached ID still updates the stored label.
+	renamed := canonicalEvent(serverID, "", "renamed", 20)
+	renamed.Container = &logs.ContainerIdentity{ID: "stable-id", Name: "new-name"}
+	persistEvents(t, writer, serverID, renamed)
+	rows := containerRows(t, db.Reader())
+	if len(rows) != 1 || rows[0].name != "new-name" {
+		t.Fatalf("renamed container instances = %#v", rows)
+	}
+	if eventContainer(t, db.Reader(), "first") != rows[0].id ||
+		eventContainer(t, db.Reader(), "renamed") != rows[0].id {
+		t.Fatal("rename split one container into several instances")
+	}
+
+	// A redelivered older chunk does not revert the newer label.
+	stale := canonicalEvent(serverID, "", "stale redelivery", 5)
+	stale.Container = &logs.ContainerIdentity{ID: "stable-id", Name: "old-name"}
+	persistEvents(t, writer, serverID, stale)
+	if rows := containerRows(t, db.Reader()); len(rows) != 1 || rows[0].name != "new-name" {
+		t.Fatalf("stale label overwrote the newer one: %#v", rows)
+	}
+
+	// Within one batch the newest observation names the instance, and a name
+	// can be dropped and come back.
+	unnamed := canonicalEvent(serverID, "", "unnamed", 30)
+	unnamed.Container = &logs.ContainerIdentity{ID: "stable-id"}
+	persistEvents(t, writer, serverID, unnamed)
+	if rows := containerRows(t, db.Reader()); len(rows) != 1 || rows[0].name != "" {
+		t.Fatalf("absent name was not recorded: %#v", rows)
+	}
+	later := canonicalEvent(serverID, "", "batch newest", 50)
+	later.Container = &logs.ContainerIdentity{ID: "stable-id", Name: "newest"}
+	earlier := canonicalEvent(serverID, "", "batch older", 40)
+	earlier.Container = &logs.ContainerIdentity{ID: "stable-id", Name: "older"}
+	persistEvents(t, writer, serverID, later, earlier)
+	if rows := containerRows(t, db.Reader()); len(rows) != 1 || rows[0].name != "newest" {
+		t.Fatalf("batch label = %#v", rows)
+	}
+	assertCounts(t, db.Reader(), 1, 1, 6)
+}
+
+func TestBatchWriterReingestsAfterContainerInstanceRemoval(t *testing.T) {
+	db, coordinator, writer := newWriterTest(t, WriterOptions{})
+	serverID := insertTestServer(t, db.Writer())
+	first := canonicalEvent(serverID, "", "before removal", 1)
+	persistEvents(t, writer, serverID, first)
+	removed := containerRows(t, db.Reader())
+	if len(removed) != 1 {
+		t.Fatalf("container instances = %#v", removed)
+	}
+	if _, ok := writer.containers.Get(containerKey{sourceID: 1, id: "container-1"}); !ok {
+		t.Fatal("container was not cached")
+	}
+
+	// Retention purges the events, then prunes the unreferenced instance
+	// while the writer still caches its ID.
+	if err := coordinator.Do(context.Background(), func(tx *sql.Tx) error {
+		if _, err := tx.Exec("DELETE FROM log_events"); err != nil {
+			return err
+		}
+		_, err := tx.Exec("DELETE FROM container_instances")
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// SQLite reuses the freed rowid for a different container. The stale
+	// cache entry must not attach container-1 events to it.
+	other := canonicalEvent(serverID, "", "other container", 2)
+	other.Container = &logs.ContainerIdentity{ID: "container-2", Name: "app-2"}
+	persistEvents(t, writer, serverID, other)
+	reused := containerRows(t, db.Reader())
+	if len(reused) != 1 || reused[0].id != removed[0].id {
+		t.Fatalf("expected SQLite to reuse the freed instance ID: %#v (removed %#v)", reused, removed)
+	}
+
+	again := canonicalEvent(serverID, "", "after removal", 3)
+	persistEvents(t, writer, serverID, again)
+	rows := containerRows(t, db.Reader())
+	if len(rows) != 2 || rows[1].containerID != "container-1" || rows[1].name != "app-1" ||
+		rows[0].containerID != "container-2" || rows[0].name != "app-2" {
+		t.Fatalf("re-ingested container instances = %#v", rows)
+	}
+	if eventContainer(t, db.Reader(), "after removal") != rows[1].id ||
+		eventContainer(t, db.Reader(), "other container") != rows[0].id {
+		t.Fatal("re-ingested event does not reference its own instance")
+	}
+	if id, ok := writer.containers.Get(containerKey{sourceID: 1, id: "container-1"}); !ok || id != rows[1].id {
+		t.Fatalf("cache after re-ingestion = %d %t", id, ok)
+	}
+}
+
+func TestBatchWriterNameOnlyContainerNeverGuessesAnIdentifiedInstance(t *testing.T) {
+	db, _, writer := newWriterTest(t, WriterOptions{})
+	serverID := insertTestServer(t, db.Writer())
+	identified := canonicalEvent(serverID, "", "identified", 1)
+	identified.Container = &logs.ContainerIdentity{ID: "with-id", Name: "shared-name"}
+	nameOnly := canonicalEvent(serverID, "", "name only", 2)
+	nameOnly.Container = &logs.ContainerIdentity{Name: "shared-name"}
+	persistEvents(t, writer, serverID, identified, nameOnly)
+
+	nameOnlyAgain := canonicalEvent(serverID, "", "name only again", 3)
+	nameOnlyAgain.Container = &logs.ContainerIdentity{Name: "shared-name"}
+	persistEvents(t, writer, serverID, nameOnlyAgain)
+
+	rows := containerRows(t, db.Reader())
+	if len(rows) != 2 || rows[0].containerID != "with-id" || rows[1].containerID != "" ||
+		rows[1].name != "shared-name" {
+		t.Fatalf("container instances = %#v", rows)
+	}
+	if eventContainer(t, db.Reader(), "name only") != rows[1].id ||
+		eventContainer(t, db.Reader(), "name only again") != rows[1].id {
+		t.Fatal("name-only events did not resolve to the ID-less instance")
+	}
+}
+
+func TestBatchWriterContainerCapCountsTheWholeBatch(t *testing.T) {
+	db, _, writer := newWriterTest(t, WriterOptions{ContainerLimit: 2})
+	serverID := insertTestServer(t, db.Writer())
+	var events []logs.CanonicalEvent
+	for i := 0; i < 3; i++ {
+		event := canonicalEvent(serverID, "", fmt.Sprintf("event-%d", i), int64(i+1))
+		event.Container = &logs.ContainerIdentity{ID: fmt.Sprintf("id-%d", i), Name: "replica"}
+		events = append(events, event)
+	}
+	err := writer.Persist(context.Background(), &WriteBatch{Events: events, AuthenticatedServerID: serverID})
+	assertCategory(t, err, CategoryForbidden)
+	assertCounts(t, db.Reader(), 0, 0, 0)
+	persistEvents(t, writer, serverID, events[:2]...)
+	assertCounts(t, db.Reader(), 1, 2, 2)
+}
