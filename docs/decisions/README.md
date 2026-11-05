@@ -18,6 +18,8 @@ Authoritative behavior remains in `DOMAIN.md`, `PRODUCT.md`, `ARCHITECTURE.md`, 
    (amends 0004)
 9. [Group commit, snapshot backups, and unhealthy-database restore](0009-group-commit-and-snapshot-backups.md)
    (amends 0001)
+10. [Authentication, audit capacity, public URL, and secret amendments](0010-authentication-amendments.md)
+    (amends 0003)
 
 An amending ADR replaces only the parts it names; the amended ADR gains an
 **Amended by** pointer and its remaining decisions stand.

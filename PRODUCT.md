@@ -690,10 +690,12 @@ Required behavior:
 - opaque server-side sessions;
 - only session-token hashes stored;
 - secure, HTTP-only, SameSite=Strict cookies;
-- explicit expiration and revocation;
+- explicit expiration and revocation: 12-hour idle and 7-day absolute lifetimes;
+- "Sign out other sessions" from Settings;
 - expired sessions become unusable immediately;
 - expired session rows are removed after a seven-day grace period;
-- progressive login throttling by source identity and account;
+- progressive login throttling by source identity and account, with bounded password-hash admission that answers overload with a fast `429`;
+- a mandatory `SIFTAIL_PUBLIC_URL` that alone decides the browser origin and cookie security;
 - no CAPTCHA or external dependency;
 - ordinary reverse-proxy and TLS termination support without trusting identity headers.
 
@@ -701,7 +703,7 @@ Required behavior:
 
 Siftail records immutable, bounded security-sensitive administrative events, including:
 
-- successful and failed sign-ins;
+- successful sign-ins, and rejected sign-ins as bounded per-window summaries that can never evict administrator or operator history;
 - session revocation;
 - password changes;
 - ingestion-token creation, rotation, and revocation;
@@ -1058,7 +1060,7 @@ SIFTAIL_LOG_LEVEL=info
 SIFTAIL_LOG_FORMAT=text
 ```
 
-Secrets may use `_FILE` variants. Setting both a direct secret and its `_FILE` variant is an error.
+Settings declared secret accept a `_FILE` variant (ADR 0010); version 0.5.0 declares none. Setting both a direct secret and its `_FILE` variant is an error.
 
 The UI shows a sanitized effective configuration, never raw secrets or complete environment dumps.
 

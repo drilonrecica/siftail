@@ -69,13 +69,38 @@ at most 1,000 rows. Cleanup failure is reported only as a sanitized component
 and error category; it neither terminates the process nor emits record
 contents.
 
+## Accepted amendments (ADR 0010)
+
+[ADR 0010](../decisions/0010-authentication-amendments.md) changes the
+capacity and sign-in rules below. SFT-105 implements it and then rewrites the
+affected sections as shipped behavior. Until then, the code behaves as the
+rest of this document describes.
+
+- **Aggregated rejections.** Rejected sign-ins are no longer recorded one row
+  per attempt. That covers invalid credentials, throttled, in-flight, and
+  overloaded attempts. They are counted in memory and written as at most one
+  `sign_in.rejected_summary` row per 5-minute window (outcome `rejected`,
+  actor `unauthenticated`). A row holds closed-reason counts, the window
+  start, a distinct-client count capped at 1,024, and the most frequent
+  client summary. The throttle and admission decisions happen before any
+  write. A crash loses at most the open window.
+- **Reserved capacity.** `unauthenticated` rows have a sub-cap of 10,000. An
+  insert above it evicts only the oldest `unauthenticated` row, so
+  administrator, local-operator, and system rows always keep at least 90,000
+  rows and are never evicted by unauthenticated writes. A trigger-maintained
+  counter, added by an additive migration with a fixture, keeps the check a
+  primary-key read. Existing per-attempt rows count toward the sub-cap and age
+  out normally.
+- **New action.** `session.revoke_others` records "Sign out other sessions"
+  with the revoked count (SFT-106).
+
 ## Recorded actions
 
 The current implementation records these normalized actions:
 
 | Action | Outcome and actor |
 | --- | --- |
-| `sign_in` | successful administrator sign-in or rejected unauthenticated attempt |
+| `sign_in` | successful administrator sign-in or rejected unauthenticated attempt (rejections become `sign_in.rejected_summary` windows under ADR 0010) |
 | `session.revoke`, `session.revoke_all` | successful administrator or local-operator revocation |
 | `administrator.create`, `administrator.password_reset` | successful local-operator recovery action |
 | `server.create` | successful administrator or local-operator creation |

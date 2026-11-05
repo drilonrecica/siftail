@@ -641,15 +641,28 @@ Do not add:
 - No plaintext password argument in normal CLI.
 - Never log or echo password.
 - Password change revokes sessions unless documented otherwise.
+- At most two concurrent hash operations behind bounded admission: throttle
+  reservation, one in-flight attempt per client and account key, a bounded
+  wait queue, and an immediate `429` on overflow without hashing or a
+  per-request audit write (ADR 0010).
+- Account lockout never blocks a recently successful client.
 
 ### 13.2 Sessions
 
 - opaque random token;
 - hash stored;
-- secure cookie;
+- secure cookie (`__Host-` prefix when the public URL is HTTPS);
+- 12-hour idle and 7-day absolute lifetime, as constants (ADR 0010);
 - immediate invalidation at expiry/revocation;
+- "Sign out other sessions" available to the administrator;
 - cleanup after grace period;
-- no JWT.
+- no JWT;
+- `SIFTAIL_PUBLIC_URL` is mandatory for `serve`; origin checks, cookie
+  security, and HSTS derive only from it, never from `Host` or forwarded
+  headers;
+- unauthenticated sign-in rejections are aggregated in memory into at most
+  one summary audit row per window, with a reserved capacity that never
+  evicts administrator, local-operator, or system audit rows.
 
 ### 13.3 Ingestion tokens
 
@@ -662,10 +675,13 @@ Do not add:
 
 ### 13.4 `_FILE` secrets
 
-- reject direct and file variants together;
-- never log file content;
-- validate readable file;
-- document newline handling.
+- only settings declared secret have a `_FILE` variant (none in 0.5.0);
+- reject direct and file variants together, even when either is empty;
+- read once at startup; absolute path to a regular file, at most 64 KiB;
+- remove trailing CR/LF only, and reject an interior line break;
+- refuse group- or world-writable files;
+- never log file content or its length;
+- the exact contract is ADR 0010.
 
 ### 13.5 Trusted proxy
 

@@ -3,6 +3,10 @@
 **Status:** Accepted  
 **Date:** 2026-07-27
 
+**Amended by:** [ADR 0010](0010-authentication-amendments.md) (bounded hash
+admission, session lifetimes, aggregated sign-in auditing, mandatory public
+origin)
+
 ## Context
 
 Siftail protects sensitive application logs but is intentionally not a multi-user or

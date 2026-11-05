@@ -412,16 +412,31 @@ Defaults must be documented and visible in sanitized effective configuration.
 
 ### 9.3 `_FILE` secrets
 
-Secret environment variables may support `_FILE` variants.
+Every process setting the configuration registry declares secret, `SIFTAIL_X`,
+has exactly one file variant, `SIFTAIL_X_FILE`. Non-secret settings have no
+file variant, and a name such as `SIFTAIL_PUBLIC_URL_FILE` is an unknown
+reserved variable. Version 0.5.0 declares no secret setting. The mechanism is
+implemented and tested so that the first secret inherits it (ADR 0010).
 
 Rules:
 
-- direct and `_FILE` form cannot both be set;
-- file is read at startup;
-- trailing newline handling is documented;
-- file content is never logged;
-- permissions are operator responsibility but insecure conditions may warn;
-- secret is kept in memory only as required.
+- direct and `_FILE` form cannot both be present, even when either is empty;
+  there is no precedence, and the error names both variables but no value;
+- an empty direct value, or a file that is empty after trimming, is invalid;
+- the path is absolute and resolves, following symlinks, to a regular file of
+  at most 64 KiB containing valid UTF-8 without NUL;
+- the file is read once at startup and never reloaded;
+- all trailing CR and LF bytes are removed and nothing else; a line break that
+  remains inside the value is an error;
+- a group- or world-writable file is refused; a world- or group-readable file
+  is accepted silently, because Docker and Kubernetes secret mounts default to
+  `0444`/`0644` inside the container; documentation recommends `0400`/`0440`
+  on the host;
+- file content and its length are never logged or echoed; errors name the
+  variable and path only;
+- sanitized configuration shows `[redacted]` and whether the value came from
+  the environment or a file;
+- the secret is kept in memory only by the component that uses it.
 
 ### 9.4 Runtime settings
 
@@ -452,7 +467,12 @@ Fail startup for:
 - malformed bind address;
 - listener port collision;
 - unwritable data directory;
-- invalid public UI or ingestion URL;
+- missing `SIFTAIL_PUBLIC_URL` for `serve` (also reported by
+  `config validate`; other commands do not require it);
+- invalid public UI or ingestion URL; the public UI URL is an exact `http` or
+  `https` origin with an empty or `/` path and no credentials, query, or
+  fragment;
+- `_FILE` contract violations (§9.3);
 - malformed trusted proxy CIDR;
 - nonpositive limits;
 - queue byte limit smaller than max event size;
@@ -1570,6 +1590,19 @@ Initial parameters:
 Store parameters with the hash and permit at most two concurrent password-hash
 operations. Benchmark on low-resource hardware before changing these values.
 
+Every attempt that would hash, including the dummy hash for an unknown
+username, passes bounded admission first (ADR 0010):
+
+1. the throttle reserves the attempt for the client and account keys (§19.5);
+2. at most one attempt is in flight per client key and per account key;
+3. up to 8 attempts wait at most 2 seconds for a hash slot;
+4. client keys that signed in successfully in the last 7 days (a bounded
+   in-memory set of 64) wait in a separate queue of 2 that is served first.
+
+Overflow, an expired wait, and a second in-flight attempt return `429` with
+`Retry-After` immediately, without hashing and without a per-request audit
+write. The values are constants; SFT-104 records measured final values here.
+
 ### 19.3 Sessions
 
 Use 32-byte high-entropy opaque tokens and allow at most 64 active sessions.
@@ -1579,13 +1612,25 @@ Store a SHA-256 hash of the token, not plaintext.
 Cookie:
 
 ```text
+Name __Host-siftail_session when the public origin is HTTPS, else siftail_session
 HttpOnly
 Secure when public origin is HTTPS
 SameSite=Strict
 Path=/
+no Domain
 ```
 
-Set explicit max age/expiry. Default absolute lifetime is 14 days and default inactivity lifetime is 7 days. These are constants initially, not runtime UI settings. Rotate the session token on successful login.
+Set explicit max age/expiry. The absolute lifetime is 7 days and the
+inactivity lifetime is 12 hours (ADR 0010). These are constants, not runtime
+UI settings. The absolute limit is enforced at lookup as the earlier of the
+stored expiry and creation plus 7 days, so sessions created under the earlier
+14-day policy follow it without a data rewrite. Rotate the session token on
+successful login.
+
+Settings offers "Sign out other sessions": it revokes every active session
+except the current one in one transaction and records `session.revoke_others`
+with the revoked count. Live streams on revoked sessions end at the next
+5-second re-check.
 
 ### 19.4 CSRF
 
@@ -1600,6 +1645,17 @@ For every state-changing browser request:
 ### 19.5 Login throttling
 
 Progressive per-client and per-account throttling.
+
+`Check` reserves an attempt, and a success releases the reservation, so
+parallel requests cannot multiply guesses. Client keys group IPv6 addresses by
+/64 and IPv4 addresses by /32 after trusted-proxy resolution. The account
+throttle counts failures from every client but never blocks a client that
+signed in successfully in the last 7 days; that client remains subject to its
+own client throttle. After a restart the recent-client set is empty, which is
+a documented tradeoff (ADR 0010).
+
+Rejected attempts are not audited individually. They are counted in memory
+and written as one aggregated summary row per 5-minute window (§23.4).
 
 Implementation can use:
 
@@ -1682,7 +1738,9 @@ Also consider:
 
 - `Cross-Origin-Resource-Policy: same-origin`;
 - `X-Frame-Options: DENY` as legacy defense;
-- HSTS only when public URL is HTTPS and deployment behavior is understood.
+- HSTS only when the public URL is HTTPS: the UI listener then sends
+  `Strict-Transport-Security: max-age=31536000` without `includeSubDomains`
+  or `preload`; the ingestion listener never sends HSTS (ADR 0010).
 
 Avoid inline scripts/styles so CSP remains strict without nonces in version one.
 
@@ -1703,7 +1761,10 @@ Siftail serves HTTP internally.
 
 Requirements:
 
-- explicit `SIFTAIL_PUBLIC_URL` for browser origin;
+- mandatory `SIFTAIL_PUBLIC_URL` for browser origin: `serve` refuses to start
+  without it, and the allowed origin never derives from `Host`; an `http`
+  public URL whose host is not loopback or `localhost` logs one startup
+  warning;
 - explicit `SIFTAIL_INGEST_PUBLIC_URL` for generated source configuration, with same-origin path derivation allowed only when deliberately configured;
 - trust forwarded scheme/host only from configured proxy networks;
 - secure cookie decision based on explicit public URL, not arbitrary request headers;
@@ -1756,6 +1817,16 @@ to the filesystem. When the footprint reaches 95% of the configured limit:
 Delete the oldest security audit records in bounded chunks when they are older than
 the configured age or the table exceeds 100,000 rows. Application-log retention never
 deletes audit records.
+
+Rows with actor `unauthenticated` have a reserved sub-cap of 10,000 (ADR
+0010). An insert above it evicts only the oldest `unauthenticated` row, so
+unauthenticated writes never evict administrator, local-operator, or system
+rows, which always keep at least 90,000 rows of capacity. Rejected sign-ins
+reach the table only as `sign_in.rejected_summary` rows: one per 5-minute
+window that had a rejection, with closed-reason counts, a distinct-client
+count capped at 1,024, and the most frequent client summary. One owned worker
+writes them through the coordinator and flushes the open window at graceful
+shutdown; a crash loses at most that window.
 
 The audit store enforces the count cap in the same transaction as every insert,
 keeping the newest 100,000 events by `(occurred_at_us, id)`. The row count
