@@ -621,6 +621,12 @@ func nullable(value string) any {
 	return value
 }
 
+// persistenceError maps a failed batch to its transport category. Only
+// storage-wide conditions (busy, I/O, corruption, full) are reported as
+// unavailable or storage-full, which the worker treats as a database failure
+// that degrades ingestion globally. Constraint and internal failures are scoped
+// to the batch that caused them (audit DAT-03): one poison batch must not gate
+// every other Server.
 func persistenceError(err error) error {
 	if errors.Is(err, errCanonicalConflict) {
 		return &Error{Category: CategoryConflict}
@@ -632,19 +638,26 @@ func persistenceError(err error) error {
 	var databaseErr *database.CategoryError
 	if errors.As(err, &databaseErr) {
 		switch databaseErr.Category {
-		case database.CategoryBusy, database.CategoryIO:
+		case database.CategoryBusy, database.CategoryIO, database.CategoryCorrupt:
 			return &Error{Category: CategoryUnavailable}
 		case database.CategoryFull:
 			return &Error{Category: CategoryStorageFull}
+		case database.CategoryConstraint:
+			if databaseErr.ForeignKey {
+				// A stale reference that survived the uncached retry is a
+				// Siftail defect, not something the client can fix.
+				return &Error{Category: CategoryInternal}
+			}
+			return &Error{Category: CategoryBadRequest}
 		default:
-			return &Error{Category: CategoryUnavailable}
+			return &Error{Category: CategoryInternal}
 		}
 	}
 	if errors.Is(err, database.ErrCoordinatorClosed) || errors.Is(err, context.Canceled) ||
 		errors.Is(err, context.DeadlineExceeded) {
 		return &Error{Category: CategoryUnavailable}
 	}
-	return &Error{Category: CategoryUnavailable}
+	return &Error{Category: CategoryInternal}
 }
 
 type boundedCache[K comparable] struct {

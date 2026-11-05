@@ -218,3 +218,33 @@ func TestBackupDiagnosticsUseClosedPayloadFreeSummaries(t *testing.T) {
 		t.Fatalf("backup diagnostics = %#v", diagnostics)
 	}
 }
+
+func TestStateBatchScopedIngestFailuresNeverDegrade(t *testing.T) {
+	at := time.Unix(2_000, 0).UTC()
+	state := NewState(at)
+	state.SetWriterReady(true)
+	for _, category := range []ingest.ErrorCategory{
+		ingest.CategoryInternal, ingest.CategoryBadRequest,
+		ingest.CategoryConflict, ingest.CategoryForbidden,
+	} {
+		state.RecordIngestRejected(category, false, at)
+	}
+	if !state.Ready(false) || !state.DatabaseWritable() ||
+		state.IngestUnavailable() != "" || state.HealthSeverity() != "Healthy" {
+		t.Fatal("a batch-scoped rejection degraded ingestion")
+	}
+	snapshot := state.Snapshot(at)
+	if snapshot.RejectedBatches != 4 || snapshot.Degraded ||
+		snapshot.LastDatabaseError != nil || len(snapshot.Diagnostics) != 1 {
+		t.Fatalf("snapshot = %#v", snapshot)
+	}
+	diagnostic := snapshot.Diagnostics[0]
+	if diagnostic.Component != "ingestion" ||
+		diagnostic.Category != "batch_internal_error" ||
+		diagnostic.Severity != "attention" {
+		t.Fatalf("diagnostic = %#v", diagnostic)
+	}
+	if err := diagnostic.Validate(); err != nil {
+		t.Fatal(err)
+	}
+}

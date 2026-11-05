@@ -349,7 +349,13 @@ func TestPersistenceErrorClassification(t *testing.T) {
 	}{
 		{&database.CategoryError{Category: database.CategoryBusy}, CategoryUnavailable},
 		{&database.CategoryError{Category: database.CategoryIO}, CategoryUnavailable},
+		{&database.CategoryError{Category: database.CategoryCorrupt}, CategoryUnavailable},
 		{&database.CategoryError{Category: database.CategoryFull}, CategoryStorageFull},
+		{&database.CategoryError{Category: database.CategoryConstraint}, CategoryBadRequest},
+		{&database.CategoryError{Category: database.CategoryConstraint, ForeignKey: true}, CategoryInternal},
+		{&database.CategoryError{Category: database.CategoryInternal}, CategoryInternal},
+		{errors.New("unclassified"), CategoryInternal},
+		{database.ErrCoordinatorClosed, CategoryUnavailable},
 		{errCanonicalConflict, CategoryConflict},
 	}
 	for _, test := range tests {
@@ -359,6 +365,8 @@ func TestPersistenceErrorClassification(t *testing.T) {
 			CategoryUnavailable: 503,
 			CategoryStorageFull: 507,
 			CategoryConflict:    409,
+			CategoryBadRequest:  400,
+			CategoryInternal:    500,
 		}[test.category]; got != want {
 			t.Fatalf("status = %d, want %d", got, want)
 		}

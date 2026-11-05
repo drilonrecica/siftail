@@ -1,7 +1,8 @@
 # Storage-full degraded mode and recovery
 
-**Reviewed:** 2026-07-28  
-**Scope:** SFT-041 active-server storage failure and deterministic recovery
+**Reviewed:** 2026-11-05  
+**Scope:** SFT-041 active-server storage failure and deterministic recovery;
+SFT-089 failure scoping and readiness guidance
 
 ## Observable behavior
 
@@ -26,6 +27,32 @@ them before decoding or queueing their bodies:
 Siftail does not keep an in-memory overflow, create an internal disk spool,
 delete or recreate the database, run automatic full `VACUUM`, or acknowledge
 an uncommitted request.
+
+Only storage-wide failures degrade ingestion this way: busy, I/O, corruption,
+and full storage. A batch that fails a SQLite constraint (`400`) or hits an
+internal error (`500`) is rolled back and rejected on its own; readiness,
+Status degradation, and every other Server's ingestion stay unaffected.
+
+## Readiness, health checks, and restarts
+
+`/health/ready` deliberately reports `503` while storage is full, because
+ingestion is refused. The container image's `HEALTHCHECK` (`siftail
+healthcheck`) probes `/health/ready`, so Docker shows the container as
+`unhealthy` for the whole degraded period. That status is informational:
+
+- Plain Docker and Docker Compose do not restart a container because it is
+  unhealthy; a `restart:` policy reacts only to the process exiting, and
+  Siftail keeps running while degraded.
+- Orchestrators or tools that restart unhealthy containers (Docker Swarm
+  service health, Kubernetes liveness probes pointed at readiness,
+  `autoheal`-style sidecars, some PaaS health monitors) must not use
+  `/health/ready` as their restart signal. A restart frees no space, drops the
+  in-flight recovery probe, interrupts the History and Status reads that still
+  work, and repeats the startup integrity check against a full volume. Point
+  restart decisions at `/health/live` and use `/health/ready` only to route or
+  hold ingestion traffic.
+- Alert on the `unhealthy` status or on `507` responses from Fluent Bit rather
+  than acting on them automatically.
 
 ## Safe operator procedure
 

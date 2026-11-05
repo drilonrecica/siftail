@@ -19,6 +19,8 @@ func categoryForStatus(status int) ErrorCategory {
 		return CategoryTooLarge
 	case 429:
 		return CategoryRateLimited
+	case 500:
+		return CategoryInternal
 	case 503:
 		return CategoryUnavailable
 	case 507:

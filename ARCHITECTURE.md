@@ -778,10 +778,32 @@ If record 9,999 fails, none of the request is queued.
 | `413` | Request/event too large | Reduce batch or event |
 | `415` | Unsupported format/encoding | Fix format |
 | `429` | Temporary rate limit | Retry with backoff |
-| `503` | Queue/database/shutdown temporarily unavailable | Retry |
+| `500` | Internal failure scoped to this batch | Retry; alert if it repeats |
+| `503` | Queue/database/shutdown temporarily unavailable, request timeout, or token lookup failure | Retry |
 | `507` | Storage unavailable/full | Retry cautiously and alert |
 
 Every response includes `X-Request-ID`.
+
+Persistence failures are classified by scope (audit DAT-03):
+
+- busy, I/O, corruption, and full storage are storage-wide. They return `503`
+  or `507`, mark the database degraded, and gate later requests until the
+  recovery probe commits (§24);
+- a SQLite constraint failure is caused by the batch's content. It returns
+  `400`, rolls back that batch only, and leaves readiness unchanged;
+- an internal failure, including a foreign-key failure that survives the
+  uncached retry (§15.2), returns `500`, rolls back that batch only, records an
+  `ingestion/batch_internal_error` diagnostic, and leaves readiness unchanged.
+
+A handler whose request timeout elapses while the admitted batch waits for the
+writer answers `503` explicitly; it never falls through to an implicit `200`.
+The batch stays queued and may still commit, so a retry can deliver it twice;
+this is the at-least-once ambiguity of §13.4 and stable source event IDs keep
+it idempotent. When the client itself disconnects, nothing is written.
+
+Token verification answers `401` only for a definite mismatch or a revoked
+token. A database error during the lookup answers `503`, because it says
+nothing about the credential.
 
 Ingestion does not return `409`. A record that reuses a stable source event ID
 for different content is dropped and counted inside an otherwise successful
@@ -1933,6 +1955,15 @@ application events are exhausted, and only a later successful retention result
 clears that condition. Shutdown makes readiness unhealthy before listeners
 drain. Liveness remains healthy for these database and degradation states while
 the HTTP stack can respond.
+
+Batch-scoped ingestion failures (constraint `400`, internal `500`, conflicts,
+and policy rejections) never change readiness. Storage-full keeps readiness
+unhealthy on purpose: it is the signal that ingestion is refused. The image's
+`HEALTHCHECK` probes readiness, so the container reports `unhealthy` while
+degraded. Docker does not restart unhealthy containers on its own, but an
+orchestrator or auto-heal tool that does would discard the recovery probe and
+the bounded reader pool without freeing space; such restarts must key off
+`/health/live` instead (`docs/operations/storage-full-recovery.md`).
 
 ### 26.3 Authentication
 

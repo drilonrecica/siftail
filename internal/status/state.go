@@ -238,6 +238,14 @@ func (s *State) RecordIngestRejected(
 			Category: "queue_saturated",
 			Summary:  "Ingestion admission was temporarily saturated.",
 		})
+	} else if category == ingest.CategoryInternal {
+		// Batch-scoped (audit DAT-03): visible, but readiness and the
+		// database category stay as they are.
+		s.appendDiagnosticLocked(Diagnostic{
+			At: at, Severity: "attention", Component: "ingestion",
+			Category: "batch_internal_error",
+			Summary:  "An ingestion batch failed with an internal error and was not committed.",
+		})
 	}
 	s.mu.Unlock()
 }
@@ -401,6 +409,9 @@ func sanitizeDiagnostic(input DiagnosticInput) (Diagnostic, error) {
 	case "ingestion/queue_saturated":
 		severity = "attention"
 		summary = "Ingestion admission was temporarily saturated."
+	case "ingestion/batch_internal_error":
+		severity = "attention"
+		summary = "An ingestion batch failed with an internal error and was not committed."
 	case "ingestion/guided_test_rejected":
 		severity = "information"
 		summary = "A guided ingestion test request was rejected."

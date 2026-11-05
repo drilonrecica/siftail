@@ -29,6 +29,7 @@ func (a fixedAvailability) IngestUnavailable() ErrorCategory {
 
 type handlerFixture struct {
 	handler *Handler
+	db      *database.DB
 	store   *sources.Store
 	token   sources.CreatedToken
 }
@@ -51,7 +52,7 @@ func newHandlerFixture(t *testing.T, decoder Decoder, maxBytes int64) handlerFix
 	}
 	return handlerFixture{
 		handler: NewHandler(store, decoder, Limits{MaxCompressedBytes: maxBytes, RequestTimeout: 25 * time.Millisecond}),
-		store:   store, token: token,
+		db:      db, store: store, token: token,
 	}
 }
 
@@ -199,6 +200,7 @@ func TestHTTPBoundaryMapsSafeCategoriesWithoutPayload(t *testing.T) {
 		{CategoryBadRequest, 400}, {CategoryForbidden, 403}, {CategoryConflict, 409},
 		{CategoryTooLarge, 413}, {CategoryRateLimited, 429},
 		{CategoryUnavailable, 503}, {CategoryStorageFull, 507},
+		{CategoryInternal, 500},
 	}
 	for _, tt := range categories {
 		fixture := newHandlerFixture(t, decoderFunc(func(context.Context, DecodeRequest) (DecodedBatch, error) {
@@ -226,6 +228,60 @@ func TestHTTPBoundaryRequestDeadline(t *testing.T) {
 		authorizedRequest(fixture.token.Token, "application/json", `{}`))
 	if response.Code != http.StatusServiceUnavailable {
 		t.Fatalf("status = %d", response.Code)
+	}
+}
+
+func TestHTTPBoundaryTokenLookupFailureIsUnavailableNotUnauthorized(t *testing.T) {
+	calls := 0
+	fixture := newHandlerFixture(t, decoderFunc(func(context.Context, DecodeRequest) (DecodedBatch, error) {
+		calls++
+		return DecodedBatch{}, nil
+	}), 1024)
+	if err := fixture.db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	response := httptest.NewRecorder()
+	web.RequestID(fixture.handler).ServeHTTP(response,
+		authorizedRequest(fixture.token.Token, "application/json", `{}`))
+	if response.Code != http.StatusServiceUnavailable || calls != 0 {
+		t.Fatalf("status/calls = %d/%d", response.Code, calls)
+	}
+}
+
+type headerCountingWriter struct {
+	*httptest.ResponseRecorder
+	headers int
+}
+
+func (w *headerCountingWriter) WriteHeader(status int) {
+	w.headers++
+	w.ResponseRecorder.WriteHeader(status)
+}
+
+func TestIngestOutcomeWriterWritesHeaderOnce(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		write  func(*ingestOutcomeWriter)
+		status int
+	}{
+		{"implicit", func(w *ingestOutcomeWriter) {
+			_, _ = w.Write([]byte("a"))
+			_, _ = w.Write([]byte("b"))
+			w.WriteHeader(http.StatusTeapot)
+		}, http.StatusOK},
+		{"explicit", func(w *ingestOutcomeWriter) {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			w.WriteHeader(http.StatusNoContent)
+			_, _ = w.Write([]byte("a"))
+		}, http.StatusServiceUnavailable},
+	} {
+		recorder := &headerCountingWriter{ResponseRecorder: httptest.NewRecorder()}
+		outcome := &ingestOutcomeWriter{ResponseWriter: recorder, status: http.StatusOK}
+		test.write(outcome)
+		if recorder.headers != 1 || recorder.Code != test.status || outcome.status != test.status {
+			t.Fatalf("%s: headers/code/status = %d/%d/%d",
+				test.name, recorder.headers, recorder.Code, outcome.status)
+		}
 	}
 }
 

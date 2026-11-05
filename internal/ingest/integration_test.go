@@ -20,6 +20,7 @@ import (
 type ingestionIntegration struct {
 	db              *database.DB
 	coordinator     *database.Coordinator
+	writer          *BatchWriter
 	admission       *Admission
 	queue           *Queue
 	handler         *Handler
@@ -99,15 +100,16 @@ func newIngestionIntegrationWithPublisher(
 	handler := NewHandler(sources.NewCoordinatedStore(db.Reader(), coordinator), decoder, Limits{
 		MaxCompressedBytes: 1 << 20, RequestTimeout: time.Second,
 	}).WithQueue(queue).WithObserver(observer)
+	writer := NewBatchWriter(coordinator, publisher)
 	writerDone := make(chan error, 1)
 	go func() {
-		writerDone <- NewWriterWorker(
-			queue, NewBatchWriter(coordinator, publisher),
-		).WithObserver(observer).Run(context.Background())
+		writerDone <- NewWriterWorker(queue, writer).
+			WithObserver(observer).Run(context.Background())
 	}()
 
 	fixture := &ingestionIntegration{
-		db: db, coordinator: coordinator, admission: admission, queue: queue,
+		db: db, coordinator: coordinator, writer: writer,
+		admission: admission, queue: queue,
 		handler: handler, token: token.Token, coordinatorStop: coordinatorStop,
 		coordinatorDone: coordinatorDone, writerDone: writerDone,
 		observer: observer,
@@ -323,6 +325,92 @@ func TestIngestionCancellationAfterAdmissionStillCommits(t *testing.T) {
 	close(release)
 	waitForEventCount(t, fixture.db.Reader(), 1)
 	waitForQueuedEvents(t, fixture.admission, 0)
+}
+
+func TestIngestionCancellationAfterAdmissionWritesNoStatus(t *testing.T) {
+	fixture := newIngestionIntegration(t, 10, 1<<20)
+	release := fixture.blockCoordinator(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	response, done := fixture.request(ctx, testEventJSON("", "gone"))
+	unblock := sync.OnceFunc(func() { close(release) })
+	t.Cleanup(unblock)
+	waitForQueuedEvents(t, fixture.admission, 1)
+	cancel()
+	<-done
+	if response.Body.Len() != 0 || response.Header().Get("Content-Type") != "" {
+		t.Fatalf("cancelled request was answered: %q", response.Body.String())
+	}
+	unblock()
+	waitForEventCount(t, fixture.db.Reader(), 1)
+}
+
+func TestIngestionRequestTimeoutWritesExplicitUnavailable(t *testing.T) {
+	fixture := newIngestionIntegration(t, 10, 1<<20)
+	fixture.handler.limits.RequestTimeout = 50 * time.Millisecond
+	release := fixture.blockCoordinator(t)
+	// Cleanup runs last-registered first: unblock the writer even when an
+	// assertion fails, or the fixture cleanup would wait forever.
+	unblock := sync.OnceFunc(func() { close(release) })
+	t.Cleanup(unblock)
+	response, done := fixture.request(context.Background(), testEventJSON("", "slow"))
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("timed-out handler did not leave")
+	}
+	if response.Code != http.StatusServiceUnavailable ||
+		response.Header().Get("X-Siftail-Ingest-Outcome") != "" {
+		t.Fatalf("timeout status = %d", response.Code)
+	}
+	// The admitted batch still commits; only the worker records its outcome.
+	unblock()
+	waitForEventCount(t, fixture.db.Reader(), 1)
+	waitForQueuedEvents(t, fixture.admission, 0)
+	fixture.observer.mu.Lock()
+	defer fixture.observer.mu.Unlock()
+	if fixture.observer.acceptedBatches != 1 || fixture.observer.rejectedBatches != 0 {
+		t.Fatalf("observer = %#v", fixture.observer)
+	}
+}
+
+func TestIngestionPoisonBatchIsBatchScoped(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		fail   func(*sql.Tx) error
+		status int
+	}{
+		{"constraint", func(tx *sql.Tx) error {
+			// A real SQLite CHECK failure inside the batch transaction.
+			_, err := tx.Exec("INSERT INTO settings(key, value_json) VALUES ('', '{}')")
+			return database.Classify("poison insert", err)
+		}, http.StatusBadRequest},
+		{"internal", func(*sql.Tx) error {
+			return &database.CategoryError{Category: database.CategoryInternal, Operation: "poison"}
+		}, http.StatusInternalServerError},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			fixture := newIngestionIntegration(t, 10, 1<<20)
+			fixture.writer.beforeInsert = test.fail
+			poisoned, done := fixture.request(context.Background(), testEventJSON("", "poison"))
+			<-done
+			if poisoned.Code != test.status || strings.Contains(poisoned.Body.String(), "poison") {
+				t.Fatalf("poison status = %d body=%q", poisoned.Code, poisoned.Body.String())
+			}
+			fixture.writer.beforeInsert = nil
+			healthy, done := fixture.request(context.Background(), testEventJSON("", "healthy"))
+			<-done
+			if healthy.Code != http.StatusNoContent {
+				t.Fatalf("next batch status = %d", healthy.Code)
+			}
+			assertEventCount(t, fixture.db.Reader(), 1)
+			fixture.observer.mu.Lock()
+			defer fixture.observer.mu.Unlock()
+			if fixture.observer.rejectedBatches != 1 || fixture.observer.acceptedBatches != 1 ||
+				fixture.observer.databaseFailure {
+				t.Fatalf("observer = %#v", fixture.observer)
+			}
+		})
+	}
 }
 
 func TestIngestionQueueSaturationIsRetryable(t *testing.T) {

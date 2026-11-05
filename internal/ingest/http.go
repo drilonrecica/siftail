@@ -105,7 +105,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	server, err := h.tokens.VerifyToken(r.Context(), token)
 	if err != nil {
-		writeSafe(w, http.StatusUnauthorized)
+		// Only a definite mismatch is a credential failure. A database error
+		// says nothing about the token; 401 would read as a revoked token
+		// (audit DAT-08), so the client retries instead.
+		if errors.Is(err, sources.ErrInvalidToken) {
+			writeSafe(w, http.StatusUnauthorized)
+		} else {
+			writeSafe(w, http.StatusServiceUnavailable)
+		}
 		return
 	}
 	if h.availability != nil {
@@ -178,26 +185,41 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusNoContent)
 		case <-ctx.Done():
 			// Queue ownership survives a disconnected or timed-out request.
-			// The buffered result lets the writer finish without blocking.
-			return
+			// The buffered result lets the writer finish without blocking, and
+			// the worker records the batch's eventual outcome.
+			writerOutcome = true
+			if r.Context().Err() != nil {
+				return // The client is gone; there is nobody to answer.
+			}
+			// The request timeout elapsed first. Without an explicit status
+			// net/http would send an implicit 200 (audit DAT-12). The writer
+			// may still commit, which at-least-once delivery tolerates.
+			writeSafe(w, http.StatusServiceUnavailable)
 		}
 		return
 	}
 	writeSafe(w, statusFor(err))
 }
 
+// ingestOutcomeWriter records the response status for the observer. It
+// forwards the header exactly once, like net/http itself.
 type ingestOutcomeWriter struct {
 	http.ResponseWriter
-	status int
+	status      int
+	wroteHeader bool
 }
 
 func (w *ingestOutcomeWriter) WriteHeader(status int) {
+	if w.wroteHeader {
+		return
+	}
+	w.wroteHeader = true
 	w.status = status
 	w.ResponseWriter.WriteHeader(status)
 }
 
 func (w *ingestOutcomeWriter) Write(body []byte) (int, error) {
-	if w.status == http.StatusOK {
+	if !w.wroteHeader {
 		w.WriteHeader(http.StatusOK)
 	}
 	return w.ResponseWriter.Write(body)
@@ -224,6 +246,9 @@ const (
 	CategoryRateLimited ErrorCategory = "rate_limited"
 	CategoryUnavailable ErrorCategory = "unavailable"
 	CategoryStorageFull ErrorCategory = "storage_full"
+	// CategoryInternal is a batch-scoped Siftail failure (500). Unlike
+	// CategoryUnavailable it never degrades ingestion for other batches.
+	CategoryInternal ErrorCategory = "internal"
 )
 
 type Error struct{ Category ErrorCategory }
@@ -258,6 +283,8 @@ func statusFor(err error) int {
 		return http.StatusServiceUnavailable
 	case CategoryStorageFull:
 		return http.StatusInsufficientStorage
+	case CategoryInternal:
+		return http.StatusInternalServerError
 	default:
 		return http.StatusBadRequest
 	}

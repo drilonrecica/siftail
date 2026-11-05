@@ -53,6 +53,9 @@ func (w *WriterWorker) Run(ctx context.Context) error {
 				if errors.As(persistErr, &ingestErr) {
 					category = ingestErr.Category
 				}
+				// Only storage-wide categories degrade ingestion globally;
+				// conflict, policy, constraint, and internal failures are
+				// scoped to this batch.
 				databaseFailure := category == CategoryUnavailable ||
 					category == CategoryStorageFull
 				w.observer.RecordIngestRejected(

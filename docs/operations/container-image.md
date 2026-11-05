@@ -42,6 +42,15 @@ converts wildcard UI binds to loopback, disables environment proxies and
 redirects, and requires HTTP `200` with the exact bounded body `ok`. It exposes
 no configuration detail in its errors.
 
+The health command probes `/health/ready`, so the container reports
+`unhealthy` whenever ingestion is refused: during startup, shutdown, and
+storage-full or other storage-wide degradation. Docker and Docker Compose only
+display that status; they do not restart the container for it. An orchestrator
+or auto-heal tool that restarts unhealthy containers must use `/health/live`
+for that decision instead. A restart does not free storage and only interrupts
+recovery and the reads that still work. See
+[`storage-full-recovery.md`](storage-full-recovery.md#readiness-health-checks-and-restarts).
+
 ## Build inputs and reproducibility
 
 The Dockerfile pins these multi-architecture image indexes:
