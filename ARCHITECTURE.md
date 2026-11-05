@@ -344,7 +344,7 @@ Canonical SIGTERM/SIGINT behavior:
 2. Stop accepting new ingestion requests.
 3. Stop accepting new UI connections.
 4. Allow in-flight decoders to finish within timeout.
-5. Drain accepted queued batches through the writer.
+5. Drain accepted queued batches through the writer, in commit groups (§14.3).
 6. Publish committed batches already accepted.
 7. Send shutdown control event to SSE clients and close streams.
 8. Stop periodic workers.
@@ -478,7 +478,7 @@ Use:
   audit, session cleanup, and other mutations;
 - one dedicated writer connection or a `*sql.DB` constrained to one writer connection;
 - a read connection pool capped at four connections by default;
-- separate backup connection as required by online backup API;
+- a dedicated read connection for `VACUUM INTO` snapshot backups (§25.1);
 - short-lived migration connection during startup where appropriate.
 
 SQLite remains authoritative. In-memory caches are reconstructable.
@@ -510,7 +510,7 @@ The `database` package owns:
 - migrations;
 - transaction helpers;
 - quick/full integrity checks;
-- online backup plumbing;
+- snapshot backup (`VACUUM INTO`) plumbing;
 - WAL checkpoint operations;
 - database size reporting;
 - schema compatibility checks.
@@ -555,6 +555,13 @@ A likely normalized schema includes:
 avoids speculative hierarchy joins while preserving exact identity and foreign-key
 integrity. Deployment boundaries are not stored in version one.
 
+`container_instances` (rebuilt by migration `0005`, ADR 0006) carries no
+uniqueness constraint on producer metadata. It keeps `UNIQUE (id, source_id)`
+as the composite foreign-key target of `log_events`, the `source_id` foreign
+key, and the column checks. Non-unique indexes on `(source_id, container_id)`
+and `(source_id, container_name) WHERE container_id IS NULL` serve resolution
+(§15.4).
+
 Migration `0004` adds `security_audit_events` as an immutable `STRICT` table.
 Category, outcome, actor type, action, occurrence time, optional safe entity
 identifiers, request ID, and a bounded JSON metadata object are explicit
@@ -580,9 +587,10 @@ Illustrative, not a substitute for migrations:
 CREATE TABLE log_events (
     id                    INTEGER PRIMARY KEY,
     event_at_us           INTEGER NOT NULL,
+    event_at_defaulted    INTEGER NOT NULL DEFAULT 0, -- ADR 0007
     received_at_us        INTEGER NOT NULL,
-    retention_at_us       INTEGER GENERATED ALWAYS AS
-                              (min(event_at_us, received_at_us)) STORED,
+    -- retention_at_us (min(event_at_us, received_at_us)) remains in the
+    -- schema as a deprecated, unused generated column (ADR 0008).
     source_id             INTEGER NOT NULL,
     container_instance_id INTEGER,
     stream                TEXT NOT NULL,
@@ -618,8 +626,8 @@ Core indexes should cover:
 CREATE INDEX log_events_time_idx
 ON log_events(event_at_us DESC, id DESC);
 
-CREATE INDEX log_events_retention_idx
-ON log_events(retention_at_us, id);
+CREATE INDEX log_events_received_idx
+ON log_events(received_at_us, id);   -- replaces log_events_retention_idx (ADR 0008)
 
 CREATE INDEX log_events_source_time_idx
 ON log_events(source_id, event_at_us DESC, id DESC);
@@ -767,7 +775,6 @@ If record 9,999 fails, none of the request is queued.
 | `400` | Malformed or invalid input | Do not retry unchanged |
 | `401` | Invalid or missing token | Fix credentials |
 | `403` | Authenticated token violates source policy | Fix configuration |
-| `409` | Stable source event ID reused with different canonical content | Fix producer identity |
 | `413` | Request/event too large | Reduce batch or event |
 | `415` | Unsupported format/encoding | Fix format |
 | `429` | Temporary rate limit | Retry with backoff |
@@ -775,6 +782,10 @@ If record 9,999 fails, none of the request is queued.
 | `507` | Storage unavailable/full | Retry cautiously and alert |
 
 Every response includes `X-Request-ID`.
+
+Ingestion does not return `409`. A record that reuses a stable source event ID
+for different content is dropped and counted inside an otherwise successful
+request (§14.5, ADR 0007).
 
 Do not return raw database errors or stack traces.
 
@@ -802,6 +813,7 @@ type ReceivedRecord struct {
 
 type CanonicalEvent struct {
     EventAtUS      int64
+    EventAtDefaulted bool // no source or Fluent Bit timestamp; ADR 0007
     ReceivedAtUS   int64
     Source         SourceIdentity
     Container      *ContainerIdentity
@@ -924,30 +936,52 @@ Benefits:
 
 ### 14.2 Transaction flow
 
-For each `WriteBatch`:
+For each commit group of one or more queued `WriteBatch`es (§14.3):
 
 ```text
-1. Begin transaction.
-2. Resolve distinct stable sources using cache and upserts.
-3. Resolve container instances.
-4. Check source-event-ID idempotency.
-5. Insert events using prepared statements.
-6. Update source/container last_seen in aggregate.
-7. Commit.
-8. Release queue accounting.
-9. Notify waiting request.
-10. Publish newly committed events to the live broker in ID order.
+1. Begin an immediate transaction.
+2. For each batch, in queue order:
+   a. SAVEPOINT for the batch.
+   b. Resolve distinct stable sources using cache and upserts.
+   c. Resolve container instances (§15.4).
+   d. Check source-event-ID idempotency; drop and count conflicts (§14.5).
+   e. Insert events using prepared statements.
+   f. Update source/container last_seen in aggregate.
+   g. RELEASE on success; on a batch-scoped error ROLLBACK TO and RELEASE,
+      record that batch's outcome, and continue.
+3. Commit.
+4. Fill caches from successful batches only.
+5. Release queue accounting.
+6. Notify every waiting request with its own outcome.
+7. Publish newly committed events of every successful batch to the live broker
+   in ID order.
 ```
 
-No live publication before successful commit.
+No live publication and no success acknowledgement before successful commit.
+A transaction-level failure (`Busy`, `IO`, `Full`, a failed commit, or any
+error after which SQLite may have rolled back the transaction) rolls back the
+whole group, and every batch in it receives that classified retryable outcome.
 
 ### 14.3 Batching across HTTP requests
 
-Initial implementation may commit one HTTP request per transaction for clear atomicity.
+The writer groups complete HTTP batches into one SQLite transaction (ADR 0009).
+It takes the next queued batch, then drains further already-queued batches
+until the group reaches a maximum batch count, a maximum approximate
+retained-byte total, or a maximum wait for more batches. The wait defaults to
+zero, so grouping adds no latency at low load. A batch larger than the byte
+bound forms a group of one. Defaults are benchmark-driven on a real disk and
+documented in `docs/performance`; all three bounds are configurable within
+documented limits and enforced by tests.
 
-A later optimization may group multiple complete HTTP batches into one SQLite transaction while preserving per-request all-or-nothing and completion results. This is optional and must be benchmark-driven.
-
-Never merge requests in a way that makes one invalid request roll back unrelated already-validated requests without clear handling.
+`synchronous=FULL` is unchanged: one fsync covers the whole group, and every
+acknowledgement still means the transaction containing that request
+committed. Per-request all-or-nothing is preserved by one `SAVEPOINT` per
+batch, so one failing request never rolls back unrelated requests. Source or
+container rows created inside a rolled-back savepoint are never reused by a
+later batch in the group or cached. Quotas and deduplication see earlier
+batches of the same group exactly as if they had committed separately in queue
+order. Admission-ledger accounting is unchanged. Maintenance and administrative
+mutations run between groups, never inside one.
 
 ### 14.4 Prepared statements
 
@@ -959,9 +993,16 @@ Check every error.
 
 Use the partial unique index for non-null `source_event_id`. When the existing event's
 canonical persisted content is identical, the record is an idempotent no-op and is not
-republished. When the same ID has different canonical content, reject the entire
-request with `409` and roll back every change made for it. Do not use `INSERT OR
-REPLACE`, because replacement mutates historical identity and can delete/reinsert rows.
+republished. Canonical comparison ignores event time when either side's time was
+defaulted (`event_at_defaulted`), and compares container identity by container ID when
+both carry one (ADR 0007).
+
+When the same ID names different canonical content, in the database or earlier in the
+same request, the record is dropped: it is not inserted or published, and the rest of
+the batch commits normally. The writer increments a per-server conflicting-duplicate
+counter exposed on Status and emits at most one closed-category diagnostic per server
+per minute (§27.5). Do not use `INSERT OR REPLACE`, because replacement mutates
+historical identity and can delete/reinsert rows.
 
 ---
 
@@ -986,13 +1027,33 @@ For each batch:
 - cache entries can be rebuilt;
 - no correctness depends on cache survival;
 - stale display aliases are not cached in the ingestion path unless safely invalidated;
-- cache key uses stable normalized identity, never mutable display name.
+- cache key uses stable normalized identity, never mutable display name;
+- the container cache key is `(source_id, container_id)` when an ID is present and
+  `(source_id, container_name)` otherwise; a cached ID whose name changed still
+  updates the stored label.
 
 ### 15.3 Discovery bounds
 
 Enforce at most 10,000 stable sources and 100,000 container instances per server.
 Creating records beyond either limit rejects the complete ingestion request. Inactive
-container-instance metadata may be removed only when no retained event references it.
+container-instance metadata may be removed only when no retained event references it;
+the retention cycle prunes it in bounded chunks (§23.7).
+
+### 15.4 Container-instance resolution
+
+Per ADR 0006:
+
+1. With a container ID, look up `(source_id, container_id)`; when the stored name
+   differs from the supplied name, update it in the same transaction; when no row
+   exists, insert one.
+2. With only a container name, look up `(source_id, container_name)` among rows with
+   no container ID; insert when absent. Never attach an ID-less event to an instance
+   that has an ID.
+3. If more than one row matches, which only a defect can produce, use the most
+   recently seen (`last_seen_at_us DESC, id DESC`).
+
+The same name with a new ID is a new instance, so a recreated container never
+conflicts with its predecessor.
 
 ---
 
@@ -1515,16 +1576,24 @@ No cron daemon in the container.
 
 ### 23.2 Age cleanup
 
-Delete expired events in bounded chunks.
+Delete events whose `received_at_us` is older than the age cutoff, in bounded chunks
+ordered by `(received_at_us, id)` through `log_events_received_idx` (ADR 0008). Event
+time does not decide age eligibility, so an event is never acknowledged and then
+deleted by the next age run.
 
 Each transaction should complete quickly enough not to starve ingestion.
+
+An event whose `event_at_us` is already older than the age cutoff when received is a
+late event: it is stored normally, the writer increments a per-server late-event
+counter exposed on Status, and at most one closed-category diagnostic per server per
+hour is emitted (§27.5).
 
 ### 23.3 Size cleanup
 
 Measure the active SQLite footprint as the main database plus WAL and SHM files.
 When it reaches 95% of the configured limit:
 
-- delete oldest events by `(retention_at_us, id)` toward 90%;
+- delete oldest-received events by `(received_at_us, id)` toward 90%;
 - repeat bounded chunks;
 - stop on error;
 - expose last result;
@@ -1565,6 +1634,19 @@ Retention writes serialize through the writer/database coordination strategy.
 
 Send maintenance work through the write coordinator. Do not let retention and
 ingestion create uncontrolled `SQLITE_BUSY` contention.
+
+### 23.7 Container-instance pruning
+
+Each retention cycle prunes container instances that no retained event references
+(ADR 0006, `DOMAIN.md` §14), in bounded chunks through the coordinator:
+
+1. unreferenced instances whose `last_seen_at_us` is older than the age cutoff,
+   oldest first;
+2. then, for each server above its 100,000-instance cap, its oldest unreferenced
+   instances by `(last_seen_at_us, id)` until it is within the cap.
+
+Referenced instances are never deleted; the non-cascading `log_events` foreign key
+enforces this. Chunk size and maximum writer hold follow event-deletion measurement.
 
 ---
 
@@ -1618,16 +1700,21 @@ release pages that allow a later probe to succeed.
 
 ### 25.1 Online backup
 
-Use SQLite's online backup API through the selected driver or a carefully validated equivalent.
+Use `VACUUM INTO` on a dedicated read connection (ADR 0009). It copies one
+consistent read snapshot, so concurrent commits never restart it, and it omits
+free pages. The step-wise online backup API is not used: it restarts whenever
+another connection writes between steps, so it cannot finish under steady
+ingestion.
 
 Do not copy the live main database file alone while WAL writes are active.
 
 The active process owns one bounded asynchronous backup manager. It accepts at
-most one job, uses a separate source reader and destination connection, copies
-at most 256 pages per step, yields between steps, and stops with application
-cancellation. Ingestion continues through the ordinary writer coordinator;
-SQLite defines whether a concurrent committed write is before or after the
-consistent snapshot boundary.
+most one job and stops with application cancellation, which interrupts the
+statement and removes the staging file. Progress is staged bytes written
+against the source logical size. Ingestion continues through the ordinary
+writer coordinator; commits after the snapshot began are not in the artifact.
+The snapshot's read transaction holds back WAL checkpoints for the backup's
+duration, so WAL grows and the space preflight includes WAL headroom.
 
 ### 25.2 Full backup flow
 
@@ -1636,11 +1723,12 @@ consistent snapshot boundary.
    available space for the logical page count plus 5% or 1 MiB slack.
 2. Refuse every existing destination and create a random same-directory hidden
    staging file exclusively with mode 0600.
-3. Run the SQLite online backup API in 256-page steps.
+3. Run `VACUUM INTO` the empty staging file from one read snapshot.
 4. Switch only the staged artifact to a self-contained delete journal, enable
    secure deletion, delete every session row, and write exactly one format-1
    completed full-backup metadata record in a committed transaction.
-5. Close and synchronize the staged artifact.
+5. Close and synchronize the staged artifact (SQLite does not fsync `VACUUM
+   INTO` output).
 6. Run full SQLite integrity, schema compatibility, required-table,
    backup-metadata, completed-state, and zero-session verification.
 7. Stream SHA-256 calculation with bounded memory.
@@ -1708,7 +1796,9 @@ details, hashes, or artifact contents.
 1. Require exact `RESTORE` confirmation and acquire the same exclusive,
    owner-private advisory lock held for the lifetime of `siftail serve`.
 2. Verify the input backup read-only and fully inspect the stopped current
-   database; require its current supported schema as a rollback source.
+   database; require its current supported schema as a rollback source, or
+   apply the unhealthy-database path below when the operator passed
+   `--replace-unhealthy`.
 3. Preflight room for the input artifact, current logical database/WAL state,
    and 5% or at least 1 MiB of slack.
 4. Exclusively create mode-0700 `/data/restore-staging`; refuse a leftover
@@ -1716,10 +1806,10 @@ details, hashes, or artifact contents.
 5. Stream-copy the input into a mode-0600 staged file with a 128 KiB buffer,
    synchronize it, and verify type/checksum again to close the input TOCTOU
    boundary.
-6. Capture the stopped current database through SQLite's online backup API,
-   finalize it as a verified format-1 full artifact with sessions removed, and
-   synchronize it. This incorporates committed WAL state without copying only
-   the live main file.
+6. Capture the stopped current database with `VACUUM INTO`, finalize it as a
+   verified format-1 full artifact with sessions removed, and synchronize it.
+   This incorporates committed WAL state without copying only the live main
+   file.
 7. Run a truncating checkpoint on the old database, close every connection,
    synchronize the main file/directory, and remove only its checkpointed
    WAL/SHM/journal sidecars.
@@ -1758,13 +1848,39 @@ direct use of the managed path is refused so a failed recovery attempt cannot
 consume the only copy. Because sessions are excluded, every restore or
 automatic rollback requires a new sign-in.
 
+### 25.5.1 Restore without a healthy current database
+
+`siftail restore --replace-unhealthy` (ADR 0009) classifies the current database
+before changing anything:
+
+- **healthy** (compatible, current schema, integrity `ok`): the flag has no
+  effect; the flow above runs unchanged;
+- **missing**: steps 6–7 and 11 are skipped; restore installs the verified
+  artifact and reports that no rollback copy exists;
+- **unhealthy** (unreadable, not SQLite, integrity failure, incompatible, or
+  not at this binary's current schema): the main file and any `-wal`, `-shm`,
+  and `-journal` sidecars are moved by same-directory rename into a new
+  mode-0700 `<database>.unhealthy-<UTC timestamp>/` directory, then the
+  missing-database path runs. Restore prints the safe basename of that
+  directory. Stray sidecars without a main file are preserved the same way, so
+  they never meet the restored file.
+
+Without the flag, an unusable current database is refused with a message that
+names the flag. The flag never bypasses the lock, `RESTORE` confirmation, input
+verification, staging rules, space preflight, post-install validation, or the
+`restore.apply` audit. The managed `<database>.rollback` is replaced only by a
+verified artifact, so it is untouched when no rollback copy could be made.
+Siftail never deletes a preserved `.unhealthy-*` directory; the operator does.
+
 ### 25.6 Downgrade behavior
 
 Older binary + newer schema:
 
 - refuse startup;
 - state current schema and supported maximum;
-- instruct operator to reinstall compatible version or restore pre-upgrade backup;
+- instruct operator to reinstall compatible version or restore pre-upgrade backup
+  (with `--replace-unhealthy`, because a newer-schema database is not a valid
+  rollback source for the older binary, §25.5.1);
 - never attempt best-effort down-migration.
 
 ---
@@ -1898,6 +2014,11 @@ internal request ID and an optional recovery time; it never carries a path,
 request body, environment map, credential, hash, or application field. The
 ring resets on restart by design. Authenticated Status and the owner-only
 `siftail diagnostics` control-socket command expose at most those 100 entries.
+
+The closed table includes an ingestion conflicting-duplicate entry (ADR 0007, at
+most one per server per minute) and an ingestion late-event entry (ADR 0008, at
+most one per server per hour). Their per-server counts and last-occurrence times
+are process-local Status counters, not diagnostic fields.
 
 ### 27.6 Recursive ingestion prevention
 

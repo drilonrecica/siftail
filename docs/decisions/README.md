@@ -11,6 +11,16 @@ Authoritative behavior remains in `DOMAIN.md`, `PRODUCT.md`, `ARCHITECTURE.md`, 
 3. [Single-administrator authentication](0003-single-administrator-authentication.md)
 4. [Canonical events, sources, and deduplication](0004-canonical-events-sources-and-deduplication.md)
 5. [Operator-console visual redesign](0005-operator-console-visual-redesign.md)
+6. [Ephemeral container identity](0006-ephemeral-container-identity.md)
+7. [Deduplication with defaulted timestamps and conflict policy](0007-deduplication-and-defaulted-timestamps.md)
+   (amends 0004)
+8. [Retention basis and stale events](0008-retention-basis-and-stale-events.md)
+   (amends 0004)
+9. [Group commit, snapshot backups, and unhealthy-database restore](0009-group-commit-and-snapshot-backups.md)
+   (amends 0001)
+
+An amending ADR replaces only the parts it names; the amended ADR gains an
+**Amended by** pointer and its remaining decisions stand.
 
 Do not edit an accepted ADR to reverse its decision. Add a superseding ADR and update
 every affected authoritative document, migration, and accepted test in the same change.

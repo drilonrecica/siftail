@@ -3,6 +3,10 @@
 **Status:** Accepted  
 **Date:** 2026-07-27
 
+**Amended by:** [ADR 0007](0007-deduplication-and-defaulted-timestamps.md)
+(comparison set, conflict outcome) and
+[ADR 0008](0008-retention-basis-and-stale-events.md) (retention order)
+
 ## Context
 
 Coolify and generic Fluent Bit inputs carry inconsistent envelopes and ephemeral

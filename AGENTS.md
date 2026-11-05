@@ -137,8 +137,10 @@ Every agent must preserve these unless an explicitly approved architectural chan
 - `synchronous=FULL`; an acknowledged transaction must survive an OS crash or
   power loss, subject to the guarantees of the host filesystem and storage.
 - Global age and database-size retention.
-- Oldest events by `min(event_at_us, received_at_us), id` are deleted first in
-  bounded chunks.
+- Oldest-received events by `received_at_us, id` are deleted first in bounded
+  chunks (ADR 0008).
+- Writes may share one commit group, with a savepoint per batch and an
+  acknowledgement only after the shared commit (ADR 0009).
 - Full `VACUUM` is never automatic routine maintenance.
 - Disk-full mode rejects ingestion and preserves reads where possible.
 - Never recreate or delete the database silently after an error.
@@ -705,11 +707,13 @@ Purge emits control event to affected live/history views. Deletion does not wait
 
 ## 15. Backup and recovery rules
 
-- Use SQLite online backup API for active database.
+- Use a SQLite single-snapshot copy (`VACUUM INTO`, ADR 0009) for the active database.
 - Do not copy only the live main DB file in WAL mode.
 - Verify backup before reporting success.
 - Restore requires ingestion stopped.
-- Preserve current DB as rollback copy.
+- Preserve current DB as rollback copy; a missing or unhealthy current DB is
+  restored over only with the explicit flag, and its files are moved aside,
+  never deleted (ADR 0009).
 - Run compatibility and integrity checks.
 - Older binary refuses newer schema.
 - No arbitrary SQL CLI.

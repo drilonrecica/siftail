@@ -739,7 +739,7 @@ The diagnostics area may show the latest 100 sanitized operational events. It mu
 
 Before the first public release, Siftail must provide:
 
-- full database backup using SQLite's online backup mechanism;
+- full database backup using a SQLite single-snapshot copy (`VACUUM INTO`);
 - configuration-only backup;
 - backup verification;
 - explicit restore command;

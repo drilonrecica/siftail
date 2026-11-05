@@ -3,6 +3,9 @@
 **Status:** Accepted  
 **Date:** 2026-07-27
 
+**Amended by:** [ADR 0009](0009-group-commit-and-snapshot-backups.md)
+(group commit; `VACUUM INTO` replaces the online backup API)
+
 ## Context
 
 Siftail is a single-administrator appliance with bounded retention, one production
