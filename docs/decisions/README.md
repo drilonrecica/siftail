@@ -20,6 +20,8 @@ Authoritative behavior remains in `DOMAIN.md`, `PRODUCT.md`, `ARCHITECTURE.md`, 
    (amends 0001)
 10. [Authentication, audit capacity, public URL, and secret amendments](0010-authentication-amendments.md)
     (amends 0003)
+11. [Interface direction amendments](0011-interface-direction-amendments.md)
+    (amends 0005)
 
 An amending ADR replaces only the parts it names; the amended ADR gains an
 **Amended by** pointer and its remaining decisions stand.

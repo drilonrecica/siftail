@@ -5,6 +5,9 @@
 **Audience:** Maintainer, coding agents, designers, reviewers, contributors  
 **Supersedes:** The pre-`0.6.0` design specification, per ADR 0005
 
+**Amended:** 2026-11-05 per ADR 0011 (interface direction amendments; the
+reasoning for every amended section is recorded there)
+
 ---
 
 ## 1. Purpose
@@ -157,7 +160,8 @@ position in addition to color. Severity codes (§12.3) are always visible.
 
 Server owns: query validation; rendered historical fragments; source and
 settings truth; authentication and authorization; persistent event details;
-**theme and density preferences** (§19.5).
+**interface preferences** (theme, density, keyboard shortcuts, time zone;
+§19.5) and the rendering of every time in the chosen zone (§12.2).
 
 Browser owns transient view behavior: scroll position; pending live-row
 counter; selected keyboard row; paused rendering state; expansion state.
@@ -186,8 +190,10 @@ System ▾
   Backup
 ```
 
-The System menu also contains the theme and density preference controls and
-the sign-out action. Do not add a Dashboard item.
+The System menu also contains the interface preference controls (theme,
+density, keyboard shortcuts, time zone; §19.5), a **Keyboard shortcuts** item
+that opens the help overlay (§32.5), and the sign-out action. Do not add a
+Dashboard item.
 
 ### 5.2 Primary routes
 
@@ -241,11 +247,14 @@ One slim, visually quiet top bar on every authenticated page:
 - Brand mark and name link to `/logs`.
 - Primary navigation marks the active destination with `aria-current="page"`
   and an accent underline.
-- The health indicator is a small dot plus visually hidden text naming the
-  current status severity; it links to `/status`. When status is Healthy the
-  dot uses a muted neutral; Attention uses warning; Degraded/Unavailable use
-  error. The dot is omitted (plain Status link remains in System) if a cheap
-  cached severity value is unavailable.
+- The health indicator is a small dot that links to `/status`, with the
+  accessible name "System health: <severity>". When status is Healthy the
+  dot uses a muted neutral and stands alone; when it is not Healthy a visible
+  text label with the severity word ("Attention", "Degraded", "Unavailable")
+  sits beside the dot, so the state is never colour-only. Attention uses
+  warning; Degraded/Unavailable use error. The target is at least 24×24 px.
+  The dot is omitted (plain Status link remains in System) if a cheap cached
+  severity value is unavailable.
 - The palette button is labeled with the platform shortcut (`⌘K` or
   `Ctrl K`) and opens the command palette (§32.4).
 - The System menu is a native `<details>`-based menu containing Status,
@@ -274,10 +283,13 @@ conditions are not dismissible.
 
 ### 6.4 Workspace heading
 
-Each page renders an eyebrow (small caps label naming the section), an `h1`,
-and a context line. Page metadata comes from one server-side definition per
-page; the shell must not contain per-page conditional chains for titles,
-eyebrows, or headings.
+Each page renders an `h1` naming the page and a context line naming the
+scope in plain words (ADR 0011 D5, D15). There is no eyebrow label. At
+desktop widths the `h1` and the context line share one row; at narrow widths
+the context line wraps below. Detail pages name the entity in the `h1` and
+the `<title>` ("api/web", not "Sources"). Page metadata comes from one
+server-side definition per page; the shell must not contain per-page
+conditional chains for titles or headings.
 
 ---
 
@@ -333,9 +345,14 @@ Because switching modes performs navigation, the control renders as links
 styled as a segmented control — **not** with `tab`/`tablist` roles. The
 active mode is marked with `aria-current="page"`.
 
-History and Live share source and severity filters but remain distinct
-states. Do not append live records into a historical result set
-automatically.
+History and Live share **one filter model**: source scope, levels, streams,
+and the Contains text serialise to both modes' URLs, and switching modes (the
+segmented control, the `H`/`L` shortcuts, the Go live link) carries the
+current values across. The Live source selector is the same cascade as
+History (§9.1). The two modes remain distinct states: do not append live
+records into a historical result set automatically. Controls one mode does
+not support (the time range and Does not contain in Live) are left out of
+that mode's bar, not disabled.
 
 ### 8.2 Current source context
 
@@ -409,11 +426,14 @@ Quick presets:
 
 - Presets resolve to absolute endpoints when applied and keep those
   endpoints in every pagination URL.
-- Custom range uses labeled From and To fields with `datetime-local` inputs
-  (UTC text entry remains the no-JS fallback), validation that To is after
-  From, half-open semantics `[From, To)`, and a maximum range of 31 days.
-- Row and range display use the browser locale and timezone; event details
-  also show canonical UTC.
+- Custom range uses labeled From and To fields. With JavaScript they are
+  `datetime-local` pickers whose values are interpreted in the display zone
+  (§19.5) and whose labels name that zone ("From (Europe/Berlin)"); without
+  JavaScript they are UTC text fields labelled "(UTC)". Validation that To is
+  after From, half-open semantics `[From, To)`, and a maximum range of 31
+  days. The URL always carries UTC RFC3339 `from` and `to`.
+- Rows, the range summary, and every other time render in the display zone
+  (§12.2); event detail also shows UTC.
 
 ### 10.3 Level filter
 
@@ -442,17 +462,45 @@ Exact filters for request ID, logger, HTTP method, HTTP status, error type,
 and container instance live under a "More filters" disclosure. Do not expose
 arbitrary JSON paths.
 
-### 10.7 Filter bar behavior
+### 10.7 Filter bar
 
-The filter disclosure is collapsible at every width, defaulting open on
-desktop. Its collapsed summary line names the active scope so a collapsed
-bar never hides state (§4.3).
+One filter bar serves both modes (ADR 0011 D1). At desktop widths it is at
+most two rows, with no bordered fieldsets or legends; groups are labelled
+with `role="group"` and short visible labels.
+
+```text
+[History|Live]  Scope [All servers ▾][nextup ▾][api ▾]   15m 1h 6h 24h 7d Custom   More ▾   Apply
+TRC DBG INF WRN ERR FTL UNK · Errors Problems All   stdout stderr unknown   [ Contains message text      ]
+```
+
+- **Row one:** the mode switch (§8.1); the scope cascade showing only the
+  dimensions with more than one option (§9.1); the time presets and Custom
+  (History only); the **More** disclosure; the Apply button, rendered quiet.
+  Apply serves keyboard and no-JavaScript use; with JavaScript, selectors
+  apply on change and text applies on debounce or Enter (§10.5).
+- **Row two:** the seven severity-code toggles as labelled checkbox chips
+  with the Errors, Problems, and All shortcuts beside them; the stream chips;
+  the Contains field taking the remaining width.
+- **More:** Does not contain; the custom From and To fields; the structured
+  filters (§10.6).
+- **Target:** at 1280×800 in Compact density with the bar open, the first
+  log row begins within 280 px of the top of the viewport.
+
+Below 48 rem the bar collapses into a **Filters** disclosure, closed by
+default, whose summary line names the active scope and range so a collapsed
+bar never hides state (§4.3). The open state survives fragment swaps.
+
+Live's controls (Pause/Resume, Jump to newest, Clear view, and Reconnect when
+disconnected) sit on the Live tail line (§12.6), not in a toolbar row.
 
 ### 10.8 Result summary
 
-Show loaded event count, current range, source scope, active text filters,
-and whether more results exist in either direction. Prefer
-"200 events loaded · more available" over an expensive total count.
+One line: loaded event count with the order in words ("200 events loaded,
+newest first"), current range with the display zone label (§12.2), source
+scope, active text filters, whether more results exist in either direction,
+and the **Wrap** toggle (§12.4) at the end. Prefer "200 events loaded · more
+available" over an expensive total count. The zone label links to the time
+zone preference.
 
 ### 10.9 Pagination
 
@@ -493,8 +541,11 @@ pulsing.
 
 ### 11.2 Live controls
 
-Required: Pause/Resume; Jump to newest; source, level, and stream filters;
-Clear view (browser-only — never labeled "Clear logs"); connection status.
+Required: Pause/Resume; Jump to newest; the shared filter bar (§10.7) with
+scope, level, stream, and Contains filters; Clear view (browser-only — never
+labeled "Clear logs"); connection status; Reconnect, shown only in the
+Disconnected state. Pause/Resume, Jump to newest, Clear view, and Reconnect
+sit on the Live tail line beside the connection status (§12.6).
 
 ### 11.3 Auto-scroll and the pending buffer
 
@@ -546,10 +597,21 @@ summary; message preview; stream label. The row is entirely monospace
 
 ### 12.2 Timestamp
 
-Rows show local time with milliseconds (`20:41:07.283`); when the range
-spans multiple days, include the date (`27 Jul 20:41:07.283`). Expanded
-detail shows the full event timestamp with timezone, UTC, received
-timestamp, and delivery delay.
+Every time in the interface renders in the **display zone**: UTC by default,
+or the IANA zone the operator chose in the time zone preference (§19.5). The
+server renders History rows, the range summary, event detail, Status, Audit,
+Backup, and the export dialog in that zone; the Live module formats its rows
+with the same zone from a `data-timezone` attribute. A zone that cannot be
+loaded renders UTC, labelled UTC.
+
+Formats are fixed and locale-independent so columns never move: rows show
+`20:41:07.283`; when the range spans more than one day, `27 Jul 20:41:07.283`;
+ranges and absolute times use `02 Jan 2006 15:04`; always 24-hour
+(`hourCycle: 'h23'` in JavaScript). The zone is labelled wherever times
+appear: the result summary and column header name it ("UTC",
+"Europe/Berlin"); the range picker labels name it; event detail shows the
+display zone, UTC, the received timestamp, and the delivery delay. Every
+`<time>` carries `datetime` in UTC RFC3339.
 
 ### 12.3 Severity codes
 
@@ -558,28 +620,51 @@ severity is always textual:
 
 | Level | Code | Treatment |
 |---|---|---|
-| trace | `TRC` | heavily muted text |
-| debug | `DBG` | muted text |
-| info | `INF` | secondary text |
-| warn | `WRN` | warning color + subtle left edge indicator |
-| error | `ERR` | error color + subtle left edge indicator |
-| fatal | `FTL` | fatal color, weight 700 + left edge indicator |
-| unknown | `UNK` | outlined neutral |
+| trace | `TRC` | `--text-muted`, weight 400, no edge |
+| debug | `DBG` | `--text-muted`, weight 400, no edge |
+| info | `INF` | `--text-secondary`, weight 400, no edge |
+| warn | `WRN` | `--status-warning`, weight 400, 2 px left edge in the same colour |
+| error | `ERR` | `--status-error`, weight 400, 2 px left edge |
+| fatal | `FTL` | weight 700; the code is a filled chip (`--status-fatal` background, `--text-inverse` text); 3 px left edge |
+| unknown | `UNK` | `--text-secondary`, dotted underline, no edge |
 
-Do not color the entire row. The code list is canonical; templates and the
-live rendering module must share one mapping.
+The left edge is an inset box shadow on the row at full row height, so it
+never changes layout. Fatal is stronger than error by weight, by fill, and by
+edge width, so the order holds without colour. Do not color the entire row;
+the message column keeps `--text-primary` at every level. The code list is
+canonical; templates and the live rendering module must share one mapping.
 
 ### 12.4 Message preview
 
-One line in Compact density; up to two lines in Comfortable. Preserve
-visible whitespace sensibly; show truncation ellipsis; indicate multiline
-count when useful (`NullPointerException …  +18 lines`).
+One line in Compact density; up to two lines in Comfortable; truncation
+ellipsis. A **Wrap** toggle (a button with `aria-pressed`, at the end of the
+result summary in History and on the tail line in Live) wraps the preview in
+full; its state is browser-local and survives swaps and new Live rows. The
+preview is the server-bounded excerpt; the complete message is in the detail
+panel.
+
+A message with more than one stored line ends its preview with a muted
+`+N lines` suffix in the same face (`NullPointerException …  +18 lines`); the
+server supplies the count (an additive `lines` field in the Live payload).
+
+When a Contains filter is active, matching substrings in the preview are
+wrapped in `<mark>` using `--mark-bg` with the inherited text colour and no
+padding. The server splits the preview into segments in the view model and
+the template escapes each; the Live module builds the same with text nodes.
+Matching is the same literal, ASCII-case-folded comparison as the query.
+Preserve visible whitespace sensibly.
 
 ### 12.5 Row selection and actions
 
-The keyboard-selected row gets a selection outline distinct from hover. No
-checkbox multi-select. Actions on focus/hover or in expanded detail:
-Expand/Collapse; Copy message; Copy raw event; Copy request ID when present.
+Hover: `--surface-hover` background only. The keyboard-selected row (the
+list's roving tab stop, §32.3): `--surface-selected` background plus the 2 px
+`--focus-ring` outline drawn inset, so it is distinct from hover and never
+collides with the severity edge. Expanded: the chevron rotates 90° and the
+detail opens below; no colour change on the row. Row metadata (source,
+stream) uses `--text-secondary`, never `--text-muted`, so it stays readable
+on hover and selected surfaces. No checkbox multi-select. Actions on
+focus/hover or in expanded detail: Expand/Collapse; Copy message; Copy raw
+event; Copy request ID when present; Show events around this time (§13.1).
 Primary action is expansion; avoid per-row action clutter.
 
 ### 12.6 The tail line
@@ -588,13 +673,22 @@ The tail line is the rendered boundary at the newest edge of every log list
 — the product's signature element.
 
 - **Live:** a thin accent rule directly below the newest rendered row,
-  carrying the connection state dot. It marks "now." When paused it renders
-  in the warning color with the Paused label adjacent. It moves with the
-  newest row; it does not animate per event.
+  carrying the connection state dot and text, and the Live controls:
+  Pause/Resume, Jump to newest, Clear view, the Wrap toggle, and Reconnect
+  when disconnected. It marks "now." When paused it renders in the warning
+  color with the Paused label adjacent. It moves with the newest row; it does
+  not animate per event.
 - **History:** the same rule sits above the newest loaded row and hosts the
   **Load newer** control when newer matching events exist, and a **Go live**
   link when the range extends to the present. It marks where the tail
   begins beyond the loaded window.
+
+**Time flows away from the tail line.** History reads from the newest event
+at the top down into the past; Live reads down to the newest event at the
+bottom. The two orientations are deliberate (ADR 0011 D2): the newest edge
+is where attention lands on arrival, at the top for triage and at the bottom
+for tailing, and the tail line is the one element that marks it in both. The
+result summary states the order in words so it is never implicit.
 
 The tail line is a functional landmark, not decoration: it always answers
 "where does now start?" It must never receive severity colors, glow, or
@@ -608,9 +702,12 @@ continuous animation.
 
 Expand inline below the row (no side drawer). Sections: Message; Source;
 Timing; Severity and stream; Common structured fields; Remaining attributes;
-Raw payload; Copy actions. The detail panel stays in the monospace family
-for values; labels use the UI face. Expanding a row must not switch the
-list's reading rhythm.
+Raw payload; Actions. Actions are the copy actions and **Show events around
+this time**, which opens History at the event's time ±1 minute with the
+current scope and this event highlighted (§4.1, "what happened immediately
+before and after"). The detail panel stays in the monospace family for
+values; labels use the UI face. Expanding a row must not switch the list's
+reading rhythm.
 
 ### 13.2 Source section
 
@@ -833,10 +930,23 @@ reset ends every session including the current one.
 
 ### 19.5 Interface preferences
 
-Theme (System / Dark / Light) and density (Compact / Comfortable) are
-**server-stored preferences** submitted to `POST /preferences` from the
-System menu, persisted in a non-secret cookie, and rendered server-side as
-`data-theme` / `data-density` attributes before first paint.
+Four **server-stored preferences** are submitted to `POST /preferences` from
+the System menu, persisted in one non-secret cookie
+(`theme.density.shortcuts.timezone`; a parser accepts fewer fields and
+defaults the rest), and rendered server-side before first paint:
+
+| Preference | Values | Rendered as |
+|---|---|---|
+| Theme | System (default) / Dark / Light | `data-theme` on `<html>` |
+| Density | Compact (default) / Comfortable | `data-density` on `<html>` |
+| Keyboard shortcuts | On (default) / Off | `data-shortcuts` on `<html>` (§32.6) |
+| Time zone | UTC (default) / an IANA zone name | `data-timezone` on `<main>` and every server-rendered time (§12.2) |
+
+The time zone control offers "UTC" and "Browser time zone (Europe/Berlin)",
+where JavaScript fills the second option from the browser's resolved zone;
+without JavaScript only UTC is offered and the control says so. The server
+accepts a zone of at most 64 characters from `[A-Za-z0-9_+/-]` that
+`time.LoadLocation` resolves, and otherwise keeps UTC.
 
 - With JavaScript, changes apply instantly and persist in the background.
 - Without JavaScript, the preference form submits normally and returns to
@@ -964,9 +1074,12 @@ Actions: **Clear text filters** (when text filters are active);
 
 ### 24.4 Empty live view
 
-> Waiting for new events from this source.
+> Waiting for events from **all sources**.
 
-Shows connection status; links to History.
+> Waiting for events from **nextup/api**.
+
+The scope phrase follows the selected scope. Shows connection status; the
+action is **Look in History**, a real link carrying the current filters.
 
 ### 24.5 No audit events
 
@@ -1000,8 +1113,11 @@ One shared notice region rendered by the shell directly below the header.
   delivered as **one-time flash messages** via a short-lived cookie set
   before the redirect — never as URL query parameters. A reload or shared
   link never re-shows a stale notice.
-- Screen-reader accessible via a polite live region.
-- Success notices auto-dismiss; critical errors remain until resolved.
+- Screen-reader accessible via a polite live region that exists at page load
+  and receives the flash text after load, so it is announced; one announcer
+  with throttling and de-duplication serves every page.
+- Success notices auto-dismiss after they have been announced; critical
+  errors remain until resolved.
 - No stacked floods: newest replaces equivalent messages.
 - No bouncing or celebratory animation.
 
@@ -1015,8 +1131,11 @@ Two stylesheets, both embedded and served same-origin:
 
 - `tokens.css` — font faces, primitive palette, semantic tokens, type
   scale, spacing, radii, shadows, density variables;
-- `app.css` — everything else, organized in native cascade layers
-  `@layer base, chrome, components, pages`.
+- `app.css` — everything else, organized in commented sections in the order
+  base, chrome, components, pages. Native cascade layers are not used (ADR
+  0011 D14); the order is kept by file organisation, with no `!important`
+  and selector specificity of at most two classes except for state
+  selectors.
 
 Every color used by a component references a semantic token. No literal
 colors in component rules; no arbitrary one-off colors when a token exists.
@@ -1033,9 +1152,11 @@ Each semantic color is defined **exactly once** with `light-dark()`:
 :root {
   /* static dark fallbacks first, for browsers without light-dark() */
   --surface-base: #0f1218;
-  --surface-base: light-dark(#0f1218, #f3f4f8);
+  --surface-base: light-dark(#f3f4f8, #0f1218); /* light value first */
 }
 ```
+
+`light-dark()` takes the **light** value first and the dark value second.
 
 `data-theme` is rendered server-side from the preference cookie (§19.5);
 absence means System. Browsers below the `light-dark()` support floor
@@ -1061,15 +1182,24 @@ in the same change.
 | `--text-muted` | `#808B9D` | `#5F6879` |
 | `--text-inverse` | `#0D1017` | `#F5F7FC` |
 | `--border-subtle` | `#262E3E` | `#D6DAE5` |
-| `--border-strong` | `#3E4A61` | `#A7AFC2` |
+| `--border-strong` | `#5A6A86` | `#79849B` |
 | `--accent` | `#8B96EC` | `#4653C8` |
 | `--accent-hover` | `#A2ACF2` | `#3945B0` |
 | `--status-info` | `#85A9D6` | `#33608F` |
 | `--status-warning` | `#E2A93F` | `#8F5B00` |
 | `--status-error` | `#EE7B74` | `#BC3A31` |
-| `--status-fatal` | `#F79A94` | `#8F1D25` |
+| `--status-fatal` | `#FF6B63` | `#8F1D25` |
 | `--status-success` | `#6FC08D` | `#1F7A48` |
+| `--mark-bg` | `#4A4420` | `#F5E7A3` |
 | `--focus-ring` | `#ADB7FF` | `#4653C8` |
+
+Values amended by ADR 0011: `--border-strong` (non-text contrast ≥ 3:1 on
+base and raised surfaces in both themes: 3.43/3.19 dark, 3.42/3.66 light),
+`--status-fatal` dark (deeper and more saturated than error: 6.73:1 on base,
+4.69:1 on selected), and the new `--mark-bg` (match highlight; the row's text
+colour inherits at 8.4:1 dark and 13.1:1 light). `--text-muted` is used only
+on base and raised surfaces, never inside rows with hover or selected states
+(§12.5).
 
 ### 27.4 Color rules
 
@@ -1104,11 +1234,13 @@ shadow; separation comes from hairline borders.
 
 - **UI:** `system-ui, -apple-system, "Segoe UI", sans-serif` — navigation,
   labels, buttons, forms, notices, prose.
-- **Data:** **JetBrains Mono** (vendored subsetted woff2, weights 400 and
-  700, OFL license vendored alongside), falling back to
+- **Data:** **JetBrains Mono** (vendored woff2 **static instances** at
+  weights 400 and 700, each subset to latin and latin-extended, four files;
+  OFL license vendored alongside; no variable-weight file), falling back to
   `ui-monospace, "SFMono-Regular", Consolas, "Liberation Mono", monospace`
-  with metric-compatible sizing. `font-display: swap`; the regular weight is
-  preloaded.
+  with metric-compatible sizing. `font-display: swap`; the regular latin
+  file is preloaded. Monospace text uses weights 400 and 700 only: severity
+  codes are 400 and `FTL` is 700.
 
 No external font requests of any kind.
 
@@ -1117,13 +1249,16 @@ No external font requests of any kind.
 Root: 15px Compact, 16px Comfortable (§29). Tokens:
 
 ```text
---text-2xs .733rem   --text-xs .8rem    --text-sm .867rem
---text-md  1rem      --text-lg 1.133rem --text-xl 1.333rem
---text-2xl 1.6rem    --text-log .833rem (log rows)
+--text-xs  .8rem     --text-sm .867rem  --text-md  1rem
+--text-lg  1.133rem  --text-xl 1.333rem --text-2xl 1.6rem
+--text-log .833rem (log rows)
 ```
 
-Weights: 400, 500, 600, 700 only. No literal font sizes or nonstandard
-weights in component rules.
+Nothing renders below 12 px: `--text-xs` is the smallest token (12 px at the
+Compact root) and help text uses it; there is no `--text-2xs`. Weights: 400,
+500, 600, 700 for the UI face; 400 and 700 for the monospace face (§28.1).
+No literal font sizes or nonstandard weights in component rules; every
+`font-size` in `app.css` references a scale token.
 
 ### 28.3 Monospace usage
 
@@ -1167,6 +1302,8 @@ them. Prefer native elements (`<button>`, `<dialog>`, `<details>`,
 | Empty state | message + real action buttons |
 | Status indicator | dot + text |
 | Code block | `<pre>` + copy action |
+| Icon | `<use>` of the inline sprite, §31 |
+| Filter bar | §10.7, shared by both modes |
 | Log row / tail line / event detail | §12–§13 |
 
 ### 30.2 Button emphasis
@@ -1180,11 +1317,17 @@ region.
 
 ## 31. Icons
 
-A very small local inline-SVG set (approximately: chevron, copy, close,
-external, search, dot indicator), consistent 1.5px stroke on a 16px grid.
-Decorative icons are `aria-hidden`; icon-only buttons carry accessible
-labels. No icon fonts, no external icons, no icon library dependency.
-Severity is never icon-only.
+One inline SVG sprite, rendered hidden once per page by a shared template
+partial as `<symbol>` elements, and used as
+`<svg class="icon" aria-hidden="true" focusable="false"><use href="#icon-name"/></svg>`.
+The set: `chevron` (expansion; rotated by CSS when expanded), `copy`,
+`check` (copied confirmation), `close`, `search`, `external`, `arrow-down`
+(new events), `menu` (narrow-width header). All on a 16 px grid, 1.5 px
+stroke, `currentColor`. Icon-only buttons carry a visible-text or
+`aria-label` name. The Live module builds icons with `createElementNS`,
+never `innerHTML`. No Unicode glyphs as icons (text inside `<kbd>` such as
+`⌘` and `Ctrl` is text, not an icon). No icon fonts, no external icons, no
+icon library dependency. Severity is never icon-only.
 
 ---
 
@@ -1207,7 +1350,10 @@ textarea, or editable content.
 | `Esc` | Close topmost overlay, else clear row selection |
 
 `Ctrl/Cmd+K` is claimed only when the palette can open; it is never
-prevented and dropped.
+prevented and dropped. The palette button and the help overlay show the
+platform's modifier (`⌘K` on macOS, `Ctrl K` elsewhere). `?` is a printable
+single-key shortcut and is inert when shortcuts are off (§32.6); `Esc` and
+`Ctrl/Cmd+K` always work.
 
 ### 32.3 Logs workspace shortcuts
 
@@ -1218,11 +1364,19 @@ prevented and dropped.
 | `H` | Switch to History |
 | `J` / `K` | Next / previous log row (roving tabindex, both modes) |
 | `Enter` | Expand/collapse selected row |
-| `Space` | Pause/resume (Live) |
+| `Space` | Pause/resume (Live only, and only when a pause control is present) |
 | `G` | Jump to newest (Live) |
 
-Row navigation works identically in History and Live and never traps focus
-inside the list.
+The log list is **one tab stop** with a roving tabindex: Tab enters the list
+at the selected row (or the newest), `J`/`K` and the arrow keys move the
+selection and announce its position ("row 12 of 200"), `Enter` or `Space`
+on the selected row toggles its details, and Tab leaves the list. Detail
+toggles are named from content (severity, source, message prefix), never
+from event IDs. Row navigation works identically in History and Live and
+never traps focus inside the list. `Space` is never intercepted on a
+`button`, `a`, `summary`, `[role=button]`, or form control, so native
+activation and page scrolling keep working. `scroll-padding-top` equals the
+sticky header height so a selected row is never hidden under it.
 
 ### 32.4 Command palette
 
@@ -1244,15 +1398,25 @@ Keyboard: `↑/↓` move, `Enter` activates, `Esc` closes and restores focus.
 
 ### 32.5 Keyboard help
 
-`?` opens an overlay listing global and currently scoped shortcuts with
-their visible-control equivalents. Every shortcut in this section appears
-there.
+`?` or the **Keyboard shortcuts** item in the System menu opens an overlay
+listing global and currently scoped shortcuts with their visible-control
+equivalents, including `Ctrl/Cmd+K` with the platform's modifier. Every
+shortcut in this section appears there. When shortcuts are off (§32.6) the
+overlay says so and links to the preference.
 
-### 32.6 Shortcut safety
+### 32.6 Shortcut safety and the shortcuts preference
 
 Never override browser conventions beyond the declared set; every action
 has a visible clickable equivalent; use `event.key` carefully across
-layouts; allow future disabling if accessibility feedback requires it.
+layouts.
+
+The **Keyboard shortcuts** preference (§19.5; On by default) satisfies WCAG
+2.1.4. When it is Off, every printable single-key shortcut is inert: `F`,
+`H`, `L`, `J`, `K`, `G`, `Space`, and `?`. `Esc`, `Ctrl/Cmd+K`, and native
+element activation (`Enter`/`Space` on a focused control) are unaffected.
+The keyboard module reads `data-shortcuts` on `<html>`; the palette module
+registers through the keyboard module, which is the only key-event listener
+(§39).
 
 ---
 
@@ -1303,8 +1467,9 @@ row expansion, dialogs; 200% zoom; reduced motion; 390px emergency pass.
 
 ### 34.1 Desktop first
 
-Dense investigation is the primary case. Filter bar in one or two rows;
-aligned row columns; multi-column detail metadata.
+Dense investigation is the primary case. Filter bar in at most two rows
+(§10.7); aligned row columns; multi-column detail metadata; first log row
+within 280 px of the top at 1280×800 in Compact density.
 
 ### 34.2 Narrow desktop / tablet
 
@@ -1354,28 +1519,73 @@ transitions; "secure delete"; "archive".
 
 ### 36.2 Copy rules
 
-- Controls state exactly what happens ("Save changes", not "Submit"); an
-  action keeps its name through the flow ("Export…" → "Export started").
+- The interface speaks to the operator about their logs, never about
+  Siftail's implementation. Name things by what they do for the operator:
+  "Test connection", not "Guided committed-receipt test"; "Retention", not
+  "Bounded local storage controls".
+- These words do not appear in the interface: committed, canonical, bounded,
+  deliberate, synthetic, trusted, sanitized, immutable, appliance, artifact,
+  receipt, stable identity, normalized. Say what happens instead: "stored",
+  "newest first", "limited to", "sent by".
+- Controls state exactly what happens ("Save changes", not "Submit"); they
+  are verb plus object; an action keeps its name through the flow ("Export
+  results" opens a dialog whose button is "Download").
+- Errors say what happened and what to do, in the interface's voice, never
+  apologising and never vague. Empty states invite the next action with a
+  real control.
 - Privacy copy is honest: "Anything your applications write to logs is
   stored. Siftail does not redact content in this version." Never "Your
   logs are completely secure."
 - Performance copy uses concrete claims (one container, local SQLite,
   bounded retention), never superlatives.
 - Destructive copy states exactly what is deleted and what remains.
-- Rows use concise local time; audit and destructive operations use
-  absolute times.
+- Rows use concise times in the display zone (§12.2); audit and destructive
+  operations use absolute times in the display zone with the zone named.
+
+### 36.3 Capitalisation
+
+Sentence case for every heading, label, button, menu item, notice, and
+`<title>`. Capitalise only proper nouns (Siftail, Coolify, Fluent Bit,
+SQLite, UTC) and the two mode names, History and Live. "Server", "source",
+"service", "project", "environment", "application", "container", and
+"token" are common nouns in the interface, whatever `DOMAIN.md` capitalises:
+"Create server", "Connect this server", "the server's token". Severity codes
+are upper-case by design (§12.3). Environment variable names and commands
+are set in `<code>` exactly as typed.
+
+### 36.4 Names fixed by ADR 0011
+
+| Old | New |
+|---|---|
+| Guided committed-receipt test | Test connection |
+| Create Server · Connect this Server | Create server · Connect this server |
+| Export matching History · Create download | Export results · Download |
+| "I confirm this complete matching range will leave Siftail." | "Export every matching event, not only the rows loaded on this page." |
+| Settings context "Bounded local storage controls" | Retention |
+| Sources context "Stable sources discovered from committed logs" | Services that have sent logs |
+| Servers context "Trusted identities for authenticated ingestion" | Each server sends logs with its own token |
+| Audit context "Immutable, bounded administrative security events" | Sign-ins and administrative actions |
+| Backup context "Verified local SQLite recovery artifacts" | Database backups |
+| Status context "Healthy · sanitized local operational state" | the severity word alone |
+| Header health indicator name | System health: <severity> |
+| Live empty state "Waiting for new events from this source" | "Waiting for events from <scope>" with a Look in History link |
+
+The destination names Logs, Sources, Servers, Status, Settings, Audit, and
+Backup stay.
 
 ---
 
 ## 37. State ownership
 
-Server-stored (cookie or database): theme; density; sessions.
+Server-stored (cookie or database): theme; density; keyboard shortcuts;
+time zone; sessions.
 
-URL-owned: complete History query; mode; pagination cursors.
+URL-owned: complete History query; mode; the shared filter model in both
+modes (scope, levels, streams, contains); pagination cursors.
 
 Browser-local (in-page or `localStorage`): scroll position; pending
-counter; row selection; expansion; keyboard-help seen flag; optional recent
-palette entries later.
+counter; row selection; expansion; message wrap; keyboard-help seen flag;
+optional recent palette entries later.
 
 Never store in the browser: ingestion tokens; session tokens outside the
 secure cookie; passwords; raw log payload caches beyond the active DOM;
@@ -1421,8 +1631,10 @@ approved ADR.
 ## 40. Page-specific acceptance criteria
 
 **Logs:** keyboard-complete; query in URL; source and mode always visible;
-no full-page spinner; deterministic order; escaped content; Live never
-steals scroll; caps enforced with both pagination directions reachable.
+filters carried across the mode switch; every time labelled with its zone;
+no full-page spinner; deterministic order stated in the summary; escaped
+content, including highlighted matches; Live never steals scroll; caps
+enforced with both pagination directions reachable.
 
 **Sources:** aliases clearly presentation-only; inactive identifiable;
 destructive actions visually distinct and typed-confirmed.
@@ -1453,6 +1665,10 @@ Before merging a UI change:
 - Is focus visible, restored, and never stolen?
 - Does it work in dark and light, Compact and Comfortable, reduced motion?
 - Does it rely on color alone anywhere?
+- Is every time shown in the display zone and labelled with it?
+- Does it use a literal font size, a colour outside the tokens, or a Unicode
+  glyph where the icon sprite applies?
+- Does the copy speak to the operator (§36.2–§36.3), in sentence case?
 - Are log contents escaped; does any JS touch `innerHTML` with event data?
 - Does it introduce an external asset, font request, or inline script?
 - Do empty, loading, and failure states exist with real actions?
@@ -1481,6 +1697,29 @@ Before merging a UI change:
 ### Live paused
 
 > Live view paused. Logs are still being stored.
+
+### Live waiting
+
+> Waiting for events from all sources.
+
+Action: **Look in History**.
+
+### Export results
+
+> The file contains every event that matches these filters, newest first,
+> not only the rows loaded on this page.
+
+Confirmation: "Export every matching event, not only the rows loaded on this
+page." Button: **Download**.
+
+### Shortcuts off
+
+> Keyboard shortcuts are off. Turn them on in the System menu.
+
+### Time zone
+
+> Times are shown in UTC. Choose your browser's time zone in the System
+> menu.
 
 ### Live truncated
 

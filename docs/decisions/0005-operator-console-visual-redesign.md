@@ -3,6 +3,10 @@
 **Status:** Accepted  
 **Date:** 2026-09-02
 
+**Amended by:** [ADR 0011](0011-interface-direction-amendments.md) (shortcut
+model gains an off switch; preference set gains keyboard shortcuts and time
+zone; `DESIGN.md` amendments)
+
 ## Context
 
 The interface surface became complete before it became coherent. The Live
