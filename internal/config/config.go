@@ -35,6 +35,11 @@ type Config struct {
 	IngestResidentMaxEvents     int64
 	IngestResidentMaxBytes      int64
 	IngestMaxDecoders           int64
+
+	// Commit-group bounds (ADR 0009).
+	IngestGroupMaxBatches int64
+	IngestGroupMaxBytes   int64
+	IngestGroupMaxWait    time.Duration
 }
 
 // Defaults aligned with ARCHITECTURE.md §9 and §11.3.
@@ -54,6 +59,12 @@ const (
 	defaultIngestResidentMaxEvents     = 30000
 	defaultIngestResidentMaxBytes      = 64 * 1024 * 1024 // 64 MiB
 	defaultIngestMaxDecoders           = 4
+	defaultIngestGroupMaxBatches       = 64
+	defaultIngestGroupMaxBytes         = 8 * 1024 * 1024 // 8 MiB
+	defaultIngestGroupMaxWait          = time.Duration(0)
+
+	maxIngestGroupMaxBatches = 1024
+	maxIngestGroupMaxWait    = 100 * time.Millisecond
 )
 
 // Parse reads the process configuration from the environment.
@@ -154,6 +165,23 @@ func Parse() (Config, error) {
 		return c, err
 	}
 
+	c.IngestGroupMaxBatches, err = readInt64(read, "SIFTAIL_INGEST_GROUP_MAX_BATCHES", defaultIngestGroupMaxBatches)
+	if err != nil {
+		return c, err
+	}
+	c.IngestGroupMaxBytes, err = readInt64(read, "SIFTAIL_INGEST_GROUP_MAX_BYTES", defaultIngestGroupMaxBytes)
+	if err != nil {
+		return c, err
+	}
+	groupWaitStr, err := read("SIFTAIL_INGEST_GROUP_MAX_WAIT", "", defaultIngestGroupMaxWait.String())
+	if err != nil {
+		return c, err
+	}
+	c.IngestGroupMaxWait, err = time.ParseDuration(groupWaitStr)
+	if err != nil {
+		return c, fmt.Errorf("SIFTAIL_INGEST_GROUP_MAX_WAIT: invalid duration: %w", err)
+	}
+
 	if unknown := listUnknownVars(known); len(unknown) > 0 {
 		return c, fmt.Errorf("unknown environment variable(s): %s", strings.Join(unknown, ", "))
 	}
@@ -242,6 +270,16 @@ func (c Config) Validate() error {
 	}
 	if err := validatePositive(c.IngestMaxDecoders, "SIFTAIL_INGEST_MAX_DECODERS"); err != nil {
 		return err
+	}
+
+	if c.IngestGroupMaxBatches < 1 || c.IngestGroupMaxBatches > maxIngestGroupMaxBatches {
+		return fmt.Errorf("SIFTAIL_INGEST_GROUP_MAX_BATCHES must be between 1 and %d", maxIngestGroupMaxBatches)
+	}
+	if c.IngestGroupMaxBytes < 1 || c.IngestGroupMaxBytes > c.QueueMaxBytes {
+		return fmt.Errorf("SIFTAIL_INGEST_GROUP_MAX_BYTES must be between 1 and SIFTAIL_QUEUE_MAX_BYTES")
+	}
+	if c.IngestGroupMaxWait < 0 || c.IngestGroupMaxWait > maxIngestGroupMaxWait {
+		return fmt.Errorf("SIFTAIL_INGEST_GROUP_MAX_WAIT must be between 0s and %s", maxIngestGroupMaxWait)
 	}
 
 	if c.QueueMaxBytes < c.MaxEventBytes {

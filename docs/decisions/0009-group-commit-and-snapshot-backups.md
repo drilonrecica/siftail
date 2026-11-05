@@ -111,6 +111,24 @@ backup" in a state where restore refuses.
     `<database>.rollback` is replaced only by a verified artifact, so it is
     left untouched when no rollback copy could be made.
 
+### Implementation notes (SFT-098)
+
+- Defaults, from the real-disk benchmark in
+  `docs/performance/group-commit.md`: 64 batches, 8 MiB of approximate
+  retained bytes, and zero wait (`SIFTAIL_INGEST_GROUP_MAX_BATCHES`,
+  `SIFTAIL_INGEST_GROUP_MAX_BYTES`, `SIFTAIL_INGEST_GROUP_MAX_WAIT`).
+  Limits: 1–1024 batches, 1 byte to `SIFTAIL_QUEUE_MAX_BYTES`, and 0s–100ms.
+  A batch that would push a group past the byte bound opens the next group.
+- `BEGIN IMMEDIATE` is issued explicitly on a pinned writer connection
+  (`Coordinator.DoImmediate`), because `database/sql` transactions always use
+  the driver's deferred `BEGIN`. Other coordinator mutations keep their
+  existing transaction shape.
+- A failure in a savepoint statement itself (`SAVEPOINT`, `ROLLBACK TO`,
+  `RELEASE`) is transaction-level, whatever its category.
+- Live publication is one call per successful batch, in queue order, which is
+  ID order. The broker's per-call bounds therefore apply to each batch as
+  before, never to a whole group.
+
 ## Alternatives
 
 - **`synchronous=NORMAL`.** This gains throughput by weakening the durability

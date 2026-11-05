@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/drilonrecica/siftail/internal/database"
 	"github.com/drilonrecica/siftail/internal/logs"
 	"github.com/drilonrecica/siftail/internal/sources"
 )
@@ -94,14 +95,14 @@ func TestBatchWriterRetriesOnceAfterForeignKeyFailure(t *testing.T) {
 	}
 
 	attempts := 0
-	writer.beforeInsert = func(tx *sql.Tx) error {
+	writer.beforeInsert = func(tx database.Statements) error {
 		attempts++
 		if attempts > 1 {
 			return nil
 		}
 		// The cached rows vanish after verification; the INSERT then
 		// violates the foreign keys and the attempt rolls back.
-		_, err := tx.Exec("DELETE FROM sources WHERE id=?", sourceID)
+		_, err := tx.ExecContext(context.Background(), "DELETE FROM sources WHERE id=?", sourceID)
 		return err
 	}
 	persistEvents(t, writer, serverID, canonicalEvent(serverID, "", "retried", 2))
@@ -118,9 +119,9 @@ func TestBatchWriterForeignKeyRetryIsBounded(t *testing.T) {
 	db, _, writer := newWriterTest(t, WriterOptions{})
 	serverID := insertTestServer(t, db.Writer())
 	attempts := 0
-	writer.beforeInsert = func(tx *sql.Tx) error {
+	writer.beforeInsert = func(tx database.Statements) error {
 		attempts++
-		_, err := tx.Exec("DELETE FROM sources")
+		_, err := tx.ExecContext(context.Background(), "DELETE FROM sources")
 		return err
 	}
 	err := writer.Persist(context.Background(), &WriteBatch{

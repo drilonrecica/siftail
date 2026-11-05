@@ -3,8 +3,11 @@ package database
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"errors"
 	"sync"
+
+	"github.com/mattn/go-sqlite3"
 )
 
 const mutationQueueCapacity = 64
@@ -24,8 +27,17 @@ type MaintenanceCoordinator interface {
 	DoMaintenance(context.Context, func(*sql.DB) error) error
 }
 
+// Statements is the statement surface shared by *sql.Tx and the pinned
+// connection of an immediate transaction.
+type Statements interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
 type mutationOperation struct {
 	run         func(*sql.Tx) error
+	immediate   func(Statements) error
 	maintenance func(*sql.DB) error
 	result      chan error
 }
@@ -103,6 +115,9 @@ func (c *Coordinator) executeOperation(ctx context.Context, operation mutationOp
 	if operation.maintenance != nil {
 		return c.executeMaintenance(operation.maintenance)
 	}
+	if operation.immediate != nil {
+		return c.executeImmediate(ctx, operation.immediate)
+	}
 	return c.execute(ctx, operation.run)
 }
 
@@ -124,6 +139,51 @@ func (c *Coordinator) execute(ctx context.Context, run func(*sql.Tx) error) erro
 	return nil
 }
 
+// executeImmediate runs one BEGIN IMMEDIATE transaction on a pinned writer
+// connection. database/sql always begins with the driver's deferred BEGIN, so
+// the transaction statements are issued explicitly; the caller may then use
+// SAVEPOINTs freely inside it (ADR 0009).
+func (c *Coordinator) executeImmediate(ctx context.Context, run func(Statements) error) error {
+	conn, err := c.db.Conn(ctx)
+	if err != nil {
+		return classify("acquire writer connection", err)
+	}
+	defer conn.Close()
+	if _, err := conn.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
+		return classify("begin immediate mutation", err)
+	}
+	if err := run(conn); err != nil {
+		abandonTransaction(ctx, conn)
+		return err
+	}
+	if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
+		// A failed COMMIT may leave the transaction open (SQLITE_BUSY);
+		// roll it back so the connection returns to autocommit.
+		abandonTransaction(ctx, conn)
+		return classify("commit immediate mutation", err)
+	}
+	return nil
+}
+
+// abandonTransaction rolls back whatever is still open. SQLite may already have
+// rolled the transaction back itself (I/O, full, or busy errors), in which case
+// ROLLBACK reports that no transaction is active; the outcome that matters is
+// the connection's state afterwards. A connection that is somehow still inside
+// a transaction is discarded rather than returned to the pool, so the next
+// mutation never inherits it.
+func abandonTransaction(ctx context.Context, conn *sql.Conn) {
+	_, rollbackErr := conn.ExecContext(ctx, "ROLLBACK")
+	if rollbackErr == nil {
+		return
+	}
+	_ = conn.Raw(func(driverConn any) error {
+		if sqliteConn, ok := driverConn.(*sqlite3.SQLiteConn); ok && sqliteConn.AutoCommit() {
+			return nil
+		}
+		return driver.ErrBadConn
+	})
+}
+
 func (c *Coordinator) executeMaintenance(run func(*sql.DB) error) error {
 	if run == nil {
 		return errors.New("database maintenance operation is nil")
@@ -138,6 +198,18 @@ func (c *Coordinator) Do(ctx context.Context, run func(*sql.Tx) error) error {
 		return errors.New("database mutation operation is nil")
 	}
 	return c.submit(ctx, mutationOperation{run: run, result: make(chan error, 1)})
+}
+
+// DoImmediate admits one BEGIN IMMEDIATE transaction and waits for its
+// committed result. run receives the statements of that transaction and may
+// open SAVEPOINTs inside it, but must not COMMIT, ROLLBACK, or BEGIN; returning
+// an error rolls the whole transaction back. Once admitted it follows the same
+// completion semantics as Do.
+func (c *Coordinator) DoImmediate(ctx context.Context, run func(Statements) error) error {
+	if run == nil {
+		return errors.New("database mutation operation is nil")
+	}
+	return c.submit(ctx, mutationOperation{immediate: run, result: make(chan error, 1)})
 }
 
 // DoMaintenance orders one bounded non-transactional writer operation with

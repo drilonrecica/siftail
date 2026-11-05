@@ -195,7 +195,11 @@ func (a *App) Run(ctx context.Context) error {
 		defer operationalState.SetWriterReady(false)
 		writerDone <- ingest.NewWriterWorker(
 			a.queue, ingest.NewBatchWriter(coordinator, liveBroker),
-		).WithObserver(operationalState).Run(writerCtx)
+		).WithObserver(operationalState).WithGroupLimits(ingest.GroupLimits{
+			MaxBatches: int(a.cfg.IngestGroupMaxBatches),
+			MaxBytes:   a.cfg.IngestGroupMaxBytes,
+			MaxWait:    a.cfg.IngestGroupMaxWait,
+		}).Run(writerCtx)
 	}()
 
 	g.Go(func() error { return backupManager.Run(serverCtx) })

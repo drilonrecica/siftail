@@ -460,15 +460,15 @@ func TestIngestionRequestTimeoutWritesExplicitUnavailable(t *testing.T) {
 func TestIngestionPoisonBatchIsBatchScoped(t *testing.T) {
 	for _, test := range []struct {
 		name   string
-		fail   func(*sql.Tx) error
+		fail   func(database.Statements) error
 		status int
 	}{
-		{"constraint", func(tx *sql.Tx) error {
+		{"constraint", func(tx database.Statements) error {
 			// A real SQLite CHECK failure inside the batch transaction.
-			_, err := tx.Exec("INSERT INTO settings(key, value_json) VALUES ('', '{}')")
+			_, err := tx.ExecContext(context.Background(), "INSERT INTO settings(key, value_json) VALUES ('', '{}')")
 			return database.Classify("poison insert", err)
 		}, http.StatusBadRequest},
-		{"internal", func(*sql.Tx) error {
+		{"internal", func(database.Statements) error {
 			return &database.CategoryError{Category: database.CategoryInternal, Operation: "poison"}
 		}, http.StatusInternalServerError},
 	} {

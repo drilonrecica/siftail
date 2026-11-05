@@ -400,7 +400,13 @@ SIFTAIL_QUEUE_MAX_BYTES=33554432
 SIFTAIL_INGEST_RESIDENT_MAX_EVENTS=30000
 SIFTAIL_INGEST_RESIDENT_MAX_BYTES=67108864
 SIFTAIL_INGEST_MAX_DECODERS=4
+SIFTAIL_INGEST_GROUP_MAX_BATCHES=64
+SIFTAIL_INGEST_GROUP_MAX_BYTES=8388608
+SIFTAIL_INGEST_GROUP_MAX_WAIT=0s
 ```
+
+The three commit-group bounds (§14.3) accept 1–1024 batches, 1 byte to
+`SIFTAIL_QUEUE_MAX_BYTES`, and 0s–100ms respectively.
 
 Defaults must be documented and visible in sanitized effective configuration.
 
@@ -997,10 +1003,18 @@ The writer groups complete HTTP batches into one SQLite transaction (ADR 0009).
 It takes the next queued batch, then drains further already-queued batches
 until the group reaches a maximum batch count, a maximum approximate
 retained-byte total, or a maximum wait for more batches. The wait defaults to
-zero, so grouping adds no latency at low load. A batch larger than the byte
-bound forms a group of one. Defaults are benchmark-driven on a real disk and
-documented in `docs/performance`; all three bounds are configurable within
+zero, so grouping adds no latency at low load. A batch at or above the byte
+bound forms a group of one; a batch that would push the group past it opens
+the next group, so queue order holds. The defaults (64 batches, 8 MiB, zero
+wait; §9.2) come from the real-disk benchmark in
+`docs/performance/group-commit.md`. All three bounds are configurable within
 documented limits and enforced by tests.
+
+The group runs as one `BEGIN IMMEDIATE` transaction on the coordinator's turn.
+`database/sql` always begins with the driver's deferred `BEGIN`, so the
+coordinator issues `BEGIN IMMEDIATE`, `COMMIT`, and `ROLLBACK` itself on a
+pinned writer connection (`Coordinator.DoImmediate`). A connection still
+inside a transaction after a failure is discarded, never reused.
 
 `synchronous=FULL` is unchanged: one fsync covers the whole group, and every
 acknowledgement still means the transaction containing that request

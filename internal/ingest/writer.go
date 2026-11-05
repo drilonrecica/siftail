@@ -43,7 +43,7 @@ type BatchWriter struct {
 	containers  *boundedCache[containerKey]
 	// beforeInsert is a test seam that runs inside the batch transaction
 	// after resolution; it simulates a cached row disappearing unseen.
-	beforeInsert func(*sql.Tx) error
+	beforeInsert func(database.Statements) error
 }
 
 func NewBatchWriter(coordinator *database.Coordinator, publisher Publisher) *BatchWriter {
@@ -131,14 +131,8 @@ type PersistResult struct {
 	LateEvents int
 }
 
-// Persist commits exactly one HTTP batch transaction. It does not complete the
-// queue result; the lifecycle-owned queue worker does that.
-//
-// The source and container caches are hints: every hit is confirmed inside the
-// transaction, because source removal, Clear logs, and retention pruning delete
-// rows the writer may still cache (audit DAT-02). Should a stale ID ever reach
-// an INSERT regardless, the foreign-key failure clears the batch's entries and
-// the batch is retried once, uncached, within the same request.
+// Persist commits exactly one HTTP batch as a group of one. It does not
+// complete the queue result; the lifecycle-owned queue worker does that.
 func (w *BatchWriter) Persist(ctx context.Context, batch *WriteBatch) error {
 	_, err := w.PersistWithResult(ctx, batch)
 	return err
@@ -146,58 +140,191 @@ func (w *BatchWriter) Persist(ctx context.Context, batch *WriteBatch) error {
 
 // PersistWithResult is Persist that also reports the committed outcome.
 func (w *BatchWriter) PersistWithResult(ctx context.Context, batch *WriteBatch) (PersistResult, error) {
-	if w == nil || w.coordinator == nil || batch == nil || len(batch.Events) == 0 {
-		return PersistResult{}, &Error{Category: CategoryUnavailable}
-	}
-	outcome, err := w.persistAttempt(ctx, batch)
-	if database.IsForeignKeyViolation(err) {
-		w.forgetBatch(batch)
-		outcome, err = w.persistAttempt(ctx, batch)
-	}
-	if err != nil {
-		return PersistResult{}, persistenceError(err)
-	}
-	committed := outcome.committed
-	sort.Slice(committed, func(i, j int) bool { return committed[i].ID < committed[j].ID })
-	if len(committed) > 0 && w.publisher != nil {
-		w.publisher.TryPublish(committed)
-	}
-	return PersistResult{ConflictsDropped: outcome.conflicts, LateEvents: outcome.late}, nil
+	outcome := w.PersistGroup(ctx, []*WriteBatch{batch})[0]
+	return outcome.Result, outcome.Err
 }
 
-// transactionOutcome is what one batch transaction produced. The cache updates
-// apply only after it commits.
+// BatchOutcome is one batch's own result within a commit group. Err is nil
+// only when the group committed and this batch's savepoint was released.
+type BatchOutcome struct {
+	Result PersistResult
+	Err    error
+}
+
+// savepointName names the one savepoint open at a time inside a group.
+const savepointName = "siftail_batch"
+
+// PersistGroup commits batches, in order, in one BEGIN IMMEDIATE transaction
+// with one SAVEPOINT per batch (ADR 0009) and returns one outcome per batch.
+//
+// A batch-scoped failure (forbidden, constraint, or internal) rolls back to
+// that batch's savepoint and becomes its own outcome; the remaining batches
+// continue and see exactly what earlier successful batches wrote, as if each
+// had committed separately in queue order. A transaction-level failure (busy,
+// I/O, corrupt, full, a failed commit, or a closed coordinator) rolls back the
+// whole group and every batch receives that classified retryable outcome.
+//
+// Nothing is acknowledged, cached, or published before COMMIT returns. After
+// it, the caches are filled from successful batches only, so a source or
+// container created inside a rolled-back savepoint is never cached, and each
+// successful batch's events are published in ID order.
+//
+// The source and container caches are hints: every hit is confirmed inside the
+// transaction, because source removal, Clear logs, and retention pruning delete
+// rows the writer may still cache (audit DAT-02). Should a stale ID ever reach
+// an INSERT regardless, the foreign-key failure rolls back that batch's
+// savepoint, clears its entries, and the batch is retried once, uncached, in a
+// fresh savepoint of the same group.
+func (w *BatchWriter) PersistGroup(ctx context.Context, batches []*WriteBatch) []BatchOutcome {
+	outcomes := make([]BatchOutcome, len(batches))
+	var members []int
+	for index, batch := range batches {
+		if w == nil || w.coordinator == nil || batch == nil || len(batch.Events) == 0 {
+			outcomes[index].Err = &Error{Category: CategoryUnavailable}
+			continue
+		}
+		members = append(members, index)
+	}
+	if len(members) == 0 {
+		return outcomes
+	}
+
+	staged := make([]transactionOutcome, len(batches))
+	failures := make([]error, len(batches))
+	err := w.coordinator.DoImmediate(ctx, func(tx database.Statements) error {
+		// Admission transfers persistence ownership away from the request.
+		// Request cancellation must not roll back an already admitted batch.
+		mutationCtx := context.Background()
+		for _, index := range members {
+			staged[index], failures[index] = transactionOutcome{}, nil
+			outcome, err := w.persistBatch(mutationCtx, tx, batches[index])
+			if err != nil {
+				if isTransactionLevel(err) {
+					return err
+				}
+				failures[index] = err
+				continue
+			}
+			staged[index] = outcome
+		}
+		return nil
+	})
+	if err != nil {
+		groupErr := persistenceError(err)
+		for _, index := range members {
+			outcomes[index].Err = groupErr
+		}
+		return outcomes
+	}
+
+	for _, index := range members {
+		if failures[index] != nil {
+			outcomes[index].Err = persistenceError(failures[index])
+			continue
+		}
+		outcome := staged[index]
+		for _, update := range outcome.sourceUpdates {
+			w.sources.Add(update.key, update.id)
+		}
+		for _, update := range outcome.containerUpdates {
+			w.containers.Add(update.key, update.id)
+		}
+		outcomes[index].Result = PersistResult{
+			ConflictsDropped: outcome.conflicts, LateEvents: outcome.late,
+		}
+	}
+	// Batches inserted in queue order inside one transaction, so publishing
+	// them in that order keeps Live in ID order across the whole group.
+	if w.publisher != nil {
+		for _, index := range members {
+			committed := staged[index].committed
+			if failures[index] != nil || len(committed) == 0 {
+				continue
+			}
+			sort.Slice(committed, func(i, j int) bool { return committed[i].ID < committed[j].ID })
+			w.publisher.TryPublish(committed)
+		}
+	}
+	return outcomes
+}
+
+// persistBatch runs one batch inside its own savepoint, retrying it once
+// uncached after a foreign-key failure on a stale cached ID.
+func (w *BatchWriter) persistBatch(ctx context.Context, tx database.Statements, batch *WriteBatch) (transactionOutcome, error) {
+	outcome, err := w.persistSavepoint(ctx, tx, batch)
+	if database.IsForeignKeyViolation(err) {
+		w.forgetBatch(batch)
+		outcome, err = w.persistSavepoint(ctx, tx, batch)
+	}
+	return outcome, err
+}
+
+// persistSavepoint opens the batch savepoint, runs the batch, and releases the
+// savepoint on success. A batch-scoped failure rolls back to the savepoint and
+// releases it, leaving earlier batches of the group intact. A transaction-level
+// failure is returned untouched: SQLite may already have rolled back the whole
+// transaction, so the group is abandoned instead.
+func (w *BatchWriter) persistSavepoint(ctx context.Context, tx database.Statements, batch *WriteBatch) (transactionOutcome, error) {
+	if _, err := tx.ExecContext(ctx, "SAVEPOINT "+savepointName); err != nil {
+		return transactionOutcome{}, &transactionFailure{err: database.Classify("open batch savepoint", err)}
+	}
+	outcome, err := w.persistTransaction(ctx, tx, batch)
+	if err != nil {
+		if isTransactionLevel(err) {
+			return transactionOutcome{}, err
+		}
+		if _, rollbackErr := tx.ExecContext(ctx, "ROLLBACK TO "+savepointName); rollbackErr != nil {
+			return transactionOutcome{}, &transactionFailure{err: database.Classify("roll back batch savepoint", rollbackErr)}
+		}
+		if _, releaseErr := tx.ExecContext(ctx, "RELEASE "+savepointName); releaseErr != nil {
+			return transactionOutcome{}, &transactionFailure{err: database.Classify("release batch savepoint", releaseErr)}
+		}
+		return transactionOutcome{}, err
+	}
+	if _, err := tx.ExecContext(ctx, "RELEASE "+savepointName); err != nil {
+		return transactionOutcome{}, &transactionFailure{err: database.Classify("release batch savepoint", err)}
+	}
+	return outcome, nil
+}
+
+// transactionFailure marks an error after which the group transaction cannot
+// continue, whatever its database category: a savepoint statement that fails
+// leaves the transaction in an unknown state.
+type transactionFailure struct {
+	err error
+}
+
+func (f *transactionFailure) Error() string { return f.err.Error() }
+func (f *transactionFailure) Unwrap() error { return f.err }
+
+// isTransactionLevel reports whether err ends the whole group rather than one
+// batch: storage-wide database conditions, after which SQLite may have rolled
+// the transaction back itself, and savepoint failures.
+func isTransactionLevel(err error) bool {
+	var failure *transactionFailure
+	if errors.As(err, &failure) {
+		return true
+	}
+	var databaseErr *database.CategoryError
+	if errors.As(err, &databaseErr) {
+		switch databaseErr.Category {
+		case database.CategoryBusy, database.CategoryIO, database.CategoryCorrupt, database.CategoryFull:
+			return true
+		}
+		return false
+	}
+	return errors.Is(err, database.ErrCoordinatorClosed) || errors.Is(err, context.Canceled) ||
+		errors.Is(err, context.DeadlineExceeded)
+}
+
+// transactionOutcome is what one batch produced inside the group transaction.
+// The cache updates apply only after the group commits.
 type transactionOutcome struct {
 	committed        []logs.CommittedEvent
 	conflicts        int
 	late             int
 	sourceUpdates    []cacheUpdate[sourceKey]
 	containerUpdates []cacheUpdate[containerKey]
-}
-
-// persistAttempt runs one batch transaction and, only after it commits, records
-// the IDs it resolved in the caches.
-func (w *BatchWriter) persistAttempt(ctx context.Context, batch *WriteBatch) (transactionOutcome, error) {
-	var outcome transactionOutcome
-	err := w.coordinator.Do(ctx, func(tx *sql.Tx) error {
-		// Admission transfers persistence ownership away from the request.
-		// BeginTx remains tied to the coordinator lifecycle; request
-		// cancellation must not roll back an already admitted batch.
-		mutationCtx := context.Background()
-		var err error
-		outcome, err = w.persistTransaction(mutationCtx, tx, batch)
-		return err
-	})
-	if err != nil {
-		return transactionOutcome{}, err
-	}
-	for _, update := range outcome.sourceUpdates {
-		w.sources.Add(update.key, update.id)
-	}
-	for _, update := range outcome.containerUpdates {
-		w.containers.Add(update.key, update.id)
-	}
-	return outcome, nil
 }
 
 // forgetBatch drops every cache entry the batch could have used, so the retry
@@ -214,7 +341,7 @@ func (w *BatchWriter) forgetBatch(batch *WriteBatch) {
 
 func (w *BatchWriter) persistTransaction(
 	ctx context.Context,
-	tx *sql.Tx,
+	tx database.Statements,
 	batch *WriteBatch,
 ) (transactionOutcome, error) {
 	if batch.AuthenticatedTokenID > 0 {
@@ -420,7 +547,7 @@ type eventTimes struct {
 // policy that fails validation leaves late events uncounted rather than
 // failing ingestion: the count is informational, and retention reports the
 // invalid policy itself.
-func countLateEvents(ctx context.Context, tx *sql.Tx, candidates []eventTimes) (int, error) {
+func countLateEvents(ctx context.Context, tx database.Statements, candidates []eventTimes) (int, error) {
 	if len(candidates) == 0 {
 		return 0, nil
 	}
@@ -450,7 +577,7 @@ func maxBatchReceivedAt(events []logs.CanonicalEvent) int64 {
 	return latest
 }
 
-func (w *BatchWriter) resolveSource(ctx context.Context, tx *sql.Tx, source logs.SourceIdentity, seen int64) (int64, bool, error) {
+func (w *BatchWriter) resolveSource(ctx context.Context, tx database.Statements, source logs.SourceIdentity, seen int64) (int64, bool, error) {
 	key := sourceCacheKey(source)
 	var id int64
 	err := tx.QueryRowContext(ctx, `SELECT id FROM sources
@@ -480,7 +607,7 @@ func (w *BatchWriter) resolveSource(ctx context.Context, tx *sql.Tx, source logs
 }
 
 // cachedSourceExists confirms a cached source ID with one primary-key lookup.
-func cachedSourceExists(ctx context.Context, tx *sql.Tx, id int64, key sourceKey) (bool, error) {
+func cachedSourceExists(ctx context.Context, tx database.Statements, id int64, key sourceKey) (bool, error) {
 	var found int
 	err := tx.QueryRowContext(ctx, `SELECT 1 FROM sources
 		WHERE id=? AND server_id=? AND project_key=? AND environment_key=?
@@ -502,7 +629,7 @@ func cachedSourceExists(ctx context.Context, tx *sql.Tx, id int64, key sourceKey
 // two candidates, the most recently seen wins rather than blocking ingestion.
 func (w *BatchWriter) resolveContainer(
 	ctx context.Context,
-	tx *sql.Tx,
+	tx database.Statements,
 	sourceID int64,
 	container logs.ContainerIdentity,
 	seen int64,
@@ -545,7 +672,7 @@ func (w *BatchWriter) resolveContainer(
 // loadCachedContainer confirms a cached instance ID. SQLite reuses the largest
 // rowid after a deletion, so the row must still carry the cached identity, not
 // merely the cached ID.
-func loadCachedContainer(ctx context.Context, tx *sql.Tx, id int64, key containerKey) (containerResolution, bool, error) {
+func loadCachedContainer(ctx context.Context, tx database.Statements, id int64, key containerKey) (containerResolution, bool, error) {
 	query := `SELECT coalesce(container_name, ''), last_seen_at_us
 		FROM container_instances WHERE id=? AND source_id=? AND container_id=?`
 	match := key.id
@@ -572,7 +699,7 @@ func loadCachedContainer(ctx context.Context, tx *sql.Tx, id int64, key containe
 // observation (a redelivered chunk) does not overwrite a newer one.
 func updateContainerLabels(
 	ctx context.Context,
-	tx *sql.Tx,
+	tx database.Statements,
 	order []containerKey,
 	containers map[containerKey]*containerResolution,
 ) error {
@@ -592,7 +719,7 @@ func updateContainerLabels(
 
 func updateLastSeen(
 	ctx context.Context,
-	tx *sql.Tx,
+	tx database.Statements,
 	events []logs.CanonicalEvent,
 	sourceIDs map[sourceKey]int64,
 	containers map[containerKey]*containerResolution,
@@ -634,7 +761,7 @@ func updateLastSeen(
 
 func loadCanonicalEvent(
 	ctx context.Context,
-	tx *sql.Tx,
+	tx database.Statements,
 	sourceID int64,
 	sourceEventID string,
 	source logs.SourceIdentity,

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"time"
 
 	"github.com/drilonrecica/siftail/internal/logs"
 )
@@ -242,6 +243,26 @@ func (q *Queue) Dequeue(ctx context.Context) (*WriteBatch, error) {
 		return batch, nil
 	case <-ctx.Done():
 		return nil, ctx.Err()
+	}
+}
+
+// next takes an already-queued batch without blocking when wait is nil, or
+// waits until wait fires. It reports false when nothing arrived in time or the
+// queue is closed and empty.
+func (q *Queue) next(wait <-chan time.Time) (*WriteBatch, bool) {
+	if wait == nil {
+		select {
+		case batch, ok := <-q.batches:
+			return batch, ok
+		default:
+			return nil, false
+		}
+	}
+	select {
+	case batch, ok := <-q.batches:
+		return batch, ok
+	case <-wait:
+		return nil, false
 	}
 }
 

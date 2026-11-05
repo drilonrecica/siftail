@@ -44,6 +44,8 @@ func testConfig(t *testing.T) config.Config {
 		IngestResidentMaxEvents:     30000,
 		IngestResidentMaxBytes:      64 * 1024 * 1024,
 		IngestMaxDecoders:           4,
+		IngestGroupMaxBatches:       64,
+		IngestGroupMaxBytes:         8 * 1024 * 1024,
 	}
 }
 

@@ -76,7 +76,8 @@ func TestDatabaseCheckAndDiagnosticsCLIUseActiveControlSocket(t *testing.T) {
 		MaxEventsPerRequest:         10000, MaxEventBytes: 1 << 20,
 		QueueMaxEvents: 20000, QueueMaxBytes: 32 << 20,
 		IngestResidentMaxEvents: 30000, IngestResidentMaxBytes: 64 << 20,
-		IngestMaxDecoders: 4,
+		IngestMaxDecoders:     4,
+		IngestGroupMaxBatches: 64, IngestGroupMaxBytes: 8 << 20,
 	}
 	t.Setenv("SIFTAIL_DATA_DIR", dataDir)
 	t.Setenv("SIFTAIL_UI_ADDR", cfg.UIAddr)

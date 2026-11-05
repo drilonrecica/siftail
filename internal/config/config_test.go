@@ -5,6 +5,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/drilonrecica/siftail/internal/ingest"
 )
 
 func TestParseDefaults(t *testing.T) {
@@ -374,4 +377,67 @@ func writeTempFile(t *testing.T, content string) string {
 		t.Fatalf("WriteFile: %v", err)
 	}
 	return path
+}
+
+func TestParseGroupCommitDefaultsMatchWriter(t *testing.T) {
+	clearEnv(t)
+	cfg, err := Parse()
+	if err != nil {
+		t.Fatalf("Parse defaults: %v", err)
+	}
+	want := ingest.DefaultGroupLimits()
+	if cfg.IngestGroupMaxBatches != int64(want.MaxBatches) ||
+		cfg.IngestGroupMaxBytes != want.MaxBytes ||
+		cfg.IngestGroupMaxWait != want.MaxWait {
+		t.Fatalf("group defaults = %d/%d/%s, writer defaults = %+v",
+			cfg.IngestGroupMaxBatches, cfg.IngestGroupMaxBytes, cfg.IngestGroupMaxWait, want)
+	}
+	if maxIngestGroupMaxBatches != ingest.MaxGroupMaxBatches || maxIngestGroupMaxWait != ingest.MaxGroupMaxWait {
+		t.Fatal("configuration and writer group limits disagree")
+	}
+}
+
+func TestParseGroupCommitOverrides(t *testing.T) {
+	clearEnv(t)
+	setEnv(t, "SIFTAIL_INGEST_GROUP_MAX_BATCHES", "8")
+	setEnv(t, "SIFTAIL_INGEST_GROUP_MAX_BYTES", "1048576")
+	setEnv(t, "SIFTAIL_INGEST_GROUP_MAX_WAIT", "5ms")
+	cfg, err := Parse()
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if cfg.IngestGroupMaxBatches != 8 || cfg.IngestGroupMaxBytes != 1<<20 ||
+		cfg.IngestGroupMaxWait != 5*time.Millisecond {
+		t.Fatalf("group bounds = %d/%d/%s", cfg.IngestGroupMaxBatches, cfg.IngestGroupMaxBytes, cfg.IngestGroupMaxWait)
+	}
+	if err := (ingest.GroupLimits{
+		MaxBatches: int(cfg.IngestGroupMaxBatches), MaxBytes: cfg.IngestGroupMaxBytes,
+		MaxWait: cfg.IngestGroupMaxWait,
+	}).Validate(); err != nil {
+		t.Fatalf("writer rejects valid configuration: %v", err)
+	}
+}
+
+func TestParseGroupCommitRejectsOutOfRangeBounds(t *testing.T) {
+	for _, tt := range []struct {
+		name, variable, value string
+	}{
+		{"zero batches", "SIFTAIL_INGEST_GROUP_MAX_BATCHES", "0"},
+		{"too many batches", "SIFTAIL_INGEST_GROUP_MAX_BATCHES", "1025"},
+		{"zero bytes", "SIFTAIL_INGEST_GROUP_MAX_BYTES", "0"},
+		{"bytes above queue", "SIFTAIL_INGEST_GROUP_MAX_BYTES", "33554433"},
+		{"negative wait", "SIFTAIL_INGEST_GROUP_MAX_WAIT", "-1ms"},
+		{"wait above limit", "SIFTAIL_INGEST_GROUP_MAX_WAIT", "101ms"},
+		{"malformed wait", "SIFTAIL_INGEST_GROUP_MAX_WAIT", "soon"},
+		{"malformed batches", "SIFTAIL_INGEST_GROUP_MAX_BATCHES", "many"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			clearEnv(t)
+			setEnv(t, tt.variable, tt.value)
+			_, err := Parse()
+			if err == nil || !strings.Contains(err.Error(), tt.variable) {
+				t.Fatalf("Parse error = %v, want one naming %s", err, tt.variable)
+			}
+		})
+	}
 }

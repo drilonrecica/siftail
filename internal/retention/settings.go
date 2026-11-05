@@ -161,7 +161,7 @@ func AgeCutoffUS(at time.Time, ageDays int) int64 {
 // a caller sees the same policy as the transaction's other reads. It returns
 // the default when no policy was saved and ErrInvalidStored when the stored
 // policy is invalid.
-func LoadAgeDaysTx(ctx context.Context, tx *sql.Tx) (int, error) {
+func LoadAgeDaysTx(ctx context.Context, tx database.Statements) (int, error) {
 	var valueJSON string
 	err := tx.QueryRowContext(ctx, `SELECT value_json FROM settings WHERE key = ?`,
 		applicationRetentionKey).Scan(&valueJSON)
