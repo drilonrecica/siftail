@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -36,7 +37,7 @@ func TestDatabaseCheckCLIOfflineQuickFullAndSafeFailures(t *testing.T) {
 		}
 		output := stdout.String()
 		for _, expected := range []string{
-			"schema: 7/7", "compatible: true", "integrity: ok",
+			fmt.Sprintf("schema: %d/%d", database.MaxSchemaVersion, database.MaxSchemaVersion), "compatible: true", "integrity: ok",
 			"writable: true (filesystem_access)",
 			"checkpoint: not_run_read_only",
 		} {

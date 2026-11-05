@@ -636,9 +636,9 @@ ON log_events(source_id, event_at_us DESC, id DESC);
 CREATE INDEX log_events_source_level_time_idx
 ON log_events(source_id, level_normalized, event_at_us DESC, id DESC);
 
-CREATE INDEX log_events_request_id_idx
-ON log_events(request_id)
-WHERE request_id IS NOT NULL;
+CREATE INDEX log_events_request_time_idx
+ON log_events(request_id, event_at_us DESC, id DESC)
+WHERE request_id IS NOT NULL;     -- replaces log_events_request_id_idx (SFT-095)
 
 CREATE INDEX log_events_container_time_idx
 ON log_events(container_instance_id, event_at_us DESC, id DESC)
@@ -1115,11 +1115,43 @@ Descending older-page predicate:
 
 ```sql
 WHERE
-  event_at_us < :cursor_event_at
-  OR (event_at_us = :cursor_event_at AND id < :cursor_id)
+  event_at_us >= :from AND event_at_us < :cursor_event_at + 1
+  AND (event_at_us < :cursor_event_at
+       OR (event_at_us = :cursor_event_at AND id < :cursor_id))
 ORDER BY event_at_us DESC, id DESC
 LIMIT :limit
 ```
+
+The cursor's timestamp replaces the range bound it tightens (older pages: the
+upper bound; newer pages: the lower bound, `max(:from, :cursor_event_at)`), so
+the index range starts at the cursor and page N costs the same as page 1. The
+`OR` is only the tie-break among rows sharing the cursor's timestamp.
+
+### 16.2.1 Filter plans
+
+Every supported filter shape reads `log_events` in History order through an
+index and stops at `LIMIT`; none sorts in a temporary B-tree. Tests in
+`internal/logs/history_store_test.go` pin each plan with `EXPLAIN QUERY PLAN`,
+with and without a cursor.
+
+- A complete source identity (Server and all four keys) names at most one
+  source: `e.source_id = (SELECT id FROM sources …)` uses
+  `log_events_source_time_idx`, or `log_events_source_level_time_idx` with one
+  level.
+- A partial hierarchy (Server only, Server+Project, …) can name many sources:
+  `+e.source_id IN (SELECT id FROM sources …)` filters rows read from
+  `log_events_time_idx`. The unary plus keeps SQLite from expanding the set
+  into per-source index ranges, whose union it could only order with a
+  temporary B-tree over every matching row in the range.
+- Several levels are a filter (`+e.level_normalized IN (…)`) for the same
+  reason; one level stays an equality.
+- An exact container uses `log_events_container_time_idx`; an exact request ID
+  uses `log_events_request_time_idx`.
+
+A filter that reads the time index costs time proportional to the rows it
+skips before filling a page, so a rarely-logging subset of a busy instance, a
+literal search, or a sparse level is bounded by the 31-day range rather than
+by the page size.
 
 Reject a cursor when its version or fingerprint does not match the current query. Do
 not use offset pagination for deep history.

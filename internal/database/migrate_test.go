@@ -367,7 +367,7 @@ func TestCriticalIndexesAreUsed(t *testing.T) {
 		{"SELECT id FROM log_events ORDER BY event_at_us DESC, id DESC LIMIT 10", "log_events_time_idx"},
 		{"SELECT id FROM log_events WHERE source_id=1 ORDER BY event_at_us DESC, id DESC LIMIT 10", "log_events_source_time_idx"},
 		{"SELECT id FROM log_events WHERE source_id=1 AND level_normalized='error' ORDER BY event_at_us DESC, id DESC LIMIT 10", "log_events_source_level_time_idx"},
-		{"SELECT id FROM log_events WHERE request_id='r'", "log_events_request_id_idx"},
+		{"SELECT id FROM log_events WHERE request_id='r' ORDER BY event_at_us DESC, id DESC LIMIT 10", "log_events_request_time_idx"},
 		{"SELECT id FROM log_events WHERE received_at_us < 100 ORDER BY received_at_us, id LIMIT 10", "log_events_received_idx"},
 		{"SELECT id FROM log_events ORDER BY received_at_us, id LIMIT 10", "log_events_received_idx"},
 		{"SELECT id FROM container_instances WHERE source_id=1 AND container_id='c' ORDER BY last_seen_at_us DESC, id DESC LIMIT 1", "container_instances_source_container_id_idx"},
@@ -721,5 +721,99 @@ func TestRetentionByReceiptMigrationReplacesRetentionIndex(t *testing.T) {
 	}
 	if err := IntegrityCheck(context.Background(), db); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestRequestTimeIndexMigrationOrdersRequestLookups(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "schema-7.db")
+	db, err := sql.Open("sqlite3", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	db.SetMaxOpenConns(1)
+	if _, err := db.Exec("PRAGMA foreign_keys=ON"); err != nil {
+		t.Fatal(err)
+	}
+	migrations, err := loadMigrations(migrationFiles)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if migrations[7].name != "0008_request_time_index.sql" || migrations[7].foreignKeysOff {
+		t.Fatalf("migration 8 = %q (foreign keys off %v)", migrations[7].name, migrations[7].foreignKeysOff)
+	}
+	if err := applyMigrations(context.Background(), db, migrations[:7]); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO servers(id,name,created_at_us) VALUES(1,'s',1);
+		INSERT INTO sources(id,server_id,project_key,environment_key,application_key,service_key,project_label,environment_label,application_label,service_label,first_seen_at_us,last_seen_at_us)
+		VALUES(1,1,'p','e','a','x','p','e','a','x',1,1);
+		INSERT INTO log_events(id,event_at_us,received_at_us,source_id,stream,level_normalized,message_raw,message_text,request_id)
+		VALUES(50,300,300,1,'stdout','info',x'61','a','r-1'),
+			(51,100,100,1,'stdout','info',x'62','b','r-1'),
+			(52,300,300,1,'stdout','info',x'63','c','r-1'),
+			(53,200,200,1,'stdout','info',x'64','d','r-2'),
+			(54,400,400,1,'stdout','info',x'65','e',NULL)`); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := applyMigrations(context.Background(), db, migrations); err != nil {
+		t.Fatal(err)
+	}
+	assertSchemaVersion(t, db, MaxSchemaVersion)
+	var current, legacy int
+	if err := db.QueryRow(`SELECT
+		(SELECT count(*) FROM sqlite_schema WHERE type='index' AND name='log_events_request_time_idx'),
+		(SELECT count(*) FROM sqlite_schema WHERE type='index' AND name='log_events_request_id_idx')`).
+		Scan(&current, &legacy); err != nil {
+		t.Fatal(err)
+	}
+	if current != 1 || legacy != 0 {
+		t.Fatalf("request indexes: current=%d legacy=%d", current, legacy)
+	}
+	var count int
+	if err := db.QueryRow("SELECT count(*) FROM log_events").Scan(&count); err != nil || count != 5 {
+		t.Fatalf("events after migration = %d, err=%v", count, err)
+	}
+
+	const lookup = `SELECT id FROM log_events INDEXED BY log_events_request_time_idx
+		WHERE request_id = ? AND event_at_us >= 0 AND event_at_us < 1000
+		ORDER BY event_at_us DESC, id DESC LIMIT 10`
+	rows, err := db.Query("EXPLAIN QUERY PLAN "+lookup, "r-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var plan []string
+	for rows.Next() {
+		var id, parent, unused int
+		var detail string
+		if err := rows.Scan(&id, &parent, &unused, &detail); err != nil {
+			t.Fatal(err)
+		}
+		plan = append(plan, detail)
+	}
+	if err := rows.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if joined := strings.Join(plan, "\n"); strings.Contains(joined, "TEMP B-TREE") {
+		t.Fatalf("request lookup sorts:\n%s", joined)
+	}
+	ordered, err := db.Query(lookup, "r-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for ordered.Next() {
+		var id int64
+		if err := ordered.Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		got = append(got, strconv.FormatInt(id, 10))
+	}
+	if err := ordered.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(got, ",") != "52,50,51" {
+		t.Fatalf("request order = %v", got)
 	}
 }

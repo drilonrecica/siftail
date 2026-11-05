@@ -1,7 +1,7 @@
 # SQLite upgrade fixtures
 
 These databases are immutable, synthetic historical snapshots for Siftail
-schema versions 1 through 7. They contain no production credentials or
+schema versions 1 through 8. They contain no production credentials or
 application payloads. Names, tokens, password/session material, addresses, and
 events are deliberately recognizable test values.
 
@@ -14,8 +14,10 @@ with a new container ID), which schema 4's uniqueness constraints could not
 hold. Schema 6 additionally carries a stable-ID event whose time was defaulted
 to receive time (`event_at_defaulted = 1`, ADR 0007). Schema 7 additionally
 carries a late event whose event time is 30 days before its receipt (ADR
-0008). Fixed timestamps and
-deterministic synthetic hashes make provenance reviewable.
+0008). Schema 8 changes only an index, so it carries the same state as schema
+7; every fixture's event 15 has a request ID that the rebuilt request-ID index
+must cover. Fixed timestamps and deterministic synthetic hashes make provenance
+reviewable.
 
 The compatibility tests pin each database's SHA-256 digest. Do not regenerate
 or edit a fixture when a new migration is added. Add only the new current
@@ -32,13 +34,14 @@ schema-4.db  5c9926b8c354e9622147acb0f10454e81db764068677776bd31fcddac92e4fe2
 schema-5.db  3e051e348460e4ceb851028a93a998032d295a3865c770ac35c478ab7a840870
 schema-6.db  d8c662571bb2fc726d93dae1493ae8a189e219d5e46b627fcb60b785762f43dc
 schema-7.db  07354718efe238051c3025b24c44945cfa7a470a9b8d4b59927bcf69b0de7c75
+schema-8.db  2675b8dc80d5add3ab8a3321db62c7c857673e931d59a646848b86006b3fe67a
 ```
 
 After adding a migration, update the generator's ordered name list and current
 version, then generate only the new fixture from the repository root:
 
 ```bash
-go run ./internal/database/testdata/upgrades/generate.go -version 8
+go run ./internal/database/testdata/upgrades/generate.go -version 9
 ```
 
 An intentional correction to one existing fixture is explicit:

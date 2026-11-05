@@ -253,47 +253,217 @@ func TestHistoryRejectsInvalidCursorAndHonorsCancellation(t *testing.T) {
 	}
 }
 
-func TestHistoryQueryPlansUseExistingTimeIndexes(t *testing.T) {
+// TestHistoryQueryPlansReadIndexOrder pins the plan of every supported filter
+// shape: each reads log_events through the named index in History order, so
+// LIMIT bounds the work, and none sorts in a temporary B-tree. Each shape is
+// checked without a cursor and with an older and a newer cursor, whose
+// timestamp must appear as an index range bound rather than a residual filter.
+func TestHistoryQueryPlansReadIndexOrder(t *testing.T) {
 	fixture := newHistoryFixture(t)
-	cases := map[string]struct {
-		query     HistoryQuery
+	source := func(query HistoryQuery) HistoryQuery {
+		query.ServerID = 1
+		query.Project = "project"
+		query.Environment = "production"
+		query.Application = "api"
+		query.Service = "web"
+		return query
+	}
+	cases := []struct {
+		name      string
+		edit      func(HistoryQuery) HistoryQuery
 		wantIndex string
 	}{
-		"unfiltered": {fixture.query(), "log_events_time_idx"},
-		"source level": {
-			func() HistoryQuery {
-				query := fixture.query()
-				query.ServerID = 1
-				query.Project = "project"
-				query.Environment = "production"
-				query.Application = "api"
-				query.Service = "web"
-				query.Levels = []Level{LevelError}
-				return query
-			}(),
-			"log_events_source_time_idx",
-		},
-		"container": {
-			func() HistoryQuery {
-				query := fixture.query()
-				query.ContainerID = 1
-				return query
-			}(),
-			"log_events_container_time_idx",
-		},
+		{"unfiltered", func(query HistoryQuery) HistoryQuery { return query }, "log_events_time_idx"},
+		{"single source", source, "log_events_source_time_idx"},
+		{"server only", func(query HistoryQuery) HistoryQuery {
+			query.ServerID = 1
+			return query
+		}, "log_events_time_idx"},
+		{"server project environment", func(query HistoryQuery) HistoryQuery {
+			query.ServerID = 1
+			query.Project = "project"
+			query.Environment = "production"
+			return query
+		}, "log_events_time_idx"},
+		{"two hierarchy levels", func(query HistoryQuery) HistoryQuery {
+			query.ServerID = 1
+			query.Project = "project"
+			return query
+		}, "log_events_time_idx"},
+		{"single source one level", func(query HistoryQuery) HistoryQuery {
+			query = source(query)
+			query.Levels = []Level{LevelError}
+			return query
+		}, "log_events_source_level_time_idx"},
+		{"single source two levels", func(query HistoryQuery) HistoryQuery {
+			query = source(query)
+			query.Levels = []Level{LevelWarn, LevelError}
+			return query
+		}, "log_events_source_time_idx"},
+		{"server only two levels", func(query HistoryQuery) HistoryQuery {
+			query.ServerID = 1
+			query.Levels = []Level{LevelWarn, LevelError}
+			return query
+		}, "log_events_time_idx"},
+		{"request id", func(query HistoryQuery) HistoryQuery {
+			query.RequestID = "request-1"
+			return query
+		}, "log_events_request_time_idx"},
+		{"container", func(query HistoryQuery) HistoryQuery {
+			query.ContainerID = 1
+			return query
+		}, "log_events_container_time_idx"},
+		{"literal", func(query HistoryQuery) HistoryQuery {
+			query.Contains = "timeout"
+			return query
+		}, "log_events_time_idx"},
 	}
-	for name, test := range cases {
-		t.Run(name, func(t *testing.T) {
-			statement, arguments := buildHistorySQL(test.query, nil)
-			details, err := historyQueryPlan(fixture.store.db, statement, arguments)
+	cursors := []struct {
+		name      string
+		direction Direction
+		cursor    *HistoryCursor
+	}{
+		{"first page", DirectionOlder, nil},
+		{"older cursor", DirectionOlder, &HistoryCursor{EventAtUS: 1_500_000, ID: 2}},
+		{"newer cursor", DirectionNewer, &HistoryCursor{EventAtUS: 1_500_000, ID: 2}},
+	}
+	for _, test := range cases {
+		for _, page := range cursors {
+			t.Run(test.name+"/"+page.name, func(t *testing.T) {
+				query := test.edit(fixture.query())
+				query.Direction = page.direction
+				statement, arguments := buildHistorySQL(query, page.cursor)
+				details, err := historyQueryPlan(fixture.store.db, statement, arguments)
+				if err != nil {
+					t.Fatal(err)
+				}
+				plan := strings.Join(details, "\n")
+				var eventStep string
+				for _, detail := range details {
+					if strings.HasPrefix(detail, "SEARCH e ") || strings.HasPrefix(detail, "SCAN e") {
+						eventStep = detail
+					}
+				}
+				if !strings.Contains(eventStep, "INDEX "+test.wantIndex+" ") {
+					t.Fatalf("events not read through %s:\n%s", test.wantIndex, plan)
+				}
+				if !strings.Contains(eventStep, "event_at_us>? AND event_at_us<?") {
+					t.Fatalf("time range is not an index bound:\n%s", plan)
+				}
+				if strings.Contains(plan, "TEMP B-TREE") {
+					t.Fatalf("plan sorts in a temporary B-tree:\n%s", plan)
+				}
+			})
+		}
+	}
+}
+
+func TestHistoryCursorTightensTheRangeBound(t *testing.T) {
+	query := HistoryQuery{FromUS: 1_000, ToUS: 9_000, Direction: DirectionOlder, Limit: 200}
+	cursor := &HistoryCursor{EventAtUS: 5_000, ID: 7}
+	_, arguments := buildHistoryFilterSQL(query, cursor)
+	if arguments[0] != int64(1_000) || arguments[1] != int64(5_001) {
+		t.Fatalf("older bounds = [%v, %v), want [1000, 5001)", arguments[0], arguments[1])
+	}
+	query.Direction = DirectionNewer
+	_, arguments = buildHistoryFilterSQL(query, cursor)
+	if arguments[0] != int64(5_000) || arguments[1] != int64(9_000) {
+		t.Fatalf("newer bounds = [%v, %v), want [5000, 9000)", arguments[0], arguments[1])
+	}
+	// A cursor outside the range never widens it.
+	outside := &HistoryCursor{EventAtUS: 20_000, ID: 1}
+	query.Direction = DirectionOlder
+	_, arguments = buildHistoryFilterSQL(query, outside)
+	if arguments[1] != int64(9_000) {
+		t.Fatalf("older bound widened to %v", arguments[1])
+	}
+	query.Direction = DirectionNewer
+	_, arguments = buildHistoryFilterSQL(query, &HistoryCursor{EventAtUS: 10, ID: 1})
+	if arguments[0] != int64(1_000) {
+		t.Fatalf("newer bound widened to %v", arguments[0])
+	}
+}
+
+func TestHistoryHierarchyFiltersSelectSourceSets(t *testing.T) {
+	fixture := newHistoryFixture(t)
+	cases := []struct {
+		name string
+		edit func(*HistoryQuery)
+		want []int64
+	}{
+		{"server spans its sources", func(query *HistoryQuery) { query.ServerID = 1 }, []int64{3, 2, 1}},
+		{"two levels", func(query *HistoryQuery) {
+			query.ServerID = 1
+			query.Project = "project"
+		}, []int64{3, 2, 1}},
+		{"application narrows", func(query *HistoryQuery) {
+			query.ServerID = 1
+			query.Project = "project"
+			query.Environment = "production"
+			query.Application = "worker"
+		}, []int64{2}},
+		{"other server", func(query *HistoryQuery) { query.ServerID = 2 }, []int64{}},
+		{"unknown complete identity", func(query *HistoryQuery) {
+			query.ServerID = 1
+			query.Project = "project"
+			query.Environment = "production"
+			query.Application = "api"
+			query.Service = "missing"
+		}, []int64{}},
+		{"project without server", func(query *HistoryQuery) { query.Project = "inactive-project" }, []int64{}},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			query := fixture.query()
+			test.edit(&query)
+			page, err := fixture.store.History(context.Background(), query)
 			if err != nil {
 				t.Fatal(err)
 			}
-			t.Log(strings.Join(details, "\n"))
-			if !strings.Contains(strings.Join(details, "\n"), test.wantIndex) {
-				t.Fatalf("plan did not use %s:\n%s", test.wantIndex, strings.Join(details, "\n"))
+			if got := historyIDs(page.Events); !reflect.DeepEqual(got, test.want) {
+				t.Fatalf("IDs = %v, want %v", got, test.want)
 			}
 		})
+	}
+
+	// Pagination through a partial hierarchy keeps the tie-break on equal
+	// timestamps (events 1 and 2 share one) in both directions.
+	query := fixture.query()
+	query.ServerID = 1
+	query.Limit = 1
+	var older []int64
+	var last HistoryPage
+	for {
+		page, err := fixture.store.History(context.Background(), query)
+		if err != nil {
+			t.Fatal(err)
+		}
+		older = append(older, historyIDs(page.Events)...)
+		last = page
+		if !page.HasMore {
+			break
+		}
+		query.Cursor = page.NextCursor
+	}
+	if !reflect.DeepEqual(older, []int64{3, 2, 1}) {
+		t.Fatalf("older pages = %v", older)
+	}
+	query.Cursor = last.PrevCursor
+	query.Direction = DirectionNewer
+	var newer []int64
+	for {
+		page, err := fixture.store.History(context.Background(), query)
+		if err != nil {
+			t.Fatal(err)
+		}
+		newer = append(newer, historyIDs(page.Events)...)
+		if !page.HasMore {
+			break
+		}
+		query.Cursor = page.NextCursor
+	}
+	if !reflect.DeepEqual(newer, []int64{2, 3}) {
+		t.Fatalf("newer pages = %v", newer)
 	}
 }
 

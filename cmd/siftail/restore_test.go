@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -85,7 +86,7 @@ func TestRestoreCLIRequiresStoppedServerConfirmationAndStaysSecretFree(
 	for _, expected := range []string{
 		"restore complete", "type: full",
 		"artifact: private-artifact.sqlite",
-		"rollback: siftail.db.rollback", "schema: 7",
+		"rollback: siftail.db.rollback", fmt.Sprintf("schema: %d", database.MaxSchemaVersion),
 		"fresh login required: true",
 	} {
 		if !strings.Contains(stdout.String(), expected) {

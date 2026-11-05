@@ -225,26 +225,53 @@ func buildHistorySQL(query HistoryQuery, cursor *HistoryCursor) (string, []any) 
 		"\nLIMIT ?", arguments
 }
 
+// buildHistoryFilterSQL returns the WHERE clause shared by History pages and
+// exports. Its shape is chosen so every supported filter reads rows in
+// (event_at_us DESC, id DESC) order from an index and LIMIT stops the scan;
+// history_store_test.go asserts the plans.
+//
+//   - A cursor tightens the range bound itself (older: upper, newer: lower)
+//     instead of adding only an OR predicate, so page N starts its index range
+//     at the cursor and costs the same as page 1. The tie-break predicate then
+//     excludes the already-returned rows that share the cursor's timestamp.
+//   - Hierarchy filters never filter the joined sources row. A complete source
+//     identity names at most one source, so it becomes an equality on
+//     e.source_id and uses the per-source time indexes. A partial hierarchy
+//     (Server only, Server+Project, …) can name many sources; it becomes
+//     +e.source_id IN (…), whose unary plus keeps SQLite from expanding the
+//     set into per-source index ranges that would need a temporary B-tree to
+//     merge, so log_events_time_idx supplies the order instead.
+//   - Several levels are likewise a filter (+e.level_normalized) rather than
+//     a multi-range on log_events_source_level_time_idx; one level stays an
+//     equality and may use that index.
 func buildHistoryFilterSQL(
 	query HistoryQuery,
 	cursor *HistoryCursor,
 ) (string, []any) {
+	fromUS, toUS := query.FromUS, query.ToUS
+	if cursor != nil {
+		if query.Direction == DirectionNewer {
+			fromUS = max(fromUS, cursor.EventAtUS)
+		} else if cursor.EventAtUS < toUS {
+			// The cursor row's own timestamp may still hold unread rows with
+			// smaller IDs, so the exclusive bound is one microsecond above it.
+			toUS = cursor.EventAtUS + 1
+		}
+	}
 	clauses := []string{"e.event_at_us >= ?", "e.event_at_us < ?"}
-	arguments := []any{query.FromUS, query.ToUS}
+	arguments := []any{fromUS, toUS}
 	addExact := func(column string, value any, present bool) {
 		if present {
 			clauses = append(clauses, column+" = ?")
 			arguments = append(arguments, value)
 		}
 	}
-	addExact("s.server_id", query.ServerID, query.ServerID > 0)
-	addExact("s.project_key", query.Project, query.Project != "")
-	addExact("s.environment_key", query.Environment, query.Environment != "")
-	addExact("s.application_key", query.Application, query.Application != "")
-	addExact("s.service_key", query.Service, query.Service != "")
-	addExact("e.container_instance_id", query.ContainerID, query.ContainerID > 0)
 	addSet := func(column string, values []string) {
 		if len(values) == 0 {
+			return
+		}
+		if len(values) == 1 {
+			addExact(column, values[0], true)
 			return
 		}
 		placeholders := make([]string, len(values))
@@ -254,11 +281,24 @@ func buildHistoryFilterSQL(
 		}
 		clauses = append(clauses, column+" IN ("+strings.Join(placeholders, ",")+")")
 	}
+	if sources, sourceArguments, complete := historySourceSubquery(query); sources != "" {
+		if complete {
+			clauses = append(clauses, "e.source_id = ("+sources+")")
+		} else {
+			clauses = append(clauses, "+e.source_id IN ("+sources+")")
+		}
+		arguments = append(arguments, sourceArguments...)
+	}
+	addExact("e.container_instance_id", query.ContainerID, query.ContainerID > 0)
 	levels := make([]string, len(query.Levels))
 	for index, level := range query.Levels {
 		levels[index] = string(level)
 	}
-	addSet("e.level_normalized", levels)
+	if len(levels) > 1 {
+		addSet("+e.level_normalized", levels)
+	} else {
+		addSet("e.level_normalized", levels)
+	}
 	streams := make([]string, len(query.Streams))
 	for index, stream := range query.Streams {
 		streams[index] = string(stream)
@@ -290,6 +330,31 @@ func buildHistoryFilterSQL(
 		arguments = append(arguments, cursor.EventAtUS, cursor.EventAtUS, cursor.ID)
 	}
 	return strings.Join(clauses, "\nAND "), arguments
+}
+
+// historySourceSubquery returns the source-ID selection for the query's
+// hierarchy filters, or "" when there are none. complete reports that Server
+// and all four keys are set, which the unique source identity resolves to at
+// most one source.
+func historySourceSubquery(query HistoryQuery) (string, []any, bool) {
+	var clauses []string
+	var arguments []any
+	add := func(column string, value any, present bool) {
+		if present {
+			clauses = append(clauses, "scope."+column+" = ?")
+			arguments = append(arguments, value)
+		}
+	}
+	add("server_id", query.ServerID, query.ServerID > 0)
+	add("project_key", query.Project, query.Project != "")
+	add("environment_key", query.Environment, query.Environment != "")
+	add("application_key", query.Application, query.Application != "")
+	add("service_key", query.Service, query.Service != "")
+	if len(clauses) == 0 {
+		return "", nil, false
+	}
+	return "SELECT scope.id FROM sources AS scope WHERE " +
+		strings.Join(clauses, " AND "), arguments, len(clauses) == 5
 }
 
 func scanHistoryPageEvent(row rowScanner) (HistoryEvent, error) {

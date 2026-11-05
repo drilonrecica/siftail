@@ -2,12 +2,12 @@
 
 **Reviewed:** 2026-11-05
 **Scope:** SFT-047 schema 1–4 fixture and recovery matrix; SFT-087 schema 5;
-SFT-090 schema 6; SFT-091 schema 7
+SFT-090 schema 6; SFT-091 schema 7; SFT-095 schema 8
 
 ## Supported window
 
 The current pre-public binary supports automatic forward migration from every
-checked-in historical schema fixture, versions 1 through 7. It supports a
+checked-in historical schema fixture, versions 1 through 8. It supports a
 fresh database through the same production open path. Before `1.0`, only the
 latest stable Siftail release receives ordinary support, but that release must
 continue to open every schema fixture retained in this repository.
@@ -30,7 +30,9 @@ schema 3 adds a hashed synthetic browser session; schema 4 adds a sanitized
 immutable security-audit event; schema 5 adds a recreated container instance
 (the same name with a new container ID), which schema 4 could not hold; schema
 6 adds a stable-ID event whose time was defaulted to receive time; schema 7
-adds a late event whose event time is 30 days before its receipt.
+adds a late event whose event time is 30 days before its receipt. Schema 8
+changes only an index and carries the same rows as schema 7; event 15, present
+in every fixture, has the request ID the rebuilt index must find.
 
 Every name, address, token, credential, timestamp, and payload is an obvious
 synthetic test value. The generator contains no production data and makes no
@@ -153,9 +155,32 @@ The migration is forward-only. A binary that supports only schema 6 refuses
 the upgraded database with its actual and supported versions and changes
 nothing. Downgrading requires restoring a backup taken before the upgrade.
 
+## Schema 8: request-ID index in History order
+
+Migration `0008_request_time_index.sql` (SFT-095) replaces
+`log_events_request_id_idx ON log_events (request_id)` with
+`log_events_request_time_idx ON log_events (request_id, event_at_us DESC, id
+DESC)`, still partial on `request_id IS NOT NULL`. A History request-ID filter
+now reads the request's rows in page order and stops at the page limit;
+before, SQLite collected every row for the request and sorted them in a
+temporary B-tree first, which was unbounded when a producer reused one request
+ID. Each indexed row grows by its 8-byte event time; events without a request
+ID still cost nothing in the index. Retention deletion does not use it.
+
+No stored event is written. Building the index reads the whole event table
+once, inside the migration transaction, on the first open after the upgrade,
+like schema 7; only rows with a request ID are sorted into it. Its duration on
+a large database was not measured separately, so plan for the first start
+after the upgrade to take as long as the schema 7 measurement above, and take
+and verify a backup before upgrading.
+
+The migration is forward-only. A binary that supports only schema 7 refuses
+the upgraded database with its actual and supported versions and changes
+nothing. Downgrading requires restoring a backup taken before the upgrade.
+
 ## Matrix guarantees
 
-For each schema 1–7 fixture, tests:
+For each schema 1–8 fixture, tests:
 
 1. copy the immutable file and verify its pinned digest;
 2. open it through production pragmas, compatibility checks, migrations,

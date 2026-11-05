@@ -115,6 +115,9 @@ func TestRestoreMigratesSupportedArtifactAndRejectsActiveOwner(t *testing.T) {
 		ALTER TABLE log_events DROP COLUMN event_at_defaulted;
 		DROP INDEX log_events_received_idx;
 		CREATE INDEX log_events_retention_idx ON log_events(retention_at_us, id);
+		DROP INDEX log_events_request_time_idx;
+		CREATE INDEX log_events_request_id_idx ON log_events(request_id)
+			WHERE request_id IS NOT NULL;
 		DELETE FROM schema_migrations WHERE version>=4;
 		UPDATE siftail_backup_metadata SET source_schema_version=3;
 	`)

@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -9,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/drilonrecica/siftail/internal/database"
 	"github.com/drilonrecica/siftail/internal/ingest"
 	"github.com/drilonrecica/siftail/internal/web"
 )
@@ -149,7 +151,8 @@ func TestBrowserRunsAuthenticatedCorrelatedSafeDatabaseCheck(t *testing.T) {
 	body := page.Body.String()
 	if page.Code != http.StatusOK ||
 		!strings.Contains(body, "Database check completed.") ||
-		!strings.Contains(body, "Healthy · schema 7/7 · SQLite ") ||
+		!strings.Contains(body, fmt.Sprintf("Healthy · schema %d/%d · SQLite ",
+			database.MaxSchemaVersion, database.MaxSchemaVersion)) ||
 		!strings.Contains(body, "· ok · checkpoint completed") ||
 		!strings.Contains(body, "database_check_succeeded") ||
 		!strings.Contains(body, "The bounded database check completed successfully.") ||

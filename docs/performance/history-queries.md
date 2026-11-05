@@ -1,9 +1,107 @@
 # Historical query baseline
 
-**Measured:** 2026-07-28  
-**Scope:** SFT-020 development baseline; not a hardware-independent guarantee
+**Measured:** 2026-07-28 (SFT-020 baseline); 2026-11-05 (SFT-095 bounds)  
+**Scope:** development measurements; not a hardware-independent guarantee
 
-## Method and environment
+## SFT-095: cursor and hierarchy bounds (2026-11-05)
+
+Audit DAT-06 found that a History cursor was only an `OR` predicate, so page N
+scanned every index row newer than the cursor, and that Server-only and
+partial-hierarchy filters sorted every matching row in the range in a
+temporary B-tree before `LIMIT`. SFT-095 folds the cursor's timestamp into the
+range bound, resolves hierarchy filters to `source_id` (`=` for a complete
+identity, `+source_id IN (…)` against `log_events_time_idx` otherwise), keeps
+several levels a filter, and replaces the request-ID index with one in History
+order (migration 0008). `ARCHITECTURE.md` §16.2–16.2.1 describes the plans and
+`TestHistoryQueryPlansReadIndexOrder` asserts index use and no `TEMP B-TREE`
+for each filter shape with and without a cursor.
+
+### Method and environment
+
+- Host: Fedora Linux, kernel 7.2.10, x86-64; Intel Core i5-7500, four cores,
+  3.40 GHz nominal; 31 GiB RAM; no container limits.
+- Storage: `TMPDIR` on btrfs on a SATA SSD (Crucial BX500), not tmpfs.
+- Toolchain: Go 1.27.3 linux/amd64 with CGO; SQLite 3.53.4 bundled by
+  `github.com/mattn/go-sqlite3` v1.14.52; production migrations and pragmas
+  through `database.Open`.
+- Fixture (rewritten for SFT-095): 100,000 or 1,000,000 events one millisecond
+  apart (the sustained 1,000 events/second target), round-robin across four
+  sources on two Servers. Messages are 80–399 bytes of access-log-like text;
+  one in ten events is `error`, one in ten `warn`, one in three `stderr`, and
+  one in 1,000 contains `needle`. Setup runs in one transaction outside timing.
+- Cases: `unfiltered`; `source_level` (complete identity + `error`); `literal`
+  (`needle`); `server_only` (one Server: two of four sources);
+  `server_two_levels` (Server + `warn,error`); and `deep_unfiltered`,
+  `deep_source`, `deep_server_only`, which continue from a cursor 90% of the
+  way to the oldest event. Every case reads one 200-row page through
+  `Store.History`.
+- "Before" ran the same benchmark file against the query builder at commit
+  `151add8` (the parent of this change); "after" is this change. Both on
+  schema 8.
+
+```bash
+mkdir -p .bench-tmp
+TMPDIR=$PWD/.bench-tmp go test -run '^$' \
+  -bench '^BenchmarkHistoryStore(100K|1M)$' \
+  -benchtime=5x -count=1 -benchmem ./internal/logs
+rm -rf .bench-tmp
+```
+
+### Results
+
+Five iterations each; allocations were unchanged within 1%
+(≈392–399 kB and ≈7,680–7,764 allocations per page, 236–386 kB for the
+literal case).
+
+| Rows | Query | Before | After |
+|---:|---|---:|---:|
+| 100,000 | unfiltered | 1.20 ms | 5.34 ms¹ |
+| 100,000 | source + level | 2.52 ms | 5.67 ms¹ |
+| 100,000 | literal `needle` | 2,208 ms² | 139 ms |
+| 100,000 | Server only | 73.0 ms | 1.27 ms |
+| 100,000 | Server + two levels | 63.3 ms | 2.49 ms |
+| 100,000 | deep cursor, unfiltered | 9.36 ms | 1.27 ms |
+| 100,000 | deep cursor, source | 3.03 ms | 1.30 ms |
+| 100,000 | deep cursor, Server only | 13.0 ms | 1.19 ms |
+| 1,000,000 | unfiltered | 4.81 ms¹ | 1.09 ms |
+| 1,000,000 | source + level | 9.78 ms¹ | 1.17 ms |
+| 1,000,000 | literal `needle` | 623 ms | 248 ms |
+| 1,000,000 | Server only | 1,232 ms | 1.24 ms |
+| 1,000,000 | Server + two levels | 1,014 ms | 2.47 ms |
+| 1,000,000 | deep cursor, unfiltered | 77.8 ms | 1.07 ms |
+| 1,000,000 | deep cursor, source | 21.0 ms | 1.12 ms |
+| 1,000,000 | deep cursor, Server only | 110 ms | 1.29 ms |
+
+¹ The first cases after seeding run against a cold page cache; with five
+iterations the first one dominates. Their plans did not change, and the other
+fixture size shows the warm figure.  
+² Same plan before and after (time index, residual `instr`); the difference is
+page-cache and host noise, not this change. Literal search remains bounded by
+the time range, as before.
+
+Server-only and partial-hierarchy pages went from a full-range sort (1.2 s at 1M rows, growing with
+the range) to about one page of index reads, and a deep cursor now costs the
+same as the first page at both sizes.
+
+Plans captured at both sizes with `-benchtime=1x -v` read events through
+`log_events_time_idx` (unfiltered, literal, Server only, Server + two levels,
+deep unfiltered, deep Server only), `log_events_source_level_time_idx`
+(source + level), and `log_events_source_time_idx` (deep source), each with the
+range `event_at_us>? AND event_at_us<?` as the index bound and no temporary
+B-tree.
+
+A time-index plan costs time proportional to the rows skipped before a page
+fills. In this fixture a Server is half the traffic; a Server or partial
+hierarchy that is a small fraction of a busy instance skips more rows, bounded
+by the 31-day range, like literal search. The 10-million-event review remains
+the pre-public release gate below.
+
+## SFT-020 baseline (2026-07-28)
+
+The sections below record the original fixture (two sources, 14-byte
+messages, events one microsecond apart, no cursor) and are kept as history.
+
+### Method and environment
 
 - Host: Fedora Linux 7.1.4 x86-64.
 - CPU: Intel Core i5-7500, four physical cores, 3.40 GHz nominal.
@@ -37,7 +135,7 @@
     -benchtime=1x -count=1 -v ./internal/logs
   ```
 
-## Results
+### Results
 
 These are development-machine measurements:
 
@@ -60,7 +158,7 @@ No new index is justified by this baseline. Literal substring search has no
 dedicated index by design and remains bounded by the required time range;
 introducing FTS5 still requires the documented ADR and measurements.
 
-## 0.2.0 gate rerun
+### 0.2.0 gate rerun
 
 SFT-024 reran each 100k/1M case once on the same host and configuration:
 

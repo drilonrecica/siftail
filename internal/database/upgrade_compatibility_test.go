@@ -68,6 +68,7 @@ func assertCurrentMigrationHistory(t *testing.T, db *sql.DB) {
 		"0005_container_identity.sql",
 		"0006_event_time_defaulted.sql",
 		"0007_retention_by_receipt.sql",
+		"0008_request_time_index.sql",
 	}
 	var got []string
 	for rows.Next() {
@@ -104,6 +105,18 @@ func assertCurrentMigrationHistory(t *testing.T, db *sql.DB) {
 	}
 	if received != 1 || legacy != 0 {
 		t.Fatalf("retention indexes: received=%d legacy=%d", received, legacy)
+	}
+	// Migration 0008 replaces the request-ID index with one that carries the
+	// History order.
+	var requestTime, requestLegacy int
+	if err := db.QueryRow(`SELECT
+		(SELECT count(*) FROM sqlite_schema WHERE type='index' AND name='log_events_request_time_idx'),
+		(SELECT count(*) FROM sqlite_schema WHERE type='index' AND name='log_events_request_id_idx')`).
+		Scan(&requestTime, &requestLegacy); err != nil {
+		t.Fatal(err)
+	}
+	if requestTime != 1 || requestLegacy != 0 {
+		t.Fatalf("request indexes: time=%d legacy=%d", requestTime, requestLegacy)
 	}
 }
 
@@ -249,6 +262,20 @@ func exerciseProductionCriticalPaths(
 	}
 	if origin == 0 && len(before) != 0 {
 		t.Fatalf("fresh initial History = %#v", before)
+	}
+	if origin > 0 {
+		// Every fixture's event 15 carries a request ID; the rebuilt
+		// request-ID index must still find it.
+		page, err := history.History(context.Background(), logs.HistoryQuery{
+			FromUS:    1785196800000000 - 3_600_000_000,
+			ToUS:      1785196800000000 + 3_600_000_000,
+			Direction: logs.DirectionOlder,
+			Limit:     logs.DefaultHistoryLimit,
+			RequestID: "fixture-request-1",
+		})
+		if err != nil || len(page.Events) != 1 || page.Events[0].ID != 15 {
+			t.Fatalf("schema-%d request-ID History = %#v %v", origin, page.Events, err)
+		}
 	}
 
 	eventAt := int64(1785196800000100)
