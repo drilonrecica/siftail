@@ -418,8 +418,12 @@ without host detail.
 
 The shell is dark-first with a complete light theme, visible focus, a skip
 link, reduced-motion handling, and responsive layouts for emergency mobile
-inspection. Theme (`System`, `Dark`, or `Light`) and density (`Compact` or
-`Comfortable`) are presentation-only browser-local preferences. HTMX history
+inspection. Theme (`System`, `Dark`, or `Light`), density (`Compact` or
+`Comfortable`), keyboard shortcuts (`On` or `Off`), and time zone (`UTC` by
+default, or the browser's own zone) are set in the System menu, kept in one
+non-secret cookie, and rendered by the server before first paint. Every time
+in the interface is shown in the chosen zone, 24-hour, and labelled with the
+zone; History URLs, `<time datetime>` values, and exports stay in UTC. HTMX history
 snapshots are disabled both declaratively and with a zero-entry history cache,
 so authenticated DOM is refetched instead of restored from a snapshot.
 

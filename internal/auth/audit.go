@@ -42,7 +42,7 @@ func (b *Browser) auditPage(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	view := buildAuditView(query, page)
+	view := buildAuditView(query, page, requestZone(r))
 	b.renderAudit(w, r, http.StatusOK, view)
 }
 
@@ -161,10 +161,11 @@ outcomeValid:
 	return query, nil
 }
 
-func buildAuditView(query audit.Query, page audit.Page) webui.AuditView {
+func buildAuditView(query audit.Query, page audit.Page, zone displayZone) webui.AuditView {
 	view := webui.AuditView{
 		From:       queryTime(query.FromOccurredAtUS),
 		To:         queryTime(query.ToOccurredAtUS),
+		Zone:       zone.name,
 		Action:     query.Action,
 		Categories: auditCategoryOptions(),
 		Outcomes:   auditOutcomeOptions(),
@@ -174,9 +175,10 @@ func buildAuditView(query audit.Query, page audit.Page) webui.AuditView {
 	selectAuditOption(view.Outcomes, string(query.Outcome))
 	for index, event := range page.Events {
 		view.Rows[index] = webui.AuditRowView{
-			Time: formatStatusTime(event.OccurredAt), Category: string(event.Category),
-			Action: event.Action, Outcome: string(event.Outcome),
-			Actor: auditActorLabel(event), Summary: auditSummary(event),
+			Time: zone.clock(event.OccurredAt), TimeUTC: datetime(event.OccurredAt),
+			Category: string(event.Category),
+			Action:   event.Action, Outcome: string(event.Outcome),
+			Actor: auditActorLabel(event), Summary: auditSummary(event, zone),
 			RequestID: event.RequestID,
 		}
 	}
@@ -211,9 +213,9 @@ func auditActorLabel(event audit.Event) string {
 	return label
 }
 
-func auditSummary(event audit.Event) string {
+func auditSummary(event audit.Event, zone displayZone) string {
 	if event.Action == signInAuditAction {
-		return signInAggregateSummary(event)
+		return signInAggregateSummary(event, zone)
 	}
 	parts := make([]string, 0, len(event.Metadata)+2)
 	if event.ServerID != nil {
@@ -275,13 +277,13 @@ func queryTime(value int64) string {
 
 // signInAggregateSummary renders an aggregated rejection window as one
 // readable sentence instead of raw metadata keys.
-func signInAggregateSummary(event audit.Event) string {
+func signInAggregateSummary(event audit.Event, zone displayZone) string {
 	metadata := event.Metadata
 	window := "Rejected sign-ins"
 	if start, err := time.Parse(audit.WindowTimeLayout,
 		metadata[audit.MetadataWindowStartedAt]); err == nil {
-		window += " " + start.Format("2006-01-02 15:04") + "–" +
-			event.OccurredAt.UTC().Format("15:04") + " UTC"
+		window += " " + start.In(zone.loc).Format("2006-01-02 15:04") + "–" +
+			event.OccurredAt.In(zone.loc).Format("15:04") + " " + zone.name
 	}
 	parts := []string{window}
 	for _, count := range []struct{ key, label string }{

@@ -6,6 +6,7 @@ import { expect, request as playwrightRequest, test, type Page } from "@playwrig
 import {
   administratorPassword,
   administratorUsername,
+  closeSystemMenu,
   navigateSystem,
   openSystemMenu,
   readState,
@@ -326,7 +327,7 @@ test("History rows are one roving tab stop with content-named toggles and collap
   const rows = list.getByRole("listitem");
   await expect(rows).toHaveCount(200);
   await expect(list).toMatchAriaSnapshot(`
-    - list "History log events":
+    - list "History log events, times in UTC":
       - listitem:
         - 'button /^Details: ${severityCode} \\S+, .+/ [expanded=false]'
   `);
@@ -454,7 +455,7 @@ test("Live rows keep the roving tab stop on the newest or selected row and colla
   await expect(rows).toHaveCount(3);
   await expect(page.locator("[data-live-empty]")).toBeHidden();
   await expect(list).toMatchAriaSnapshot(`
-    - list "Live log events":
+    - list "Live log events, times in UTC":
       - listitem:
         - 'button "Details: ERR api/web, live-roving-0" [expanded=false]'
       - listitem:
@@ -506,6 +507,167 @@ test("Live rows keep the roving tab stop on the newest or selected row and colla
   await page.getByRole("button", { name: "Clear view" }).click();
   await expect(rows).toHaveCount(0);
   await expect(page.locator("[data-live-empty]")).toBeVisible();
+});
+
+// The display zone's wall clock for an instant, as fixed 24-hour parts
+// (DESIGN.md §12.2). Runs in Node with full ICU, independent of the page.
+function zoneParts(instant: Date, zone: string): Record<string, string> {
+  return Object.fromEntries(new Intl.DateTimeFormat("en-US", {
+    timeZone: zone, hourCycle: "h23", year: "numeric", month: "2-digit",
+    day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit",
+    fractionalSecondDigits: 3,
+  }).formatToParts(instant).map((part) => [part.type, part.value]));
+}
+
+function zoneWall(instant: Date, zone: string): string {
+  const p = zoneParts(instant, zone);
+  return `${p.year}-${p.month}-${p.day}T${p.hour}:${p.minute}:${p.second}`;
+}
+
+// Every <time> on the page as text, datetime, and whether its text overflows.
+async function timeElements(page: Page, selector = "time") {
+  return page.locator(selector).evaluateAll((elements) => elements.map((element) => ({
+    text: element.textContent ?? "",
+    datetime: element.getAttribute("datetime"),
+    overflow: element.scrollWidth > element.clientWidth + 1,
+  })));
+}
+
+test("times render in one labelled 24-hour zone under a 12-hour locale", async ({
+  browser,
+}) => {
+  const zone = "America/Los_Angeles";
+  const context = await browser.newContext({ locale: "en-US", timezoneId: zone });
+  const page = await context.newPage();
+  const rowFormat = /^\d{2}:\d{2}:\d{2}\.\d{3}$/;
+  const expectRowsInZone = async (expectedZone: string, format: RegExp) => {
+    const rows = await timeElements(page, "#history-rows .log-row time");
+    expect(rows.length).toBeGreaterThan(0);
+    for (const row of rows) {
+      expect(row.text).toMatch(format);
+      expect(row.text).not.toMatch(/AM|PM/i);
+      expect(row.overflow).toBe(false);
+      const p = zoneParts(new Date(row.datetime ?? ""), expectedZone);
+      expect(row.text.endsWith(`${p.hour}:${p.minute}:${p.second}.${p.fractionalSecond}`))
+        .toBe(true);
+    }
+  };
+  try {
+    // Default: UTC everywhere, labelled UTC, even though the browser is in
+    // Los Angeles with a 12-hour locale; nothing is rewritten client-side.
+    await login(page);
+    await expect(page.locator("main")).toHaveAttribute("data-timezone", "UTC");
+    await expect(page.locator("#history-tail .tail-zone")).toHaveText("Times in UTC");
+    await expect(page.locator(".result-summary")).toContainText(/\d{2}:\d{2} UTC/);
+    await expectRowsInZone("UTC", rowFormat);
+    const fromLabel = page.locator(".time-filters label").first();
+    await expect(fromLabel).toContainText("From (UTC)");
+
+    // The System menu offers the browser's zone; choosing it reloads with
+    // every time rendered by the server in that zone.
+    await openSystemMenu(page);
+    const zoneSelect = page.locator("[data-timezone-select]");
+    await expect(zoneSelect.locator("option")).toHaveText([
+      "UTC", `Browser time zone (${zone})`,
+    ]);
+    await zoneSelect.selectOption(zone);
+    await expect(page.locator("main")).toHaveAttribute("data-timezone", zone);
+    await expect(page.getByRole("list", { name: `History log events, times in ${zone}` }))
+      .toBeVisible();
+    await expect(page.locator("#history-tail .tail-zone")).toHaveText(`Times in ${zone}`);
+    await expect(page.locator(".result-summary")).toContainText(`${zone}`);
+    await expectRowsInZone(zone, rowFormat);
+    await openSystemMenu(page);
+    await expect(zoneSelect).toHaveValue(zone);
+    await expect(zoneSelect.locator("option:checked")).toHaveText(`Browser time zone (${zone})`);
+    await closeSystemMenu(page);
+
+    // The custom-range picker is labelled with and interpreted in the zone;
+    // the URL keeps UTC.
+    await expect(fromLabel).toContainText(`From (${zone})`);
+    const fromPicker = page.locator('.time-filters input[type="datetime-local"]').first();
+    await expect(fromPicker).toHaveAttribute("aria-label", `From (${zone})`);
+    const toParam = new URL(page.url()).searchParams.get("to") ?? "";
+    const fromParam = new URL(page.url()).searchParams.get("from") ?? "";
+    await expect(fromPicker).toHaveValue(zoneWall(new Date(fromParam), zone));
+    const target = new Date(Math.floor((Date.parse(toParam) - 2 * 3600_000) / 1000) * 1000);
+    await fromPicker.fill(zoneWall(target, zone));
+    await expect.poll(() => Date.parse(new URL(page.url()).searchParams.get("from") ?? ""))
+      .toBe(target.getTime());
+    await expect(page.locator(".time-filters label").first()).toContainText(`From (${zone})`);
+
+    // The export dialog's absolute range is in the zone and keeps UTC
+    // datetime values.
+    const exportTimes = await timeElements(page, ".export-scope time");
+    expect(exportTimes).toHaveLength(2);
+    for (const item of exportTimes) {
+      expect(item.text).toMatch(new RegExp(`^\\d{2} \\w{3} \\d{4} \\d{2}:\\d{2}:\\d{2} ${zone}$`));
+      expect(item.datetime).toMatch(/Z$/);
+    }
+
+    // Event detail shows the zone, UTC, the received time, and the delay.
+    await page.locator("#history-rows .event-toggle").first().click();
+    const detail = page.locator(".event-detail").first();
+    await expect(detail.getByText(`Event time (${zone})`, { exact: true })).toBeVisible();
+    await expect(detail.getByText("Event time (UTC)", { exact: true })).toBeVisible();
+    await expect(detail.getByText(`Received time (${zone})`, { exact: true })).toBeVisible();
+    await expect(detail.getByText("Delivery delay", { exact: true })).toBeVisible();
+    expect((await timeElements(page)).filter((item) => !item.datetime)).toEqual([]);
+
+    // A range longer than a day adds the date and the column still fits.
+    await page.getByRole("link", { name: "7d", exact: true }).click();
+    await expect(page.locator("#history-rows")).toHaveAttribute("data-show-date", "");
+    await expectRowsInZone(zone, /^\d{2} \w{3} \d{2}:\d{2}:\d{2}\.\d{3}$/);
+    for (const scheme of ["light", "dark"] as const) {
+      await page.emulateMedia({ colorScheme: scheme });
+      await page.setViewportSize({ width: 1280, height: 800 });
+      await page.screenshot({ path: `.playwright-artifacts/time-zone-history-desktop-${scheme}.png` });
+      await page.setViewportSize({ width: 390, height: 844 });
+      await expectRowsInZone(zone, /^\d{2} \w{3} \d{2}:\d{2}:\d{2}\.\d{3}$/);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth))
+        .toBe(false);
+      await page.screenshot({ path: `.playwright-artifacts/time-zone-history-mobile-${scheme}.png` });
+    }
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await openSystemMenu(page);
+    await page.screenshot({ path: ".playwright-artifacts/time-zone-system-menu-dark.png" });
+    await closeSystemMenu(page);
+    await page.emulateMedia({ colorScheme: "light" });
+
+    // Live formats its rows in the same zone from data-timezone.
+    await page.goto("/logs?mode=live");
+    await expect(page.locator("[data-live-status]")).toHaveText("Live");
+    await expect(page.locator(".live-tail .tail-zone")).toHaveText(`Times in ${zone}`);
+    await ingestLive(["zone-live-0"]);
+    const liveRow = page.locator("#live-rows .log-row").filter({ hasText: "zone-live-0" });
+    await expect(liveRow).toHaveCount(1);
+    await expect(page.getByRole("list", { name: `Live log events, times in ${zone}` }))
+      .toBeVisible();
+    const [liveTime] = await timeElements(page, "#live-rows .log-row time");
+    expect(liveTime.text).toMatch(rowFormat);
+    const liveParts = zoneParts(new Date(liveTime.datetime ?? ""), zone);
+    expect(liveTime.text).toBe(
+      `${liveParts.hour}:${liveParts.minute}:${liveParts.second}.${liveParts.fractionalSecond}`,
+    );
+    expect(liveTime.overflow).toBe(false);
+
+    // Status and Audit name the zone and every <time> carries datetime.
+    await navigateSystem(page, "Status");
+    await expect(page.getByRole("heading", { name: "Status", exact: true })).toBeVisible();
+    await expect(page.locator(".status-facts div").filter({ hasText: "Oldest event" })
+      .locator("dd")).toHaveText(new RegExp(`^\\d{2} \\w{3} \\d{4} \\d{2}:\\d{2}:\\d{2} ${zone}$`));
+    expect((await timeElements(page)).filter((item) => !item.datetime)).toEqual([]);
+    await navigateSystem(page, "Audit");
+    await expect(page.getByRole("columnheader", { name: `Time (${zone})` })).toBeVisible();
+    const auditTimes = await timeElements(page, ".audit-table time");
+    expect(auditTimes.length).toBeGreaterThan(0);
+    for (const item of auditTimes) {
+      expect(item.datetime).toMatch(/Z$/);
+      expect(item.text).toMatch(/^\d{2} \w{3} \d{4} \d{2}:\d{2}:\d{2}$/);
+    }
+  } finally {
+    await context.close();
+  }
 });
 
 test("Live pause, pending, clear-view, filters, reconnect, focus, and safe rendering", async ({

@@ -133,7 +133,7 @@ func (b *Browser) historyView(
 	if err != nil {
 		return webui.HistoryView{}, err
 	}
-	view := buildHistoryView(query, page, catalog, b.now())
+	view := buildHistoryView(query, page, catalog, b.now(), requestZone(r))
 	if appendPage {
 		noun := "events"
 		if len(view.Rows) == 1 {
@@ -157,16 +157,21 @@ func buildHistoryView(
 	page logs.HistoryPage,
 	catalog logs.SourceCatalog,
 	now time.Time,
+	zone displayZone,
 ) webui.HistoryView {
 	from := time.UnixMicro(query.FromUS).UTC()
 	to := time.UnixMicro(query.ToUS).UTC()
+	showDate := to.Sub(from) > 24*time.Hour
 	view := webui.HistoryView{
-		CanonicalURL: historyURL(query),
-		ExportURL:    "/logs/export?" + query.CanonicalQuery(),
-		From:         from.Format(time.RFC3339Nano),
-		To:           to.Format(time.RFC3339Nano),
-		RangeSummary: from.Format("02 Jan 2006 15:04") + "–" +
-			to.Format("02 Jan 2006 15:04 UTC"),
+		CanonicalURL:  historyURL(query),
+		ExportURL:     "/logs/export?" + query.CanonicalQuery(),
+		From:          datetime(from),
+		To:            datetime(to),
+		FromText:      zone.instant(from),
+		ToText:        zone.instant(to),
+		Zone:          zone.name,
+		ShowDate:      showDate,
+		RangeSummary:  zone.rangeText(from, to),
 		SourceSummary: sourceSummary(query, catalog),
 		Contains:      query.Contains,
 		Excludes:      query.Excludes,
@@ -238,10 +243,9 @@ func buildHistoryView(
 		}
 	}
 
-	showDate := to.Sub(from) > 24*time.Hour
 	view.Rows = make([]webui.HistoryRowView, len(page.Events))
 	for index, event := range page.Events {
-		eventTime := time.UnixMicro(event.EventAtUS).UTC()
+		eventTime := time.UnixMicro(event.EventAtUS)
 		message := event.MessageText
 		if event.MessageBytes > int64(len([]byte(message))) {
 			message += "…"
@@ -254,9 +258,8 @@ func buildHistoryView(
 			ID:           event.ID,
 			DetailID:     fmt.Sprintf("event-detail-%d", event.ID),
 			DetailURL:    fmt.Sprintf("/logs/events/%d", event.ID),
-			TimestampUTC: eventTime.Format(time.RFC3339Nano),
-			Timestamp:    eventTime.Format("15:04:05.000") + " UTC",
-			ShowDate:     showDate,
+			TimestampUTC: datetime(eventTime),
+			Timestamp:    zone.row(eventTime, showDate),
 			Level:        string(event.Level),
 			Stream:       string(event.Stream),
 			Source:       source,

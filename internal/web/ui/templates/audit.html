@@ -33,12 +33,12 @@
   {{if .Rows}}<div class="audit-table-scroll" tabindex="0" aria-label="Security audit event table">
     <table class="audit-table">
       <thead><tr>
-        <th scope="col">Time</th><th scope="col">Action</th>
+        <th scope="col">Time ({{.Zone}})</th><th scope="col">Action</th>
         <th scope="col">Outcome</th><th scope="col">Actor / context</th>
         <th scope="col">Safe summary</th><th scope="col">Request ID</th>
       </tr></thead>
       <tbody>{{range .Rows}}<tr>
-        <td><time>{{.Time}}</time><span class="audit-category">{{.Category}}</span></td>
+        <td><time datetime="{{.TimeUTC}}">{{.Time}}</time><span class="audit-category">{{.Category}}</span></td>
         <td><code>{{.Action}}</code></td>
         <td><span class="audit-outcome" data-outcome="{{.Outcome}}">{{.Outcome}}</span></td>
         <td>{{.Actor}}</td>

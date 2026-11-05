@@ -43,9 +43,10 @@ func TestBrowserPreferencesPersistAndRenderBeforeFirstPaint(t *testing.T) {
 			prefsCookie = candidate
 		}
 	}
-	// The form omitted the shortcuts field (as a page rendered before it
-	// existed would), so the current value, the default On, is kept.
-	if prefsCookie == nil || prefsCookie.Value != "dark.comfortable.on" ||
+	// The form omitted the shortcuts and time zone fields (as a page rendered
+	// before they existed would), so the current values, the defaults On and
+	// UTC, are kept.
+	if prefsCookie == nil || prefsCookie.Value != "dark.comfortable.on.utc" ||
 		!prefsCookie.HttpOnly || !prefsCookie.Secure ||
 		prefsCookie.SameSite != http.SameSiteLaxMode || prefsCookie.Path != "/" {
 		t.Fatalf("preference cookie = %#v", prefsCookie)
@@ -92,7 +93,7 @@ func TestBrowserShortcutsPreferenceRendersServerSide(t *testing.T) {
 		}
 	}
 	if saved.Code != http.StatusSeeOther || prefsCookie == nil ||
-		prefsCookie.Value != "system.compact.off" {
+		prefsCookie.Value != "system.compact.off.utc" {
 		t.Fatalf("save shortcuts off = %d %#v", saved.Code, prefsCookie)
 	}
 
@@ -108,13 +109,13 @@ func TestBrowserShortcutsPreferenceRendersServerSide(t *testing.T) {
 		}
 		return page.Body.String()
 	}
-	off := render("system.compact.off")
+	off := render("system.compact.off.utc")
 	if !strings.Contains(off, `data-shortcuts="off"`) ||
 		!strings.Contains(off, `<option value="off" selected>Off</option>`) {
 		t.Fatalf("shortcuts off page = %q", off)
 	}
 	// A cookie written before the shortcuts field existed defaults it to On;
-	// a trailing field a later version adds is ignored here.
+	// an unknown shortcuts value does too.
 	for _, value := range []string{"dark.comfortable", "dark.comfortable.on.UTC", "dark.comfortable.bogus"} {
 		body := render(value)
 		if strings.Contains(body, `data-shortcuts=`) ||
@@ -133,7 +134,7 @@ func TestBrowserShortcutsPreferenceRendersServerSide(t *testing.T) {
 	keptRequest.AddCookie(prefsCookie)
 	fixture.handler().ServeHTTP(kept, keptRequest)
 	if kept.Code != http.StatusSeeOther ||
-		!strings.Contains(kept.Header().Get("Set-Cookie"), "siftail_prefs=dark.compact.off") {
+		!strings.Contains(kept.Header().Get("Set-Cookie"), "siftail_prefs=dark.compact.off.utc") {
 		t.Fatalf("omitted shortcuts = %d %#v", kept.Code, kept.Header())
 	}
 

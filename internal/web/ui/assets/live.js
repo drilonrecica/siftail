@@ -162,16 +162,12 @@
     const timestamp = document.createElement("time");
     const date = new Date(Number(event.event_at_us) / 1000);
     if (!Number.isNaN(date.getTime())) {
+      // The display zone from data-timezone, 24-hour and fixed-width
+      // (DESIGN.md §12.2); app.js loads first and owns the formatter.
       timestamp.dateTime = date.toISOString();
-      timestamp.dataset.localTime = "";
-      const options = {
-        hour: "2-digit",
-        minute: "2-digit",
-        second: "2-digit",
-        fractionalSecondDigits: 3,
-      };
-      timestamp.textContent = new Intl.DateTimeFormat([], options).format(date);
-      timestamp.title = date.toLocaleString();
+      timestamp.textContent = window.siftailTime
+        ? window.siftailTime.formatRowTime(date)
+        : date.toISOString().slice(11, 23);
     } else {
       timestamp.textContent = "Unknown time";
     }

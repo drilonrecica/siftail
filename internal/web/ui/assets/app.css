@@ -407,7 +407,10 @@ code {
   top: calc(100% + var(--space-1));
   right: 0;
   display: grid;
+  /* Grows to the longest time zone option, within the viewport. */
+  width: max-content;
   min-width: 14rem;
+  max-width: min(24rem, calc(100vw - 2rem));
   gap: var(--space-3);
   padding: var(--space-3);
   border: 1px solid var(--border-subtle);
@@ -459,7 +462,25 @@ code {
 .prefs-field select {
   width: auto;
   min-width: 8.5rem;
+  max-width: 15rem;
   min-height: 2rem;
+}
+
+/* The time zone names can be long ("Browser time zone
+   (America/Argentina/Buenos_Aires)"), so that control takes the full row. */
+.prefs-field-stacked {
+  grid-template-columns: 1fr;
+  gap: var(--space-1);
+}
+
+.prefs-field-stacked select {
+  width: 100%;
+  max-width: none;
+  min-width: 0;
+}
+
+.prefs-note {
+  margin: 0;
 }
 
 .system-menu-help {
@@ -1103,9 +1124,16 @@ code {
   min-height: 0;
 }
 
+/* Row times use fixed 24-hour formats (DESIGN.md §12.2). A range longer
+   than a day adds the date ("27 Jul 20:41:07.283", 19 characters), so the
+   list widens the time column in character units of the row's mono face. */
+.log-list[data-show-date] {
+  --row-time-column: 20ch;
+}
+
 .log-row {
   display: grid;
-  grid-template-columns: 2rem 8.5rem 3.5rem minmax(8rem, 0.8fr) minmax(12rem, 3fr) 4.5rem;
+  grid-template-columns: 2rem var(--row-time-column, 8.5rem) 3.5rem minmax(8rem, 0.8fr) minmax(12rem, 3fr) 4.5rem;
   align-items: baseline;
   gap: var(--space-3);
   padding: var(--space-2) var(--space-3);
@@ -1383,6 +1411,13 @@ code {
   gap: var(--space-3);
   min-height: 2.5rem;
   padding: 0 var(--space-3);
+}
+
+/* The display zone heads the time column from the tail line. */
+.tail-zone {
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  white-space: nowrap;
 }
 
 .tail-line-rule {
@@ -1976,7 +2011,7 @@ kbd {
   }
 
   .log-row {
-    grid-template-columns: 2rem 7.5rem 3.5rem 1fr;
+    grid-template-columns: 2rem var(--row-time-column, 7.5rem) 3.5rem 1fr;
   }
 
   .row-source {

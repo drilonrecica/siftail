@@ -21,10 +21,13 @@ type Renderer struct {
 
 // PrefsView carries the non-secret interface preferences rendered as
 // data-theme, data-density, and data-shortcuts attributes before first paint.
+// Timezone is the display zone's name, "UTC" or an IANA zone the server has
+// loaded, rendered as data-timezone on <main> (DESIGN.md §19.5).
 type PrefsView struct {
 	Theme     string
 	Density   string
 	Shortcuts string
+	Timezone  string
 }
 
 type LoginView struct {
@@ -142,7 +145,9 @@ type BackupView struct {
 	BackupType     string
 	StateLabel     string
 	StartedAt      string
+	StartedAtUTC   string
 	CompletedAt    string
+	CompletedAtUTC string
 	TotalUnits     string
 	CompletedUnits string
 	Unit           string
@@ -171,7 +176,6 @@ type HistoryRowView struct {
 	DetailURL    string
 	TimestampUTC string
 	Timestamp    string
-	ShowDate     bool
 	Level        string
 	Stream       string
 	Source       string
@@ -179,9 +183,12 @@ type HistoryRowView struct {
 	ToggleLabel  string
 }
 
+// DetailField is one labelled value. Datetime, when set, is the UTC RFC3339
+// instant the value shows, and the value renders inside a <time>.
 type DetailField struct {
-	Label string
-	Value string
+	Label    string
+	Value    string
+	Datetime string
 }
 
 type EventDetailView struct {
@@ -219,10 +226,18 @@ type ModeSwitchView struct {
 }
 
 type HistoryView struct {
-	CanonicalURL   string
-	ExportURL      string
+	CanonicalURL string
+	ExportURL    string
+	// From and To are UTC RFC3339: the URL, form, and <time datetime> value.
+	// FromText and ToText render them in the display zone, Zone names it,
+	// and ShowDate widens rows to carry the day when the range spans more
+	// than one (DESIGN.md §12.2).
 	From           string
 	To             string
+	FromText       string
+	ToText         string
+	Zone           string
+	ShowDate       bool
 	RangeSummary   string
 	SourceSummary  string
 	Presets        []PresetLink
@@ -273,6 +288,9 @@ func (v HistoryView) EmptyState() EmptyStateView {
 }
 
 type LiveView struct {
+	// Zone names the display zone the Live module formats rows in; it reads
+	// the zone itself from data-timezone on <main>.
+	Zone          string
 	CanonicalURL  string
 	StreamURL     string
 	HistoryURL    string
@@ -491,19 +509,24 @@ type StatusLateView struct {
 	LastAt string
 }
 
+// StatusDiagnosticView times render in the display zone; the *UTC fields are
+// the <time datetime> values.
 type StatusDiagnosticView struct {
-	Time        string
-	Severity    string
-	Component   string
-	Category    string
-	Summary     string
-	RequestID   string
-	RecoveredAt string
+	Time           string
+	TimeUTC        string
+	Severity       string
+	Component      string
+	Category       string
+	Summary        string
+	RequestID      string
+	RecoveredAt    string
+	RecoveredAtUTC string
 }
 
 type AuditView struct {
 	From           string
 	To             string
+	Zone           string
 	Action         string
 	Categories     []SelectOption
 	Outcomes       []SelectOption
@@ -515,6 +538,7 @@ type AuditView struct {
 
 type AuditRowView struct {
 	Time      string
+	TimeUTC   string
 	Category  string
 	Action    string
 	Outcome   string

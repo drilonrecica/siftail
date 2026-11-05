@@ -25,7 +25,7 @@
     </section>
     <section class="detail-section">
       <h3>Timing</h3>
-      <dl>{{range .TimingFields}}<div><dt>{{.Label}}</dt><dd>{{.Value}}</dd></div>{{end}}</dl>
+      <dl>{{range .TimingFields}}<div><dt>{{.Label}}</dt><dd>{{if .Datetime}}<time datetime="{{.Datetime}}">{{.Value}}</time>{{else}}{{.Value}}{{end}}</dd></div>{{end}}</dl>
     </section>
     <section class="detail-section">
       <h3>Level and stream</h3>

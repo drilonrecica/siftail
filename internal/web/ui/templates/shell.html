@@ -9,7 +9,7 @@
   {{if .Flash.Text}}<div class="flash-region">
     <p class="notice notice-{{.Flash.Kind}}" role="status" data-flash{{if eq .Flash.Kind "success"}} data-flash-dismiss{{end}}>{{.Flash.Text}}</p>
   </div>{{end}}
-  <main id="main-content" class="workspace"{{if $p.KbScope}} data-kb-scope="{{$p.KbScope}}"{{end}}>
+  <main id="main-content" class="workspace" data-timezone="{{.Prefs.Timezone}}"{{if $p.KbScope}} data-kb-scope="{{$p.KbScope}}"{{end}}>
     <header class="workspace-heading">
       <div>
         <p class="eyebrow">{{$p.Eyebrow}}</p>

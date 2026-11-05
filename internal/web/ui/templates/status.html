@@ -79,11 +79,11 @@
       <h2 id="status-diagnostics">Diagnostics</h2>
       {{if .Diagnostics}}<ol class="diagnostic-list">
         {{range .Diagnostics}}<li>
-          <time>{{.Time}}</time>
+          <time datetime="{{.TimeUTC}}">{{.Time}}</time>
           <strong>{{.Severity}} · {{.Component}} · {{.Category}}</strong>
           <span>{{.Summary}}</span>
           {{if .RequestID}}<span>Request ID: <code>{{.RequestID}}</code></span>{{end}}
-          {{if .RecoveredAt}}<span>Recovered: {{.RecoveredAt}}</span>{{end}}
+          {{if .RecoveredAt}}<span>Recovered: <time datetime="{{.RecoveredAtUTC}}">{{.RecoveredAt}}</time></span>{{end}}
         </li>{{end}}
       </ol>{{else}}<p>No recent operational diagnostics.</p>{{end}}
     </section>

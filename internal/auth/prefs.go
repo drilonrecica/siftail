@@ -31,7 +31,9 @@ func validShortcuts(value string) bool {
 // with fewer fields defaults the missing ones, so cookies written before a
 // field existed keep working.
 func preferences(r *http.Request) webui.PrefsView {
-	prefs := webui.PrefsView{Theme: "system", Density: "compact", Shortcuts: "on"}
+	prefs := webui.PrefsView{
+		Theme: "system", Density: "compact", Shortcuts: "on", Timezone: "UTC",
+	}
 	cookie, err := r.Cookie(prefsCookieName)
 	if err != nil {
 		return prefs
@@ -46,7 +48,18 @@ func preferences(r *http.Request) webui.PrefsView {
 	if len(fields) > 2 && validShortcuts(fields[2]) {
 		prefs.Shortcuts = fields[2]
 	}
+	if len(fields) > 3 {
+		// A zone that no longer loads renders UTC, labelled UTC (§12.2).
+		zone, _ := loadDisplayZone(fields[3])
+		prefs.Timezone = zone.name
+	}
 	return prefs
+}
+
+// requestZone is the display zone for a request's interface preferences.
+func requestZone(r *http.Request) displayZone {
+	zone, _ := loadDisplayZone(preferences(r).Timezone)
+	return zone
 }
 
 // shellBase fills the shell fields shared by every authenticated page render:
@@ -74,25 +87,32 @@ func (b *Browser) preferencesSecure() bool {
 	return b.cookies.Secure()
 }
 
-// preferencesSave persists validated theme, density, and keyboard-shortcut
-// values in the preference cookie and returns to the submitting page. A form
-// rendered before the shortcuts field existed omits it; that keeps the
-// current value instead of failing. Protect has already verified the
-// session, origin, and CSRF token.
+// preferencesSave persists validated theme, density, keyboard-shortcut, and
+// time zone values in the preference cookie and returns to the submitting
+// page. A form rendered before the shortcuts or time zone field existed
+// omits it; that keeps the current value instead of failing. Protect has
+// already verified the session, origin, and CSRF token.
 func (b *Browser) preferencesSave(w http.ResponseWriter, r *http.Request) {
+	current := preferences(r)
 	theme := r.PostForm.Get("theme")
 	density := r.PostForm.Get("density")
 	shortcuts := r.PostForm.Get("shortcuts")
 	if shortcuts == "" {
-		shortcuts = preferences(r).Shortcuts
+		shortcuts = current.Shortcuts
 	}
-	if !validTheme(theme) || !validDensity(density) || !validShortcuts(shortcuts) {
+	timezone := r.PostForm.Get("timezone")
+	if timezone == "" {
+		timezone = current.Timezone
+	}
+	zone, zoneValid := loadDisplayZone(timezone)
+	if !validTheme(theme) || !validDensity(density) || !validShortcuts(shortcuts) ||
+		!zoneValid {
 		http.Error(w, "Invalid preference value.", http.StatusBadRequest)
 		return
 	}
 	http.SetCookie(w, &http.Cookie{
 		Name:     prefsCookieName,
-		Value:    theme + "." + density + "." + shortcuts,
+		Value:    theme + "." + density + "." + shortcuts + "." + zone.cookieValue(),
 		Path:     "/",
 		MaxAge:   prefsMaxAge,
 		HttpOnly: true,

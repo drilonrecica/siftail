@@ -38,6 +38,7 @@ func (b *Browser) livePage(w http.ResponseWriter, r *http.Request) {
 	}
 	shell := b.shellBase(w, r, "live")
 	shell.Live = buildLiveView(query, sources)
+	shell.Live.Zone = shell.Prefs.Timezone
 	if err := b.ui.Shell(w, http.StatusOK, shell); err != nil {
 		http.Error(w, "Logs are temporarily unavailable.", http.StatusInternalServerError)
 	}

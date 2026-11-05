@@ -35,8 +35,8 @@
   <section aria-labelledby="backup-result-heading" aria-live="polite">
     <h2 id="backup-result-heading">Latest process result</h2>
     <p><strong>{{.StateLabel}}</strong></p>
-    {{if .StartedAt}}<p>Started: <time>{{.StartedAt}}</time></p>{{end}}
-    {{if .CompletedAt}}<p>Completed: <time>{{.CompletedAt}}</time></p>{{end}}
+    {{if .StartedAt}}<p>Started: <time datetime="{{.StartedAtUTC}}">{{.StartedAt}}</time></p>{{end}}
+    {{if .CompletedAt}}<p>Completed: <time datetime="{{.CompletedAtUTC}}">{{.CompletedAt}}</time></p>{{end}}
     {{if and (eq .State "running") .Unit}}<p>Copied {{.Unit}}: {{.CompletedUnits}} / {{.TotalUnits}}</p>{{end}}
     {{if .Name}}<dl class="status-facts">
       <div><dt>Type</dt><dd>{{.BackupType}}</dd></div>

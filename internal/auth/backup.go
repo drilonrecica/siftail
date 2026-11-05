@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
-	"time"
 
 	"github.com/drilonrecica/siftail/internal/backup"
 	webui "github.com/drilonrecica/siftail/internal/web/ui"
@@ -13,7 +12,7 @@ import (
 
 func (b *Browser) backupPage(w http.ResponseWriter, r *http.Request) {
 	session, _ := BrowserSessionFromContext(r.Context())
-	view := b.backupView(session.CSRFToken)
+	view := b.backupView(session.CSRFToken, requestZone(r))
 	shell := b.shellBase(w, r, "backup")
 	shell.Backup = view
 	if err := b.ui.Shell(w, http.StatusOK, shell); err != nil {
@@ -24,7 +23,7 @@ func (b *Browser) backupPage(w http.ResponseWriter, r *http.Request) {
 
 func (b *Browser) backupRegion(w http.ResponseWriter, r *http.Request) {
 	session, _ := BrowserSessionFromContext(r.Context())
-	if err := b.ui.Backup(w, http.StatusOK, b.backupView(session.CSRFToken)); err != nil {
+	if err := b.ui.Backup(w, http.StatusOK, b.backupView(session.CSRFToken, requestZone(r))); err != nil {
 		http.Error(w, "Backup is temporarily unavailable.",
 			http.StatusInternalServerError)
 	}
@@ -143,7 +142,7 @@ func (b *Browser) renderBackupError(
 	status int,
 	message string,
 ) {
-	view := b.backupView(csrfToken)
+	view := b.backupView(csrfToken, requestZone(r))
 	view.Error = message
 	shell := b.shellBase(w, r, "backup")
 	shell.Backup = view
@@ -153,7 +152,7 @@ func (b *Browser) renderBackupError(
 	}
 }
 
-func (b *Browser) backupView(csrfToken string) webui.BackupView {
+func (b *Browser) backupView(csrfToken string, zone displayZone) webui.BackupView {
 	view := webui.BackupView{
 		CSRFToken: csrfToken, State: backup.StateIdle,
 		StateLabel: "No backup has run during this process.",
@@ -170,10 +169,12 @@ func (b *Browser) backupView(csrfToken string) webui.BackupView {
 	view.CompletedUnits = strconv.Itoa(status.CompletedUnits)
 	view.Unit = status.Unit
 	if status.StartedAt != nil {
-		view.StartedAt = status.StartedAt.UTC().Format(time.RFC3339)
+		view.StartedAt = zone.instant(*status.StartedAt)
+		view.StartedAtUTC = datetime(*status.StartedAt)
 	}
 	if status.CompletedAt != nil {
-		view.CompletedAt = status.CompletedAt.UTC().Format(time.RFC3339)
+		view.CompletedAt = zone.instant(*status.CompletedAt)
+		view.CompletedAtUTC = datetime(*status.CompletedAt)
 	}
 	switch status.State {
 	case backup.StateRunning:

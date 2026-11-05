@@ -59,13 +59,16 @@
         {{range .Presets}}<a href="{{.URL}}"{{if .Active}} aria-current="true"{{end}}>{{.Label}}</a>{{end}}
         <button type="button" data-focus-range>Custom</button>
       </div>
-      <label>From (UTC)
+      {{/* Without JavaScript these are UTC text fields labelled UTC. app.js
+           replaces each with a picker in the display zone and relabels it
+           (DESIGN.md §10.2); the URL always carries UTC. */}}
+      <label><span>From (<span data-range-zone>UTC</span>)</span>
         <input id="from-filter" name="from" value="{{.From}}" inputmode="text" required aria-describedby="range-help" data-utc-range>
       </label>
-      <label>To (UTC)
+      <label><span>To (<span data-range-zone>UTC</span>)</span>
         <input id="to-filter" name="to" value="{{.To}}" inputmode="text" required aria-describedby="range-help" data-utc-range>
       </label>
-      <p id="range-help" class="field-help">Absolute UTC range, inclusive From and exclusive To; maximum 31 days.</p>
+      <p id="range-help" class="field-help">From is inclusive and To is exclusive; the range may cover at most 31 days.</p>
     </fieldset>
     <fieldset class="filter-group choice-filters">
       <legend>Levels</legend>
@@ -137,7 +140,7 @@
       <p>This deliberate download includes every matching event in canonical History order, not only the rows currently loaded.</p>
       <dl class="export-scope" tabindex="0" aria-label="Export scope">
         <div><dt>Source scope</dt><dd>{{.SourceSummary}}</dd></div>
-        <div><dt>Absolute range</dt><dd><time datetime="{{.From}}">{{.From}}</time> to <time datetime="{{.To}}">{{.To}}</time></dd></div>
+        <div><dt>Absolute range</dt><dd><time datetime="{{.From}}">{{.FromText}}</time> to <time datetime="{{.To}}">{{.ToText}}</time></dd></div>
         {{range .ExportFilters}}<div><dt>{{.Label}}</dt><dd>{{.Value}}</dd></div>{{end}}
         {{if not .ExportFilters}}<div><dt>Additional filters</dt><dd>None</dd></div>{{end}}
       </dl>
@@ -162,7 +165,7 @@
   {{if not .Rows}}{{template "empty-state.html" .EmptyState}}{{end}}
   {{/* One tab stop: keyboard.js keeps a roving tabindex over the rows
        (DESIGN.md §32.3). Only rows are children of the list. */}}
-  <div id="history-rows" class="log-list" role="list" aria-label="History log events">{{range .Rows}}{{template "history-row" .}}{{end}}</div>
+  <div id="history-rows" class="log-list" role="list" aria-label="History log events, times in {{.Zone}}"{{if .ShowDate}} data-show-date{{end}}>{{range .Rows}}{{template "history-row" .}}{{end}}</div>
   {{template "history-pagination" .}}
   <p id="history-update-status" class="visually-hidden" role="status" aria-live="polite"></p>
   {{end}}
@@ -171,6 +174,9 @@
 
 {{define "history-tail"}}
 <div id="history-tail" class="tail-line" tabindex="-1" data-canonical-url="{{.CanonicalURL}}">
+  {{/* The tail line sits directly above the rows and heads the time
+       column with the display zone (DESIGN.md §12.2). */}}
+  <span class="tail-zone">Times in {{.Zone}}</span>
   <span class="tail-line-rule" aria-hidden="true"></span>
   {{if .PrevURL}}<button id="load-newer" class="button button-quiet tail-action" type="button"
           hx-get="{{.PrevURL}}" hx-target="#history-tail"
@@ -188,7 +194,7 @@
           aria-expanded="false" aria-controls="{{.DetailID}}"
           hx-get="{{.DetailURL}}" hx-target="#{{.DetailID}}" hx-swap="innerHTML"
           hx-disabled-elt="this">›</button>
-  <time datetime="{{.TimestampUTC}}" data-local-time{{if .ShowDate}} data-show-date{{end}}>{{.Timestamp}}</time>
+  <time datetime="{{.TimestampUTC}}">{{.Timestamp}}</time>
   {{template "severity.html" .Level}}
   <span class="row-source">{{.Source}}</span>
   <span class="row-message">{{.Message}}</span>

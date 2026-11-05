@@ -1,6 +1,77 @@
 "use strict";
 
 (() => {
+  // Every server-rendered time is already in the display zone (DESIGN.md
+  // §12.2, ADR 0011 D7). The browser formats only Live rows and the
+  // custom-range picker, both in the zone named by data-timezone on <main>,
+  // with fixed 24-hour formats assembled from parts so a 12-hour or other
+  // locale can never change the text or the column width.
+  window.siftailTime = (() => {
+    const requested =
+      document.querySelector("main[data-timezone]")?.dataset.timezone || "UTC";
+    const options = {
+      hourCycle: "h23",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      fractionalSecondDigits: 3,
+    };
+    let zone = requested;
+    let format;
+    try {
+      format = new Intl.DateTimeFormat("en-US", { ...options, timeZone: zone });
+    } catch {
+      // The server validated the zone, but this browser's zone data may lack
+      // it; UTC is the documented fallback.
+      zone = "UTC";
+      format = new Intl.DateTimeFormat("en-US", { ...options, timeZone: zone });
+    }
+    const parts = (date) => {
+      const result = {};
+      for (const part of format.formatToParts(date)) result[part.type] = part.value;
+      return result;
+    };
+    // The zone's wall clock for an instant, read back as if it were UTC.
+    const wallMs = (ms) => {
+      const p = parts(new Date(ms));
+      return Date.UTC(
+        Number(p.year), Number(p.month) - 1, Number(p.day),
+        Number(p.hour), Number(p.minute), Number(p.second),
+        Number(p.fractionalSecond),
+      );
+    };
+    return {
+      zone,
+      // 15:04:05.000, the row format.
+      formatRowTime(date) {
+        const p = parts(date);
+        return `${p.hour}:${p.minute}:${p.second}.${p.fractionalSecond}`;
+      },
+      // 2006-01-02T15:04:05 in the zone, the datetime-local value.
+      toWall(date) {
+        const p = parts(date);
+        return `${p.year}-${p.month}-${p.day}T${p.hour}:${p.minute}:${p.second}`;
+      },
+      // The instant a datetime-local value names in the zone, or null. The
+      // second pass corrects the offset when the first guess crossed a
+      // daylight-saving change.
+      fromWall(value) {
+        const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?/.exec(value);
+        if (!match) return null;
+        const guess = Date.UTC(
+          Number(match[1]), Number(match[2]) - 1, Number(match[3]),
+          Number(match[4]), Number(match[5]), Number(match[6] || 0),
+        );
+        const first = guess - (wallMs(guess) - guess);
+        const result = guess - (wallMs(first) - first);
+        return Number.isNaN(result) ? null : new Date(result);
+      },
+    };
+  })();
+
   // Theme and density are server-rendered on <html> from the preference
   // cookie. This enhancement applies changes instantly and persists them in
   // the background; without it the form's noscript submit does the same.
@@ -25,12 +96,42 @@
       delete document.documentElement.dataset.shortcuts;
     }
   };
+  // The time zone control offers the browser's own zone beside UTC
+  // (DESIGN.md §19.5). The server renders an already-chosen zone as an
+  // option; when it is this browser's zone it is relabelled, not repeated.
+  const timezoneSelect = document.querySelector("[data-timezone-select]");
+  let browserZone = "";
+  try {
+    browserZone = Intl.DateTimeFormat().resolvedOptions().timeZone || "";
+  } catch {
+    browserZone = "";
+  }
+  if (timezoneSelect instanceof HTMLSelectElement &&
+    /^[A-Za-z0-9_+/-]{1,64}$/.test(browserZone) &&
+    browserZone !== "UTC" && browserZone !== "Etc/UTC") {
+    const label = `Browser time zone (${browserZone})`;
+    const existing = Array.from(timezoneSelect.options)
+      .find((option) => option.value === browserZone);
+    if (existing) {
+      existing.textContent = label;
+    } else {
+      timezoneSelect.append(new Option(label, browserZone));
+    }
+  }
+  const initialZone = timezoneSelect instanceof HTMLSelectElement
+    ? timezoneSelect.value
+    : "";
+
   if (prefsForm) {
     prefsForm.addEventListener("change", () => {
       const data = new FormData(prefsForm);
       applyTheme(String(data.get("theme")));
       applyDensity(String(data.get("density")));
       applyShortcuts(String(data.get("shortcuts")));
+      // Times are rendered by the server, so a new zone reloads the page
+      // once the cookie is saved (ADR 0011 D7).
+      const zoneChanged = timezoneSelect instanceof HTMLSelectElement &&
+        String(data.get("timezone")) !== initialZone;
       void fetch(prefsForm.action, {
         method: "POST",
         headers: {
@@ -39,6 +140,8 @@
         body: new URLSearchParams(data).toString(),
         credentials: "same-origin",
         redirect: "manual",
+      }).then(() => {
+        if (zoneChanged) window.location.reload();
       }).catch(() => {
         // The applied preference still styles this page; persistence retries
         // on the next change or full form submission.
@@ -265,25 +368,6 @@
     if (dialog instanceof HTMLDialogElement) dialog.close();
   });
 
-  const localizeTimes = (root) => {
-    root.querySelectorAll("[data-local-time]").forEach((element) => {
-      const date = new Date(element.dateTime);
-      if (Number.isNaN(date.getTime())) return;
-      const options = {
-        hour: "2-digit",
-        minute: "2-digit",
-        second: "2-digit",
-        fractionalSecondDigits: 3,
-      };
-      if (element.hasAttribute("data-show-date")) {
-        options.day = "2-digit";
-        options.month = "short";
-      }
-      element.textContent = new Intl.DateTimeFormat([], options).format(date);
-      element.title = date.toLocaleString();
-    });
-  };
-
   const updateHistoryCount = () => {
     let rows = Array.from(document.querySelectorAll("#history-rows .log-row"));
     let trimmed = false;
@@ -330,34 +414,41 @@
   };
 
   // Native datetime-local pickers for the UTC range fields. The named UTC
-  // text input stays authoritative (and is the no-JS form); the picker is a
-  // synchronized convenience view in the browser's local timezone.
+  // text input stays authoritative (and is the no-JS form, labelled UTC);
+  // the picker is a synchronized view in the display zone, and the label
+  // names that zone (DESIGN.md §10.2).
   const enhanceRangeInputs = (root) => {
+    const time = window.siftailTime;
     root.querySelectorAll("input[data-utc-range]").forEach((utcInput) => {
       if (utcInput.dataset.rangeEnhanced) return;
       utcInput.dataset.rangeEnhanced = "true";
       const parsed = new Date(utcInput.value);
       if (Number.isNaN(parsed.getTime())) return;
+      const label = utcInput.closest("label");
+      label?.querySelectorAll("[data-range-zone]").forEach((zone) => {
+        zone.textContent = time.zone;
+      });
       const picker = document.createElement("input");
       picker.type = "datetime-local";
       picker.step = "1";
-      picker.setAttribute("aria-label", "Local time picker");
-      const toLocalValue = (date) => {
-        const shifted = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
-        return shifted.toISOString().slice(0, 19);
-      };
-      picker.value = toLocalValue(parsed);
+      picker.setAttribute(
+        "aria-label",
+        (label?.textContent || "").replace(/\s+/g, " ").trim(),
+      );
+      const help = utcInput.getAttribute("aria-describedby");
+      if (help) picker.setAttribute("aria-describedby", help);
+      picker.value = time.toWall(parsed);
       picker.addEventListener("change", () => {
-        const local = new Date(picker.value);
-        if (Number.isNaN(local.getTime())) return;
-        utcInput.value = local.toISOString();
+        const instant = time.fromWall(picker.value);
+        if (!instant) return;
+        utcInput.value = instant.toISOString();
         utcInput.dispatchEvent(new Event("change", { bubbles: true }));
       });
       utcInput.hidden = true;
       utcInput.insertAdjacentElement("afterend", picker);
       utcInput.addEventListener("change", () => {
         const value = new Date(utcInput.value);
-        if (!Number.isNaN(value.getTime())) picker.value = toLocalValue(value);
+        if (!Number.isNaN(value.getTime())) picker.value = time.toWall(value);
       });
     });
   };
@@ -373,11 +464,9 @@
     document.querySelector("#history-region")?.setAttribute("aria-busy", "false");
   });
 
-  localizeTimes(document);
   prepareResponsiveHistory(document);
   enhanceRangeInputs(document);
   document.addEventListener("htmx:afterSwap", (event) => {
-    localizeTimes(event.target);
     prepareResponsiveHistory(event.target);
     enhanceRangeInputs(event.target);
     updateHistoryCount();

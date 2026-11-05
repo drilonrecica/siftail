@@ -36,7 +36,7 @@ func (b *Browser) serversPage(w http.ResponseWriter, r *http.Request) {
 			web.RequestIDFromContext(r.Context()))
 		return
 	}
-	view := buildServersView(query, page, session.CSRFToken)
+	view := buildServersView(query, page, session.CSRFToken, requestZone(r))
 	view.Notice = notice
 	b.renderServersView(w, r, session.CSRFToken, http.StatusOK, view)
 }
@@ -82,7 +82,7 @@ func (b *Browser) serverCreate(w http.ResponseWriter, r *http.Request) {
 			}
 			view := buildServersView(sources.ServerPageQuery{
 				Limit: sources.DefaultServerPageLimit,
-			}, page, session.CSRFToken)
+			}, page, session.CSRFToken, requestZone(r))
 			view.Name = values.Get("name")
 			view.Hostname = values.Get("hostname")
 			view.ServerError = message
@@ -284,7 +284,7 @@ func (b *Browser) renderServerDetail(
 			web.RequestIDFromContext(r.Context()))
 		return
 	}
-	view := buildServerDetailView(detail, csrfToken)
+	view := buildServerDetailView(detail, csrfToken, requestZone(r))
 	view.Notice = notice
 	view.TokenError = tokenError
 	view.TokenName = tokenName
@@ -357,13 +357,14 @@ func buildServersView(
 	query sources.ServerPageQuery,
 	page sources.ServerPage,
 	csrfToken string,
+	zone displayZone,
 ) webui.ServersView {
 	view := webui.ServersView{
 		CSRFToken: csrfToken,
 		Rows:      make([]webui.ServerRowView, len(page.Servers)),
 	}
 	for index, server := range page.Servers {
-		view.Rows[index] = serverRowView(server)
+		view.Rows[index] = serverRowView(server, zone)
 	}
 	if page.HasMore {
 		values := url.Values{
@@ -375,10 +376,10 @@ func buildServersView(
 	return view
 }
 
-func serverRowView(server sources.ServerSummary) webui.ServerRowView {
+func serverRowView(server sources.ServerSummary, zone displayZone) webui.ServerRowView {
 	lastEvent := "No events received"
 	if server.LastEventAtUS != nil {
-		lastEvent = formatManagementTime(*server.LastEventAtUS)
+		lastEvent = formatManagementTime(zone, *server.LastEventAtUS)
 	}
 	return webui.ServerRowView{
 		ID: server.ID, DetailURL: fmt.Sprintf("/servers/%d", server.ID),
@@ -391,9 +392,10 @@ func serverRowView(server sources.ServerSummary) webui.ServerRowView {
 func buildServerDetailView(
 	detail sources.ServerManagementDetail,
 	csrfToken string,
+	zone displayZone,
 ) webui.ServerDetailView {
 	view := webui.ServerDetailView{
-		ServerRowView:   serverRowView(detail.Server),
+		ServerRowView:   serverRowView(detail.Server, zone),
 		CSRFToken:       csrfToken,
 		TokensTruncated: detail.TokensTruncated,
 		Tokens:          make([]webui.TokenRowView, len(detail.Tokens)),
@@ -401,23 +403,23 @@ func buildServerDetailView(
 	for index, token := range detail.Tokens {
 		lastUsed := "Never"
 		if token.LastUsedAtUS != nil {
-			lastUsed = formatManagementTime(*token.LastUsedAtUS)
+			lastUsed = formatManagementTime(zone, *token.LastUsedAtUS)
 		}
 		revoked := ""
 		if token.RevokedAtUS != nil {
-			revoked = formatManagementTime(*token.RevokedAtUS)
+			revoked = formatManagementTime(zone, *token.RevokedAtUS)
 		}
 		view.Tokens[index] = webui.TokenRowView{
 			ID: token.ID, Name: token.Name, Fingerprint: token.Fingerprint,
-			Created: formatManagementTime(token.CreatedAtUS), LastUsed: lastUsed,
+			Created: formatManagementTime(zone, token.CreatedAtUS), LastUsed: lastUsed,
 			Revoked: revoked, Active: token.RevokedAtUS == nil,
 		}
 	}
 	return view
 }
 
-func formatManagementTime(value int64) string {
-	return time.UnixMicro(value).UTC().Format("02 Jan 2006 15:04:05 UTC")
+func formatManagementTime(zone displayZone, value int64) string {
+	return zone.instant(time.UnixMicro(value))
 }
 
 func (b *Browser) renderServersView(

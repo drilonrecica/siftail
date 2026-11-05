@@ -50,7 +50,7 @@ func (b *Browser) eventDetail(w http.ResponseWriter, r *http.Request) {
 		b.renderEventReadError(w, r)
 		return
 	}
-	view, err := buildEventDetailView(event, full)
+	view, err := buildEventDetailView(event, full, requestZone(r))
 	if err != nil {
 		b.renderEventReadError(w, r)
 		return
@@ -84,7 +84,11 @@ func (b *Browser) renderEventReadError(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func buildEventDetailView(event logs.HistoryEvent, full bool) (webui.EventDetailView, error) {
+func buildEventDetailView(
+	event logs.HistoryEvent,
+	full bool,
+	zone displayZone,
+) (webui.EventDetailView, error) {
 	attributes, err := stableAttributes(event.AttributesJSON)
 	if err != nil {
 		return webui.EventDetailView{}, fmt.Errorf("format event attributes: %w", err)
@@ -109,7 +113,7 @@ func buildEventDetailView(event logs.HistoryEvent, full bool) (webui.EventDetail
 		RawTruncated:        rawTruncated,
 	}
 	view.SourceFields = sourceDetailFields(event)
-	view.TimingFields = timingDetailFields(event)
+	view.TimingFields = timingDetailFields(event, zone)
 	view.SeverityFields = []webui.DetailField{
 		{Label: "Level", Value: string(event.Level)},
 		{Label: "Stream", Value: string(event.Stream)},
@@ -177,14 +181,33 @@ func sourceDetailFields(event logs.HistoryEvent) []webui.DetailField {
 	return fields
 }
 
-func timingDetailFields(event logs.HistoryEvent) []webui.DetailField {
+// timingDetailFields shows the event time in the display zone and in UTC,
+// the received time, and the delivery delay (DESIGN.md §12.2). UTC keeps the
+// exact RFC3339 value an operator can paste into another tool; when the
+// display zone is UTC the duplicate row is left out.
+func timingDetailFields(event logs.HistoryEvent, zone displayZone) []webui.DetailField {
 	eventAt := time.UnixMicro(event.EventAtUS).UTC()
 	receivedAt := time.UnixMicro(event.ReceivedAtUS).UTC()
-	return []webui.DetailField{
-		{Label: "Event time", Value: eventAt.Format(time.RFC3339Nano)},
-		{Label: "Received time", Value: receivedAt.Format(time.RFC3339Nano)},
-		{Label: "Delivery delay", Value: (receivedAt.Sub(eventAt)).String()},
+	fields := make([]webui.DetailField, 0, 4)
+	if !zone.isUTC() {
+		fields = append(fields, webui.DetailField{
+			Label:    "Event time (" + zone.name + ")",
+			Value:    eventAt.In(zone.loc).Format("02 Jan 2006 15:04:05.000000"),
+			Datetime: datetime(eventAt),
+		})
 	}
+	fields = append(fields,
+		webui.DetailField{
+			Label: "Event time (UTC)", Value: datetime(eventAt), Datetime: datetime(eventAt),
+		},
+		webui.DetailField{
+			Label:    "Received time (" + zone.name + ")",
+			Value:    receivedAt.In(zone.loc).Format("02 Jan 2006 15:04:05.000000"),
+			Datetime: datetime(receivedAt),
+		},
+		webui.DetailField{Label: "Delivery delay", Value: receivedAt.Sub(eventAt).String()},
+	)
+	return fields
 }
 
 func commonDetailFields(event logs.HistoryEvent) []webui.DetailField {

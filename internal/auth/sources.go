@@ -36,7 +36,7 @@ func (b *Browser) sourcesPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	shell := b.shellBase(w, r, "sources")
-	shell.Sources = buildSourcesView(query, page, notice)
+	shell.Sources = buildSourcesView(query, page, notice, requestZone(r))
 	if err := b.ui.Shell(w, http.StatusOK, shell); err != nil {
 		http.Error(w, "Sources are temporarily unavailable.", http.StatusInternalServerError)
 	}
@@ -224,7 +224,7 @@ func (b *Browser) renderSourceDetailView(
 	status int,
 	aliasError, clearError, removeError string,
 ) {
-	view := buildSourceDetailView(detail, csrfToken, notice)
+	view := buildSourceDetailView(detail, csrfToken, notice, requestZone(r))
 	view.AliasError = aliasError
 	view.ClearError = clearError
 	view.RemoveError = removeError
@@ -290,6 +290,7 @@ func buildSourcesView(
 	query sources.CatalogQuery,
 	page sources.CatalogPage,
 	notice string,
+	zone displayZone,
 ) webui.SourcesView {
 	view := webui.SourcesView{
 		LoadedCount: len(page.Sources),
@@ -297,7 +298,7 @@ func buildSourcesView(
 		Notice:      notice,
 	}
 	for index, source := range page.Sources {
-		view.Rows[index] = sourceRowView(source)
+		view.Rows[index] = sourceRowView(source, zone)
 	}
 	if page.HasMore {
 		values := url.Values{
@@ -309,7 +310,7 @@ func buildSourcesView(
 	return view
 }
 
-func sourceRowView(source sources.CatalogSource) webui.SourceRowView {
+func sourceRowView(source sources.CatalogSource, zone displayZone) webui.SourceRowView {
 	status := "Inactive"
 	if source.Active {
 		status = "Active"
@@ -330,8 +331,8 @@ func sourceRowView(source sources.CatalogSource) webui.SourceRowView {
 		Alias:       source.Alias != nil,
 		Status:      status,
 		Active:      source.Active,
-		FirstSeen:   formatSourceTime(source.FirstSeenAtUS),
-		LastSeen:    formatSourceTime(source.LastSeenAtUS),
+		FirstSeen:   formatSourceTime(zone, source.FirstSeenAtUS),
+		LastSeen:    formatSourceTime(zone, source.LastSeenAtUS),
 		Retained:    retained,
 	}
 }
@@ -339,10 +340,11 @@ func sourceRowView(source sources.CatalogSource) webui.SourceRowView {
 func buildSourceDetailView(
 	detail sources.SourceDetail,
 	csrfToken, notice string,
+	zone displayZone,
 ) webui.SourceDetailView {
 	source := detail.Source
 	view := webui.SourceDetailView{
-		SourceRowView:       sourceRowView(source),
+		SourceRowView:       sourceRowView(source, zone),
 		CSRFToken:           csrfToken,
 		Notice:              notice,
 		ServerHostname:      source.ServerHostname,
@@ -373,8 +375,8 @@ func buildSourceDetailView(
 			Identity:  identity,
 			Status:    status,
 			Active:    container.Active,
-			FirstSeen: formatSourceTime(container.FirstSeenAtUS),
-			LastSeen:  formatSourceTime(container.LastSeenAtUS),
+			FirstSeen: formatSourceTime(zone, container.FirstSeenAtUS),
+			LastSeen:  formatSourceTime(zone, container.LastSeenAtUS),
 		}
 	}
 	return view
@@ -392,8 +394,8 @@ func sourceLogsURL(source sources.CatalogSource) string {
 	return "/logs?" + values.Encode()
 }
 
-func formatSourceTime(value int64) string {
-	return time.UnixMicro(value).UTC().Format("02 Jan 2006 15:04:05 UTC")
+func formatSourceTime(zone displayZone, value int64) string {
+	return zone.instant(time.UnixMicro(value))
 }
 
 func (b *Browser) renderSourcesError(

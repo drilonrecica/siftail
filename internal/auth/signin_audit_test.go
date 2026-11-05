@@ -313,7 +313,7 @@ func TestAuditViewRendersSignInAggregateClearly(t *testing.T) {
 	want := "Rejected sign-ins 2026-11-05 12:00–12:05 UTC · 4 invalid credentials · " +
 		"99,990 throttled · 5 concurrent attempt · 1 overloaded · " +
 		"1,024 distinct clients (at least) · most frequent 198.51.100.7/32 (50,000)"
-	if got := auditSummary(event); got != want {
+	if got := auditSummary(event, utcDisplayZone); got != want {
 		t.Fatalf("summary =\n%s\nwant\n%s", got, want)
 	}
 	if got := auditActorLabel(event); got != "unauthenticated (5-minute aggregate)" {

@@ -56,9 +56,10 @@
       <h2>Waiting for new events from this source</h2>
       <p>Live events will appear here after they are committed.</p>
     </div>
-    <div id="live-rows" class="log-list" role="list" aria-label="Live log events"></div>
+    <div id="live-rows" class="log-list" role="list" aria-label="Live log events, times in {{.Zone}}"></div>
   </div>
   <div class="tail-line live-tail">
+    <span class="tail-zone">Times in {{.Zone}}</span>
     <span class="tail-line-rule" aria-hidden="true"></span>
     <span class="live-status" role="status" aria-live="polite">
       <span class="live-status-dot" aria-hidden="true"></span>

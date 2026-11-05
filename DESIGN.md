@@ -613,6 +613,15 @@ appear: the result summary and column header name it ("UTC",
 display zone, UTC, the received timestamp, and the delivery delay. Every
 `<time>` carries `datetime` in UTC RFC3339.
 
+The log list has no separate header row, so the tail line, which sits on
+the rows' edge in both modes, opens with "Times in Europe/Berlin" and acts as
+the time column's header; the list's accessible name repeats it ("History log
+events, times in Europe/Berlin"). Status, Sources, Servers, and Backup append
+the zone to each time; Audit names it in the Time column header. Rows that
+carry the date widen the time column to fit the 19-character format. The
+native `datetime-local` picker draws its own value in the browser's locale
+(possibly 12-hour); its label names the zone and the URL stays UTC.
+
 ### 12.3 Severity codes
 
 Severity renders as a fixed-width three-letter code so every row aligns and
@@ -947,7 +956,10 @@ defaults the rest), and rendered server-side before first paint:
 
 The time zone control offers "UTC" and "Browser time zone (Europe/Berlin)",
 where JavaScript fills the second option from the browser's resolved zone;
-without JavaScript only UTC is offered and the control says so. The server
+without JavaScript only UTC (and any zone already chosen) is offered and
+the control says "Choosing your browser's time zone needs JavaScript." With
+JavaScript a zone change reloads the page once the cookie is saved, because
+times are rendered by the server. The server
 accepts a zone of at most 64 characters from `[A-Za-z0-9_+/-]` that
 `time.LoadLocation` resolves, and otherwise keeps UTC.
 

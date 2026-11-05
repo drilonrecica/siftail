@@ -38,10 +38,11 @@ func (b *Browser) statusPage(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	view := statusView(snapshot, b.now())
+	zone := requestZone(r)
+	view := statusView(snapshot, b.now(), zone)
 	view.CSRFToken = session.CSRFToken
 	if result, ok := b.databaseChecker.Last(); ok {
-		view.DatabaseCheckAt = formatStatusTime(result.At)
+		view.DatabaseCheckAt = zone.instant(result.At)
 		if result.ErrorCategory != "" {
 			view.DatabaseCheck = "Failed · " + result.ErrorCategory
 		} else {
@@ -101,7 +102,11 @@ func (b *Browser) renderStatus(
 	}
 }
 
-func statusView(snapshot statusstate.OperationalSnapshot, now time.Time) webui.StatusView {
+func statusView(
+	snapshot statusstate.OperationalSnapshot,
+	now time.Time,
+	zone displayZone,
+) webui.StatusView {
 	state := snapshot.State
 	footprint := snapshot.DatabaseBytes + snapshot.WALBytes + snapshot.SHMBytes
 	usage := 0
@@ -134,8 +139,8 @@ func statusView(snapshot statusstate.OperationalSnapshot, now time.Time) webui.S
 		SHMSize:           formatStatusBytes(snapshot.SHMBytes),
 		DatabaseLimit:     formatStatusBytes(snapshot.Retention.MaxDatabaseBytes),
 		DatabaseUsage:     progressUsage,
-		OldestEvent:       formatOptionalStatusTime(snapshot.OldestEventUS),
-		NewestEvent:       formatOptionalStatusTime(snapshot.NewestEventUS),
+		OldestEvent:       formatOptionalStatusTime(snapshot.OldestEventUS, zone),
+		NewestEvent:       formatOptionalStatusTime(snapshot.NewestEventUS, zone),
 		RetentionAge:      strconv.Itoa(snapshot.Retention.AgeDays) + " days",
 		LastCleanup:       "Not yet run",
 		LastCleanupResult: "No cleanup result",
@@ -154,7 +159,7 @@ func statusView(snapshot statusstate.OperationalSnapshot, now time.Time) webui.S
 		Diagnostics:       make([]webui.StatusDiagnosticView, len(state.Diagnostics)),
 	}
 	if state.LastCleanup != nil {
-		view.LastCleanup = formatStatusTime(*state.LastCleanup)
+		view.LastCleanup = zone.instant(*state.LastCleanup)
 		result := state.LastCleanupResult
 		view.LastCleanupResult = fmt.Sprintf(
 			"%d age-deleted · %d size-deleted",
@@ -165,11 +170,11 @@ func statusView(snapshot statusstate.OperationalSnapshot, now time.Time) webui.S
 		}
 	}
 	if state.LastSuccessfulIngest != nil {
-		view.LastIngest = formatStatusTime(*state.LastSuccessfulIngest)
+		view.LastIngest = zone.instant(*state.LastSuccessfulIngest)
 	}
 	if state.LastDatabaseError != nil {
 		view.LastDatabaseError = state.LastDatabaseError.Category + " · " +
-			formatStatusTime(state.LastDatabaseError.At)
+			zone.instant(state.LastDatabaseError.At)
 	}
 	switch state.DegradedCategory {
 	case string(ingest.CategoryStorageFull):
@@ -185,7 +190,7 @@ func statusView(snapshot statusstate.OperationalSnapshot, now time.Time) webui.S
 		view.ConflictServers = append(view.ConflictServers, webui.StatusConflictView{
 			Server:  server,
 			Dropped: strconv.FormatUint(conflict.Dropped, 10) + " dropped",
-			LastAt:  formatStatusTime(conflict.LastAt),
+			LastAt:  zone.instant(conflict.LastAt),
 		})
 	}
 	if hidden := len(state.Conflicts) - len(snapshot.Conflicts); hidden > 0 {
@@ -201,7 +206,7 @@ func statusView(snapshot statusstate.OperationalSnapshot, now time.Time) webui.S
 		view.LateServers = append(view.LateServers, webui.StatusLateView{
 			Server: server,
 			Late:   strconv.FormatUint(counter.Late, 10) + " late",
-			LastAt: formatStatusTime(counter.LastAt),
+			LastAt: zone.instant(counter.LastAt),
 		})
 	}
 	if hidden := len(state.Late) - len(snapshot.Late); hidden > 0 {
@@ -211,13 +216,14 @@ func statusView(snapshot statusstate.OperationalSnapshot, now time.Time) webui.S
 	}
 	for index, diagnostic := range state.Diagnostics {
 		view.Diagnostics[index] = webui.StatusDiagnosticView{
-			Time: formatStatusTime(diagnostic.At), Severity: diagnostic.Severity,
+			Time: zone.instant(diagnostic.At), TimeUTC: datetime(diagnostic.At),
+			Severity:  diagnostic.Severity,
 			Component: diagnostic.Component, Category: diagnostic.Category,
 			Summary: diagnostic.Summary, RequestID: diagnostic.RequestID,
 		}
 		if diagnostic.RecoveredAt != nil {
-			view.Diagnostics[index].RecoveredAt =
-				formatStatusTime(*diagnostic.RecoveredAt)
+			view.Diagnostics[index].RecoveredAt = zone.instant(*diagnostic.RecoveredAt)
+			view.Diagnostics[index].RecoveredAtUTC = datetime(*diagnostic.RecoveredAt)
 		}
 	}
 	return view
@@ -240,15 +246,11 @@ func formatStatusBytes(bytes int64) string {
 	return fmt.Sprintf("%.2f GiB", float64(bytes)/(1<<30))
 }
 
-func formatOptionalStatusTime(value *int64) string {
+func formatOptionalStatusTime(value *int64, zone displayZone) string {
 	if value == nil {
 		return "No retained events"
 	}
-	return formatStatusTime(time.UnixMicro(*value))
-}
-
-func formatStatusTime(value time.Time) string {
-	return value.UTC().Format("02 Jan 2006 15:04:05 UTC")
+	return zone.instant(time.UnixMicro(*value))
 }
 
 func formatUptime(duration time.Duration) string {

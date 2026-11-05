@@ -51,7 +51,20 @@
                 <option value="off"{{if eq .Prefs.Shortcuts "off"}} selected{{end}}>Off</option>
               </select>
             </div>
-            <noscript><button class="button button-quiet" type="submit">Apply</button></noscript>
+            {{/* JavaScript adds "Browser time zone (…)" from the browser's
+                 resolved zone; without it only UTC (and any zone already
+                 chosen) is offered (DESIGN.md §19.5). */}}
+            <div class="prefs-field prefs-field-stacked">
+              <label for="timezone">Time zone</label>
+              <select id="timezone" name="timezone" data-timezone-select>
+                <option value="utc"{{if eq .Prefs.Timezone "UTC"}} selected{{end}}>UTC</option>
+                {{if ne .Prefs.Timezone "UTC"}}<option value="{{.Prefs.Timezone}}" selected>{{.Prefs.Timezone}}</option>{{end}}
+              </select>
+            </div>
+            <noscript>
+              <p class="field-help prefs-note">Choosing your browser's time zone needs JavaScript.</p>
+              <button class="button button-quiet" type="submit">Apply</button>
+            </noscript>
           </form>
           <button class="button button-quiet system-menu-help" type="button" data-open-keyboard-help hidden>Keyboard shortcuts</button>
           <form class="system-menu-signout" method="post" action="/session/logout">

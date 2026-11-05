@@ -244,6 +244,7 @@ func TestLiveShellRendersExplicitEscapedBoundedWorkspace(t *testing.T) {
 		CanonicalURL:  `/logs?mode=live&amp;contains=%3Cunsafe%3E`,
 		StreamURL:     `/logs/live/stream?contains=%3Cunsafe%3E`,
 		HistoryURL:    "/logs",
+		Zone:          "Europe/Berlin",
 		SourceSummary: `API <unsafe>`,
 		Sources: []SelectOption{{
 			Value: "1", Label: `API <unsafe>`, Selected: true,
@@ -262,7 +263,9 @@ func TestLiveShellRendersExplicitEscapedBoundedWorkspace(t *testing.T) {
 		`data-live-workspace`, `data-stream-url=`,
 		`aria-current="page">Live<`, `data-live-pause`, `data-live-newest`,
 		`data-live-clear`, `>Clear view<`, `data-live-reconnect`,
-		`data-live-pending hidden`, `aria-label="Live log events"`,
+		`data-live-pending hidden`,
+		`aria-label="Live log events, times in Europe/Berlin"`,
+		`<span class="tail-zone">Times in Europe/Berlin</span>`,
 		`API &lt;unsafe&gt;`, `&lt;script&gt;alert(1)&lt;/script&gt;`,
 	} {
 		if !strings.Contains(body, want) {
@@ -403,7 +406,10 @@ func TestHistoryFragmentsRenderFocusedEscapedState(t *testing.T) {
 		CanonicalURL:  `/logs?contains=%3Cscript%3E`,
 		From:          "2026-07-28T00:00:00Z",
 		To:            "2026-07-28T01:00:00Z",
-		RangeSummary:  "28 Jul 2026 00:00–01:00 UTC",
+		FromText:      "28 Jul 2026 02:00:00 Europe/Berlin",
+		ToText:        "28 Jul 2026 03:00:00 Europe/Berlin",
+		Zone:          "Europe/Berlin",
+		RangeSummary:  "28 Jul 2026 02:00–28 Jul 2026 03:00 Europe/Berlin",
 		SourceSummary: `API <unsafe>`,
 		Servers:       []SelectOption{{Value: "1", Label: `Server <one>`, Selected: true}},
 		Levels:        []FilterChoice{{ID: "level-error", Value: "error", Label: "error", Checked: true}},
@@ -414,7 +420,7 @@ func TestHistoryFragmentsRenderFocusedEscapedState(t *testing.T) {
 		Rows: []HistoryRowView{{
 			ID: 7, DetailID: "event-detail-7", DetailURL: "/logs/events/7",
 			TimestampUTC: "2026-07-28T00:30:00Z",
-			Timestamp:    "00:30:00.000 UTC", Level: "error", Stream: "stderr",
+			Timestamp:    "02:30:00.000", Level: "error", Stream: "stderr",
 			Source: `API <unsafe>`, Message: `<img src=x onerror=alert(1)>`,
 			ToggleLabel: RowToggleLabel("error", `API <unsafe>`, `<img src=x onerror=alert(1)>`),
 		}},
@@ -438,7 +444,12 @@ func TestHistoryFragmentsRenderFocusedEscapedState(t *testing.T) {
 		`hx-disabled-elt="this"`,
 		`aria-controls="event-detail-7"`,
 		`hx-get="/logs/events/7"`,
-		`id="history-rows" class="log-list" role="list" aria-label="History log events"`,
+		`id="history-rows" class="log-list" role="list" aria-label="History log events, times in Europe/Berlin"`,
+		`<time datetime="2026-07-28T00:30:00Z">02:30:00.000</time>`,
+		`<span class="tail-zone">Times in Europe/Berlin</span>`,
+		`28 Jul 2026 02:00–28 Jul 2026 03:00 Europe/Berlin`,
+		`<time datetime="2026-07-28T00:00:00Z">28 Jul 2026 02:00:00 Europe/Berlin</time>`,
+		`From (<span data-range-zone>UTC</span>)`,
 		`class="log-row level-error" role="listitem" data-event-id="7" tabindex="-1"`,
 		`tabindex="-1" aria-label="Details: ERR API &lt;unsafe&gt;, &lt;img src=x onerror=alert(1)&gt;"`,
 	} {
