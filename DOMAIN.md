@@ -965,9 +965,15 @@ Application-event retention does not automatically delete:
 
 The active SQLite footprint is:
 
-- main database file;
+- the main database's in-use pages,
+  `(page_count − freelist_count) × page_size`;
 - WAL file;
 - shared-memory file when present.
+
+Free pages are not counted. SQLite reuses them before it grows the file, so
+they are space retention has already reclaimed; counting them would delete
+events to pay for space that is already free. Incremental vacuum returns free
+pages to the filesystem over later cleanup cycles.
 
 Backup files, restore rollback copies, export staging files, filesystem
 snapshots, and unrelated host data are excluded. The configured limit is a

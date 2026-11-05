@@ -34,7 +34,7 @@ func TestCleanerPrunesUnreferencedContainersPastAgeCutoff(t *testing.T) {
 	cleaner := NewCleaner(db.Reader(), coordinator, path, store, CleanerOptions{
 		DeleteChunk: 10, VacuumPages: 1, ContainerPruneChunk: 1,
 		Now:              func() time.Time { return now },
-		MeasureFootprint: func(string) (int64, error) { return 1, nil },
+		MeasureFootprint: func(context.Context) (int64, error) { return 1, nil },
 	})
 	result, err := cleaner.RunOnce(context.Background())
 	if err != nil {
@@ -101,7 +101,7 @@ func TestCleanerPrunesOldestUnreferencedContainersAboveServerTarget(t *testing.T
 	cleaner := NewCleaner(db.Reader(), coordinator, path, store, CleanerOptions{
 		VacuumPages: 1, ContainerLimit: 10, ContainerPruneChunk: 2,
 		Now:              func() time.Time { return now },
-		MeasureFootprint: func(string) (int64, error) { return 1, nil },
+		MeasureFootprint: func(context.Context) (int64, error) { return 1, nil },
 	})
 	result, err := cleaner.RunOnce(context.Background())
 	if err != nil {

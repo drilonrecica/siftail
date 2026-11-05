@@ -567,7 +567,11 @@ erasure and does not control backups, snapshots, or unrelated host files.
 
 The lifecycle-owned cleanup worker runs at startup and hourly. It deletes no
 more than 10,000 events per transaction through the single writer coordinator,
-then performs bounded incremental vacuum and controlled WAL checkpointing.
+then performs bounded incremental vacuum, in chunks of at most 1,024 pages that
+ingestion commits interleave with, and controlled WAL checkpointing. The size
+limit counts the database's in-use pages plus its WAL and shared-memory files;
+pages freed by deletion count as reclaimed even before vacuum returns them to
+the filesystem.
 Size cleanup stops for the current run when a reader prevents checkpointing,
 instead of deleting speculatively, and retries later. Connected Live views
 receive a post-commit retention notice; deletion never waits for a browser.

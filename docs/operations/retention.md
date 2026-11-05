@@ -1,7 +1,8 @@
 # Application-log retention and late events
 
 **Reviewed:** 2026-11-05
-**Scope:** SFT-091, ADR 0008 retention basis and late events
+**Scope:** SFT-091, ADR 0008 retention basis and late events; SFT-092
+footprint measure
 
 ## What the limits mean
 
@@ -21,6 +22,15 @@ received before `now − age` in bounded transactions, ordered by
 `(received_at_us, id)`. When the footprint reaches 95% of the size limit, it
 deletes the earliest-received events, whatever their age, until the footprint
 is back at 90%.
+
+The footprint is the database's in-use pages plus its WAL and shared-memory
+files. Pages freed by deletion count as reclaimed immediately: SQLite reuses
+them before it grows the file. The database file itself shrinks more slowly:
+each reclamation cycle (one after age deletion, one after each size-deletion
+chunk) returns at most 8,192 pages, 32 MiB at the default page size, to the
+filesystem. For a while after a large deletion the file on disk can therefore
+be larger than the footprint. The Status page lists the file sizes, which
+include those free pages.
 
 A `204 No Content` from ingestion therefore guarantees that age retention will
 not remove the event for the configured age. An accepted event can leave

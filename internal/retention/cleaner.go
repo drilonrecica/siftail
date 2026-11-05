@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/drilonrecica/siftail/internal/database"
@@ -15,7 +16,14 @@ import (
 const (
 	DefaultCleanupInterval = time.Hour
 	defaultDeleteChunk     = 10_000
-	defaultVacuumPages     = 8_192
+	// defaultVacuumPages bounds the pages one reclamation cycle releases
+	// (ARCHITECTURE.md §23.5).
+	defaultVacuumPages = 8_192
+	// defaultVacuumChunkPages bounds the pages one writer turn releases. One
+	// chunk is one incremental-vacuum transaction (one WAL commit); 1,024
+	// pages held the writer for 72–189 ms on a SATA SSD
+	// (docs/performance/retention.md).
+	defaultVacuumChunkPages = 1_024
 	// Container instances are small rows; the chunk bounds how many
 	// NOT EXISTS probes one writer turn performs.
 	defaultContainerPruneChunk = 1_000
@@ -34,11 +42,16 @@ type CleanupResult struct {
 }
 
 type CleanerOptions struct {
-	DeleteChunk      int
+	DeleteChunk int
+	// VacuumPages caps the pages released per reclamation cycle and
+	// VacuumChunkPages the pages released per coordinator operation.
 	VacuumPages      int
+	VacuumChunkPages int
 	Now              func() time.Time
 	AfterDelete      func(int64)
-	MeasureFootprint func(string) (int64, error)
+	// MeasureFootprint defaults to ActiveFootprint over the cleaner's reader
+	// pool and database path.
+	MeasureFootprint func(context.Context) (int64, error)
 	// ContainerLimit is the per-server container-instance cap the writer
 	// enforces; it defaults to logs.MaxContainerInstancesPerServer.
 	ContainerLimit      int
@@ -52,9 +65,10 @@ type Cleaner struct {
 	settings         *Store
 	deleteChunk      int
 	vacuumPages      int
+	vacuumChunk      int
 	now              func() time.Time
 	afterDelete      func(int64)
-	measureFootprint func(string) (int64, error)
+	measureFootprint func(context.Context) (int64, error)
 	containerLimit   int
 	containerChunk   int
 }
@@ -72,11 +86,16 @@ func NewCleaner(
 	if options.VacuumPages <= 0 {
 		options.VacuumPages = defaultVacuumPages
 	}
+	if options.VacuumChunkPages <= 0 {
+		options.VacuumChunkPages = defaultVacuumChunkPages
+	}
 	if options.Now == nil {
 		options.Now = time.Now
 	}
 	if options.MeasureFootprint == nil {
-		options.MeasureFootprint = ActiveFootprint
+		options.MeasureFootprint = func(ctx context.Context) (int64, error) {
+			return ActiveFootprint(ctx, db, path)
+		}
 	}
 	if options.ContainerLimit <= 0 {
 		options.ContainerLimit = logs.MaxContainerInstancesPerServer
@@ -87,7 +106,8 @@ func NewCleaner(
 	return &Cleaner{
 		db: db, coordinator: coordinator, path: path, settings: settings,
 		deleteChunk: options.DeleteChunk, vacuumPages: options.VacuumPages,
-		now: options.Now, afterDelete: options.AfterDelete,
+		vacuumChunk: options.VacuumChunkPages,
+		now:         options.Now, afterDelete: options.AfterDelete,
 		measureFootprint: options.MeasureFootprint,
 		containerLimit:   options.ContainerLimit,
 		containerChunk:   options.ContainerPruneChunk,
@@ -136,7 +156,7 @@ func (c *Cleaner) deleteEvents(ctx context.Context, settings Settings, cutoff in
 		result.CheckpointBusy = busy
 	}
 
-	result.FootprintBefore, err = c.measureFootprint(c.path)
+	result.FootprintBefore, err = c.measureFootprint(ctx)
 	if err != nil {
 		return err
 	}
@@ -170,7 +190,7 @@ func (c *Cleaner) deleteEvents(ctx context.Context, settings Settings, cutoff in
 			result.CheckpointBusy = true
 			break
 		}
-		result.FootprintAfter, err = c.measureFootprint(c.path)
+		result.FootprintAfter, err = c.measureFootprint(ctx)
 		if err != nil {
 			return err
 		}
@@ -334,50 +354,90 @@ func (c *Cleaner) deleteOldest(ctx context.Context, cutoff *int64) (int64, error
 	return deleted, nil
 }
 
+// reclaim is one bounded reclamation cycle (ARCHITECTURE.md §23.5): a passive
+// checkpoint preflight, incremental vacuum in chunks, and a truncate checkpoint.
+// Every step is its own coordinator operation, so ingestion commits queued
+// behind one step run before the next. It reports whether a reader kept a
+// checkpoint busy.
 func (c *Cleaner) reclaim(ctx context.Context) (bool, error) {
-	var checkpointBusy bool
+	busy, err := c.checkpoint(ctx, "PASSIVE")
+	if err != nil || busy {
+		return busy, err
+	}
+	if err := c.vacuum(ctx); err != nil {
+		return false, err
+	}
+	return c.checkpoint(ctx, "TRUNCATE")
+}
+
+func (c *Cleaner) checkpoint(ctx context.Context, mode string) (bool, error) {
+	var busy bool
 	err := c.coordinator.DoMaintenance(ctx, func(db *sql.DB) error {
-		busy, err := retentionCheckpoint(db, "PASSIVE")
-		if err != nil {
-			return err
-		}
-		if busy {
-			checkpointBusy = true
-			return nil
-		}
-		if err := incrementalVacuum(db, c.vacuumPages); err != nil {
-			return err
-		}
-		busy, err = retentionCheckpoint(db, "TRUNCATE")
-		if err != nil {
-			return err
-		}
-		checkpointBusy = busy
-		return nil
+		var err error
+		busy, err = retentionCheckpoint(db, mode)
+		return err
 	})
 	if err != nil {
 		return false, fmt.Errorf("retention reclamation: %w", err)
 	}
-	return checkpointBusy, nil
+	return busy, nil
 }
 
-func incrementalVacuum(db *sql.DB, maximumPages int) error {
-	if maximumPages <= 0 {
-		return errors.New("invalid incremental-vacuum page limit")
-	}
-	var freePages int
-	if err := db.QueryRow("PRAGMA freelist_count").Scan(&freePages); err != nil {
-		return database.Classify("inspect retention freelist", err)
-	}
-	if freePages < maximumPages {
-		maximumPages = freePages
-	}
-	for page := 0; page < maximumPages; page++ {
-		if _, err := db.Exec("PRAGMA incremental_vacuum(1)"); err != nil {
-			return database.Classify("incremental retention vacuum", err)
+// vacuum releases at most vacuumPages free pages, vacuumChunk per writer turn,
+// and stops early once the freelist is empty.
+func (c *Cleaner) vacuum(ctx context.Context) error {
+	for remaining := c.vacuumPages; remaining > 0; {
+		pages := min(remaining, c.vacuumChunk)
+		var released int
+		err := c.coordinator.DoMaintenance(ctx, func(db *sql.DB) error {
+			var err error
+			released, err = incrementalVacuum(db, pages)
+			return err
+		})
+		if err != nil {
+			return fmt.Errorf("retention reclamation: %w", err)
 		}
+		if released < pages {
+			return nil
+		}
+		remaining -= released
 	}
 	return nil
+}
+
+// incrementalVacuum releases up to pages free pages in one autocommit
+// transaction and returns how many it released. The pragma moves one page per
+// result row, so the rows must be drained: Exec steps once and would release a
+// single page.
+func incrementalVacuum(db *sql.DB, pages int) (int, error) {
+	if pages <= 0 {
+		// incremental_vacuum(0) would release the whole freelist.
+		return 0, errors.New("invalid incremental-vacuum page limit")
+	}
+	var before, after int
+	if err := db.QueryRow("PRAGMA freelist_count").Scan(&before); err != nil {
+		return 0, database.Classify("inspect retention freelist", err)
+	}
+	if before == 0 {
+		return 0, nil
+	}
+	rows, err := db.Query("PRAGMA incremental_vacuum(" + strconv.Itoa(pages) + ")")
+	if err != nil {
+		return 0, database.Classify("incremental retention vacuum", err)
+	}
+	for rows.Next() {
+	}
+	err = rows.Err()
+	if closeErr := rows.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		return 0, database.Classify("incremental retention vacuum", err)
+	}
+	if err := db.QueryRow("PRAGMA freelist_count").Scan(&after); err != nil {
+		return 0, database.Classify("inspect retention freelist", err)
+	}
+	return max(before-after, 0), nil
 }
 
 func retentionCheckpoint(db *sql.DB, mode string) (bool, error) {
@@ -399,12 +459,28 @@ func (c *Cleaner) notifyDeleted(deleted int64) {
 	}
 }
 
-func ActiveFootprint(databasePath string) (int64, error) {
+// ActiveFootprint is the size-retention measure (DOMAIN.md §16.6): the main
+// database's in-use pages, (page_count − freelist_count) × page_size, plus the
+// WAL and shared-memory files. Free pages are not counted because SQLite
+// reuses them before it grows the file; counting them would make size
+// retention delete events to pay for space that is already free. The three
+// page values come from one statement and therefore one read snapshot.
+func ActiveFootprint(ctx context.Context, db *sql.DB, databasePath string) (int64, error) {
+	if db == nil {
+		return 0, errors.New("database is unavailable")
+	}
 	if databasePath == "" {
 		return 0, errors.New("database path is empty")
 	}
-	var total int64
-	for _, path := range []string{databasePath, databasePath + "-wal", databasePath + "-shm"} {
+	var pages, free, pageSize int64
+	if err := db.QueryRowContext(ctx, `SELECT p.page_count, f.freelist_count, s.page_size
+		FROM pragma_page_count() AS p, pragma_freelist_count() AS f,
+			pragma_page_size() AS s`).Scan(&pages, &free, &pageSize); err != nil {
+		return 0, fmt.Errorf("measure active SQLite footprint: %w",
+			database.Classify("read page counts", err))
+	}
+	total := max(pages-free, 0) * pageSize
+	for _, path := range []string{databasePath + "-wal", databasePath + "-shm"} {
 		info, err := os.Stat(path)
 		if errors.Is(err, os.ErrNotExist) {
 			continue

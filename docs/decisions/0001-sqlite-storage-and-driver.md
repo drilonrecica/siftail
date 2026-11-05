@@ -21,6 +21,9 @@ database creation, and one application-owned write coordinator. Use a small read
 and SQLite's online backup API.
 
 The active size-retention footprint is the main database plus WAL and SHM files.
+Amended by SFT-092 (2026-11-05): the main database counts its in-use pages,
+`(page_count − freelist_count) × page_size`, not its file size (`DOMAIN.md`
+§16.6).
 Siftail remains SQLite-specific and uses handwritten SQL rather than a database
 abstraction or ORM.
 

@@ -1619,10 +1619,14 @@ hour is emitted (§27.5).
 
 ### 23.3 Size cleanup
 
-Measure the active SQLite footprint as the main database plus WAL and SHM files.
-When it reaches 95% of the configured limit:
+Measure the active SQLite footprint (`DOMAIN.md` §16.6) as the main database's
+in-use pages, `(page_count − freelist_count) × page_size`, read in one statement
+from one read snapshot, plus the WAL and SHM files. Free pages are excluded, so
+pages a deletion freed count as reclaimed before incremental vacuum returns them
+to the filesystem. When the footprint reaches 95% of the configured limit:
 
-- delete oldest-received events by `(received_at_us, id)` toward 90%;
+- delete oldest-received events by `(received_at_us, id)` toward 90%, and stop
+  as soon as a remeasurement is at or below the target;
 - repeat bounded chunks;
 - stop on error;
 - expose last result;
@@ -1647,9 +1651,18 @@ next interval.
 After meaningful deletion:
 
 - preflight with a passive WAL checkpoint;
-- run incremental vacuum for at most 8,192 pages per reclamation cycle;
+- run incremental vacuum for at most 8,192 pages per reclamation cycle, in
+  chunks of at most 1,024 pages;
 - perform a controlled truncate checkpoint to release physical WAL allocation;
 - avoid full `VACUUM` automatically.
+
+The checkpoints and every vacuum chunk are separate coordinator operations, so
+ingestion commits queued behind one run before the next. One chunk is one
+`PRAGMA incremental_vacuum(1024)` transaction with one WAL commit; its result
+rows are drained, because the pragma releases one page per step. A chunk held
+the writer for 72–189 ms on a SATA SSD (`docs/performance/retention.md`), and a
+concurrent-ingestion test bounds it. The cycle stops early once the freelist
+is empty.
 
 A busy checkpoint stops size-driven deletion for the current run and retries
 on the next scheduled cycle. This prevents a long-lived reader from causing

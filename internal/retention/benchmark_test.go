@@ -97,6 +97,58 @@ func BenchmarkRetentionWriterInterference(b *testing.B) {
 	b.ReportAllocs()
 }
 
+// BenchmarkRetentionReclaimChunks measures one full reclamation cycle with
+// relocation: 10,000 expired 3,000-byte events at the front of the file and
+// 2,000 retained ones at its tail, so the vacuum moves live pages. It reports
+// the longest vacuum-chunk and checkpoint writer holds.
+func BenchmarkRetentionReclaimChunks(b *testing.B) {
+	b.Logf("temp directory filesystem: %s", testFilesystem(b.TempDir()))
+	for iteration := 0; iteration < b.N; iteration++ {
+		b.StopTimer()
+		path, db, coordinator, stop := benchmarkRetentionDatabase(b, iteration, 0, 0)
+		insertPayloadEvents(b, db.Writer(), 1, 10_000, 1, 3_000)
+		now := time.Unix(200_000, 0).UTC()
+		insertPayloadEvents(b, db.Writer(), 10_001, 2_000, now.UnixMicro(), 3_000)
+		truncateCheckpoint(b, db.Writer())
+		store := NewStore(db.Reader(), coordinator)
+		recording := &recordingCoordinator{Coordinator: coordinator}
+		cleaner := NewCleaner(db.Reader(), recording, path, store, CleanerOptions{
+			Now:              func() time.Time { return now },
+			MeasureFootprint: func(context.Context) (int64, error) { return 1, nil },
+		})
+		databaseBefore := fileSize(b, path)
+		b.StartTimer()
+		result, err := cleaner.RunOnce(context.Background())
+		b.StopTimer()
+		if err != nil {
+			b.Fatal(err)
+		}
+		if result.AgeDeleted != 10_000 || result.CheckpointBusy {
+			b.Fatalf("cleanup result = %#v", result)
+		}
+		var maxChunk, maxCheckpoint, reclaim time.Duration
+		var chunks, released int
+		for _, turn := range recording.snapshot() {
+			reclaim += turn.hold()
+			if turn.released > 0 {
+				chunks++
+				released += turn.released
+				maxChunk = max(maxChunk, turn.hold())
+				continue
+			}
+			maxCheckpoint = max(maxCheckpoint, turn.hold())
+		}
+		b.ReportMetric(float64(maxChunk.Microseconds())/1_000, "max_chunk_ms")
+		b.ReportMetric(float64(maxCheckpoint.Microseconds())/1_000, "max_checkpoint_ms")
+		b.ReportMetric(float64(reclaim.Microseconds())/1_000, "reclaim_ms")
+		b.ReportMetric(float64(chunks), "chunks")
+		b.ReportMetric(float64(released), "pages_released")
+		b.ReportMetric(float64(databaseBefore)/(1<<20), "db_before_MiB")
+		b.ReportMetric(float64(fileSize(b, path))/(1<<20), "db_after_MiB")
+		stop()
+	}
+}
+
 func benchmarkWriterCommits(
 	b *testing.B,
 	coordinator *database.Coordinator,

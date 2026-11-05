@@ -669,8 +669,9 @@ supported.
 
 When either application-log threshold is reached, oldest application logs are deleted in bounded chunks.
 Size retention starts when the active SQLite footprint reaches 95% of the configured
-limit and targets 90%. The active footprint is the main database plus its WAL and SHM
-files.
+limit and targets 90%. The active footprint is the main database's in-use pages plus
+its WAL and SHM files; free pages that SQLite will reuse are not counted
+(`DOMAIN.md` §16.6).
 
 If the host filesystem becomes full despite normal retention, Siftail enters degraded read-only behavior:
 

@@ -58,7 +58,7 @@ func TestCleanerDeletesCanonicalAgeOrderInBoundedCommittedChunks(t *testing.T) {
 				assertRetentionEventIDs(t, db.Reader(), []int64{1, 3, 4, 5})
 			}
 		},
-		MeasureFootprint: func(string) (int64, error) { return 1, nil },
+		MeasureFootprint: func(context.Context) (int64, error) { return 1, nil },
 	})
 	result, err := cleaner.RunOnce(context.Background())
 	if err != nil {
@@ -101,7 +101,7 @@ func TestCleanerSizeTriggerDeletesOldestTowardTarget(t *testing.T) {
 	cleaner := NewCleaner(db.Reader(), coordinator, path, store, CleanerOptions{
 		DeleteChunk: 2, VacuumPages: 1,
 		Now: func() time.Time { return time.Unix(1, 0).UTC() },
-		MeasureFootprint: func(string) (int64, error) {
+		MeasureFootprint: func(context.Context) (int64, error) {
 			if measurements.Add(1) == 1 {
 				return 980 << 20, nil
 			}
@@ -142,7 +142,7 @@ func TestCleanerRollbackCancellationAndExhaustedTarget(t *testing.T) {
 	cleaner := NewCleaner(db.Reader(), coordinator, path, store, CleanerOptions{
 		DeleteChunk: 1, Now: func() time.Time { return time.Unix(200_000, 0).UTC() },
 		AfterDelete:      func(int64) { notifications.Add(1) },
-		MeasureFootprint: func(string) (int64, error) { return 1, nil },
+		MeasureFootprint: func(context.Context) (int64, error) { return 1, nil },
 	})
 	if _, err := cleaner.RunOnce(context.Background()); err == nil {
 		t.Fatal("blocked retention succeeded")
@@ -167,7 +167,7 @@ func TestCleanerRollbackCancellationAndExhaustedTarget(t *testing.T) {
 
 	cleaner.now = func() time.Time { return time.Unix(1, 0).UTC() }
 	cleaner.afterDelete = nil
-	cleaner.measureFootprint = func(string) (int64, error) { return 980 << 20, nil }
+	cleaner.measureFootprint = func(context.Context) (int64, error) { return 980 << 20, nil }
 	result, err := cleaner.RunOnce(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -214,7 +214,7 @@ func TestCleanerStopsSizeDeletionWhenCheckpointIsBusy(t *testing.T) {
 	cleaner := NewCleaner(db.Reader(), coordinator, path, store, CleanerOptions{
 		DeleteChunk: 1, VacuumPages: 1,
 		Now:              func() time.Time { return now },
-		MeasureFootprint: func(string) (int64, error) { return 980 << 20, nil },
+		MeasureFootprint: func(context.Context) (int64, error) { return 980 << 20, nil },
 	})
 	result, err := cleaner.RunOnce(context.Background())
 	if err != nil {
@@ -264,7 +264,7 @@ func TestCleanerCanReleaseQuotaPressureForRecoveryProbe(t *testing.T) {
 
 	cleaner := NewCleaner(db.Reader(), coordinator, path, store, CleanerOptions{
 		DeleteChunk: 1, VacuumPages: 1, Now: func() time.Time { return now },
-		MeasureFootprint: func(string) (int64, error) { return 1, nil },
+		MeasureFootprint: func(context.Context) (int64, error) { return 1, nil },
 	})
 	result, err := cleaner.RunOnce(context.Background())
 	if err != nil {
@@ -284,13 +284,13 @@ func TestActiveFootprintAndWorkerShutdown(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "siftail.db")
 	db, coordinator, stop := settingsTestDatabase(t, path)
 	defer stop()
-	footprint, err := ActiveFootprint(path)
+	footprint, err := ActiveFootprint(context.Background(), db.Reader(), path)
 	if err != nil || footprint <= 0 {
 		t.Fatalf("active footprint = %d, err=%v", footprint, err)
 	}
 	store := NewStore(db.Reader(), coordinator)
 	cleaner := NewCleaner(db.Reader(), coordinator, path, store, CleanerOptions{
-		MeasureFootprint: func(string) (int64, error) { return 1, nil },
+		MeasureFootprint: func(context.Context) (int64, error) { return 1, nil },
 	})
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
@@ -357,7 +357,7 @@ func TestCleanerInterleavesWithConcurrentIngestionAndReads(t *testing.T) {
 	cleaner := NewCleaner(db.Reader(), coordinator, path, store, CleanerOptions{
 		DeleteChunk: 5, VacuumPages: 1, Now: func() time.Time { return now },
 		AfterDelete:      func(int64) { time.Sleep(100 * time.Microsecond) },
-		MeasureFootprint: func(string) (int64, error) { return 1, nil },
+		MeasureFootprint: func(context.Context) (int64, error) { return 1, nil },
 	})
 
 	start := make(chan struct{})

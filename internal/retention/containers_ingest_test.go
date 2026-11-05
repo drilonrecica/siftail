@@ -62,7 +62,7 @@ func TestRecreatedContainerAcceptedAgainAfterPruningUnderTheCap(t *testing.T) {
 	cleaner := retention.NewCleaner(db.Reader(), coordinator, path, store, retention.CleanerOptions{
 		VacuumPages: 1, ContainerLimit: limit,
 		Now:              func() time.Time { return later },
-		MeasureFootprint: func(string) (int64, error) { return 1, nil },
+		MeasureFootprint: func(context.Context) (int64, error) { return 1, nil },
 	})
 	result, err := cleaner.RunOnce(context.Background())
 	if err != nil {
@@ -140,7 +140,7 @@ func TestAcknowledgedLateEventIsNotPurgedByTheNextAgeRun(t *testing.T) {
 		t.Helper()
 		cleaner := retention.NewCleaner(db.Reader(), coordinator, path, store, retention.CleanerOptions{
 			VacuumPages: 1, Now: func() time.Time { return now },
-			MeasureFootprint: func(string) (int64, error) { return 1, nil },
+			MeasureFootprint: func(context.Context) (int64, error) { return 1, nil },
 		})
 		result, err := cleaner.RunOnce(context.Background())
 		if err != nil {
