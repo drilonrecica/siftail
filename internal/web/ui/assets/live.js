@@ -153,7 +153,10 @@
     toggle.setAttribute("aria-label", toggleLabel(code, sourceText, messageText));
     toggle.setAttribute("aria-expanded", "false");
     toggle.setAttribute("aria-controls", `event-detail-${id}`);
-    toggle.setAttribute("hx-get", `/logs/events/${id}`);
+    // The detail carries the current scope for its "Show events around this
+    // time" link (DESIGN.md §13.1).
+    const scope = scopeQuery();
+    toggle.setAttribute("hx-get", scope ? `/logs/events/${id}?${scope}` : `/logs/events/${id}`);
     toggle.setAttribute("hx-target", `#event-detail-${id}`);
     toggle.setAttribute("hx-swap", "innerHTML");
     toggle.setAttribute("hx-disabled-elt", "this");
@@ -386,10 +389,22 @@
     if (trackingNewest) jumpToNewest();
   };
 
-  const streamURLFromForm = () => {
+  // The source cascade shares History's parameter names (DESIGN.md §8.1).
+  const scopeNames = ["server", "project", "environment", "application", "service"];
+  const scopeValues = () => {
     const values = new URLSearchParams();
-    const source = form.elements.namedItem("source");
-    if (source instanceof HTMLSelectElement && source.value) values.set("source", source.value);
+    scopeNames.forEach((name) => {
+      const select = form.elements.namedItem(name);
+      if (select instanceof HTMLSelectElement && select.value) values.set(name, select.value);
+    });
+    return values;
+  };
+  function scopeQuery() {
+    return scopeValues().toString();
+  }
+
+  const streamURLFromForm = () => {
+    const values = scopeValues();
     const levels = form.elements.namedItem("levels");
     if (levels instanceof HTMLInputElement && levels.value) {
       levels.value.split(",").forEach((value) => values.append("level", value));
@@ -412,9 +427,20 @@
     return `/logs?${values.toString()}`;
   };
 
+  // The History mode link carries the same filter model, so H and the
+  // segmented control keep the investigation (DESIGN.md §8.1).
+  const syncHistoryLink = () => {
+    const link = workspace.querySelector('.mode-switch a:not([aria-current="page"])');
+    if (!(link instanceof HTMLAnchorElement)) return;
+    const values = new URL(pageURLFromForm(), window.location.origin).searchParams;
+    values.set("mode", "history");
+    link.href = `/logs?${values.toString()}`;
+  };
+
   const applyFilters = () => {
     workspace.dataset.streamUrl = streamURLFromForm();
     window.history.replaceState(null, "", pageURLFromForm());
+    syncHistoryLink();
     clearView();
     addNotice("Live filters changed. Showing newly committed matching events.", "filters");
     connect();
@@ -428,6 +454,14 @@
   });
   form.addEventListener("change", (event) => {
     if (event.target?.matches?.("[data-text-filter]")) return;
+    // A scope change navigates so the server renders the narrowed child
+    // options; Live then connects with a visible Connecting state (§9.2).
+    if (event.target?.matches?.("[data-live-scope]")) {
+      window.clearTimeout(textFilterTimer);
+      closeSource();
+      window.location.assign(pageURLFromForm());
+      return;
+    }
     applyFilters();
   });
   form.addEventListener("input", (event) => {

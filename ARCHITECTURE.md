@@ -1421,7 +1421,7 @@ When full:
 Example:
 
 ```http
-GET /logs/live/stream?source=42&level=error&level=fatal
+GET /logs/live/stream?server=1&application=api&level=error&level=fatal
 Accept: text/event-stream
 ```
 
@@ -1443,8 +1443,14 @@ The payload is compact JSON interpreted by the focused client module. Message an
 attribute previews are capped at 8 KiB per event; the browser fetches complete event
 details through the authenticated event-detail route.
 
-The endpoint accepts only `source`, `level`, `stream`, and `contains` query
-parameters. Source, level, and stream are repeatable exact filters; `contains`
+The endpoint accepts only `server`, `project`, `environment`, `application`,
+`service`, `source`, `level`, `stream`, and `contains` query parameters. The
+five scope parameters occur at most once and match canonical source keys
+exactly, as History's scope does, so a source that first appears while a
+subscription is open still matches it; a scoped subscription receives a
+source lifecycle control (`source_purged`, `source_removed`) only for sources
+it has delivered events from. `source` (stable source IDs), level, and stream
+are repeatable exact filters; `contains`
 occurs at most once, is at most 512 UTF-8 bytes, and follows the same literal
 ASCII-case-insensitive/non-ASCII-exact semantics as History. Unknown or invalid
 parameters reject the connection. The initial stream sets a three-second native
@@ -1569,6 +1575,25 @@ GET  /audit
 ```
 
 Actual route names may vary, but state-changing operations use non-GET methods and CSRF protection.
+
+### 18.5 Logs URL state
+
+History and Live share one filter model (DESIGN.md §8.1): the scope cascade
+`server`, `project`, `environment`, `application`, `service`, plus `levels`
+and `streams` (CSV) and `contains`. Both modes serialise it under these
+names, so the mode links, the `H`/`L` shortcuts, and Go live carry it across.
+History additionally owns `from`, `to`, `excludes`, the structured filters,
+`direction`, `limit`, and `cursor`; Live accepts only `mode=live` and the
+shared model. A Live → History switch carries no range, so History resolves
+the default last hour and redirects to the absolute URL.
+
+`highlight=<event id>` marks one History row (DESIGN.md §13.1, "Show events
+around this time"). It is view state only: the handlers strip it before
+parsing `logs.HistoryQuery`, so cursors, their fingerprint, and exports
+ignore it, and pagination URLs re-append it so Load older can reach the row.
+`GET /logs/events/{id}` accepts the scope parameters beside `full=1` and uses
+them only to build that link: `from`/`to` at the event time ±1 minute,
+`limit=500`, and the scope, without level, stream, or text filters.
 
 ---
 

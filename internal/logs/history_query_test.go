@@ -243,3 +243,34 @@ func TestParseHistoryQueryAcceptsRepeatedLevelAndStreamEntries(t *testing.T) {
 		t.Fatal("invalid repeated level was accepted")
 	}
 }
+
+func TestParseSourceScopeRoundTripsSharedNames(t *testing.T) {
+	values := url.Values{
+		"server": {"3"}, "project": {"shop"}, "environment": {"prod"},
+		"application": {"api"}, "service": {"web"},
+	}
+	scope, err := ParseSourceScope(values)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := SourceScope{ServerID: 3, Project: "shop", Environment: "prod", Application: "api", Service: "web"}
+	if scope != want || scope.IsZero() {
+		t.Fatalf("scope = %#v", scope)
+	}
+	encoded := url.Values{}
+	scope.Set(encoded)
+	if encoded.Encode() != values.Encode() {
+		t.Fatalf("Set = %q, want %q", encoded.Encode(), values.Encode())
+	}
+	for _, bad := range []url.Values{
+		{"server": {"0"}}, {"server": {"x"}}, {"project": {"a\x01"}},
+		{"service": {strings.Repeat("s", 129)}},
+	} {
+		if _, err := ParseSourceScope(bad); err == nil {
+			t.Fatalf("ParseSourceScope(%v) accepted", bad)
+		}
+	}
+	if empty, err := ParseSourceScope(url.Values{}); err != nil || !empty.IsZero() {
+		t.Fatalf("empty scope = %#v, %v", empty, err)
+	}
+}

@@ -5,7 +5,12 @@
       <p class="eyebrow">Event {{.ID}}</p>
       <h2 id="event-detail-title-{{.ID}}">Event details</h2>
     </div>
-    <button class="button button-quiet" type="button" data-collapse-detail>Collapse details</button>
+    <div class="event-detail-actions">
+      {{/* History at the event time ±1 minute, current scope, this event
+           highlighted (DESIGN.md §13.1). */}}
+      {{if .SurroundingURL}}<a class="button button-quiet" href="{{.SurroundingURL}}" data-surrounding-events>Show events around this time</a>{{end}}
+      <button class="button button-quiet" type="button" data-collapse-detail>Collapse details</button>
+    </div>
   </header>
 
   <section class="detail-section" aria-labelledby="event-message-title-{{.ID}}">

@@ -80,21 +80,14 @@ func ParseHistoryQuery(values url.Values, now time.Time) (HistoryQuery, error) {
 	if err := parseHistoryRange(values, now, &query); err != nil {
 		return HistoryQuery{}, err
 	}
-	var err error
-	if query.ServerID, err = positiveOptionalInt(values.Get("server"), "server"); err != nil {
+	scope, err := ParseSourceScope(values)
+	if err != nil {
 		return HistoryQuery{}, err
 	}
+	query.ServerID, query.Project, query.Environment = scope.ServerID, scope.Project, scope.Environment
+	query.Application, query.Service = scope.Application, scope.Service
 	if query.ContainerID, err = positiveOptionalInt(values.Get("container"), "container"); err != nil {
 		return HistoryQuery{}, err
-	}
-	for name, target := range map[string]*string{
-		"project": &query.Project, "environment": &query.Environment,
-		"application": &query.Application, "service": &query.Service,
-	} {
-		*target = values.Get(name)
-		if err := validateQueryText(*target, 128, true); err != nil {
-			return HistoryQuery{}, fmt.Errorf("%s: %w", name, err)
-		}
 	}
 	query.Levels, err = parseLevels(mergeRepeatedCSV(values["levels"]))
 	if err != nil {
@@ -152,6 +145,81 @@ func ParseHistoryQuery(values url.Values, now time.Time) (HistoryQuery, error) {
 		return HistoryQuery{}, errors.New("cursor is invalid")
 	}
 	return query, nil
+}
+
+// ParseSourceScope reads the source cascade History and Live share
+// (DESIGN.md §8.1, §9.1) from its URL parameters: server, project,
+// environment, application, and service. Absent parameters match every
+// source.
+func ParseSourceScope(values url.Values) (SourceScope, error) {
+	var scope SourceScope
+	var err error
+	if scope.ServerID, err = positiveOptionalInt(values.Get("server"), "server"); err != nil {
+		return SourceScope{}, err
+	}
+	scope.Project = values.Get("project")
+	scope.Environment = values.Get("environment")
+	scope.Application = values.Get("application")
+	scope.Service = values.Get("service")
+	if err := scope.Validate(); err != nil {
+		return SourceScope{}, err
+	}
+	return scope, nil
+}
+
+// Validate checks the scope keys with the History source-key rules.
+func (s SourceScope) Validate() error {
+	if s.ServerID < 0 {
+		return errors.New("server must be a positive integer")
+	}
+	for name, value := range map[string]string{
+		"project": s.Project, "environment": s.Environment,
+		"application": s.Application, "service": s.Service,
+	} {
+		if err := validateQueryText(value, 128, true); err != nil {
+			return fmt.Errorf("%s: %w", name, err)
+		}
+	}
+	return nil
+}
+
+// IsZero reports whether the scope matches every source.
+func (s SourceScope) IsZero() bool {
+	return s == SourceScope{}
+}
+
+// Set writes the scope's non-empty parameters into values, in the same
+// names ParseSourceScope reads.
+func (s SourceScope) Set(values url.Values) {
+	if s.ServerID > 0 {
+		values.Set("server", strconv.FormatInt(s.ServerID, 10))
+	}
+	for name, value := range map[string]string{
+		"project": s.Project, "environment": s.Environment,
+		"application": s.Application, "service": s.Service,
+	} {
+		if value != "" {
+			values.Set(name, value)
+		}
+	}
+}
+
+// Scope returns the query's source cascade.
+func (q HistoryQuery) Scope() SourceScope {
+	return SourceScope{
+		ServerID: q.ServerID, Project: q.Project, Environment: q.Environment,
+		Application: q.Application, Service: q.Service,
+	}
+}
+
+// matches compares canonical source keys exactly, as History's source
+// clauses do.
+func (s SourceScope) matches(source SourceIdentity) bool {
+	return (s.ServerID == 0 || s.ServerID == source.ServerID) &&
+		(s.Project == "" || s.Project == source.Project) &&
+		(s.Environment == "" || s.Environment == source.Environment) &&
+		(s.Application == "" || s.Application == source.Application) &&
+		(s.Service == "" || s.Service == source.Service)
 }
 
 func parseHistoryRange(values url.Values, now time.Time, query *HistoryQuery) error {

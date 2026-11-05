@@ -28,9 +28,6 @@ func TestHistoryReadsCarryTheInteractiveQueryBound(t *testing.T) {
 	if _, err := fixture.store.Event(context.Background(), 1); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("Event past its bound = %v", err)
 	}
-	if _, err := fixture.store.LiveSources(context.Background()); err == nil {
-		t.Fatal("LiveSources past its bound succeeded")
-	}
 
 	fixture.store.WithQueryTimeout(DefaultHistoryQueryTimeout)
 	if _, err := fixture.store.History(context.Background(), fixture.query()); err != nil {

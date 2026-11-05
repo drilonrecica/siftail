@@ -8,12 +8,39 @@
       <input type="hidden" name="mode" value="live">
       <input type="hidden" name="levels" value="{{.LevelsValue}}" data-list-value="levels">
       <input type="hidden" name="streams" value="{{.StreamsValue}}" data-list-value="streams">
-      <fieldset class="filter-group live-source-filter">
+      {{/* The same source cascade as History (DESIGN.md §8.1, §9.1). A
+           scope change navigates so the server re-renders the child
+           options; levels, streams, and text reconnect in place. */}}
+      <fieldset class="filter-group source-filters">
         <legend>Source</legend>
-        <label>Source
-          <select id="live-source-filter" name="source">
-            <option value="">All sources</option>
-            {{range .Sources}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}
+        <label>Server
+          <select id="live-server-filter" name="server" data-source-level="0" data-live-scope>
+            <option value="">All servers</option>
+            {{range .Servers}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}
+          </select>
+        </label>
+        <label>Project
+          <select id="live-project-filter" name="project" data-source-level="1" data-live-scope>
+            <option value="">All projects</option>
+            {{range .Projects}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}
+          </select>
+        </label>
+        <label>Environment
+          <select id="live-environment-filter" name="environment" data-source-level="2" data-live-scope>
+            <option value="">All environments</option>
+            {{range .Environments}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}
+          </select>
+        </label>
+        <label>Application
+          <select id="live-application-filter" name="application" data-source-level="3" data-live-scope>
+            <option value="">All applications</option>
+            {{range .Applications}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}
+          </select>
+        </label>
+        <label>Service
+          <select id="live-service-filter" name="service" data-source-level="4" data-live-scope>
+            <option value="">All services</option>
+            {{range .Services}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}
           </select>
         </label>
       </fieldset>

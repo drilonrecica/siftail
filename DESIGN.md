@@ -526,6 +526,21 @@ Complete historical query state belongs in the URL:
 /logs?mode=history&server=1&app=nextup&service=api&levels=error,fatal&from=…&to=…&q=timeout
 ```
 
+Live uses the same names for the shared filter model (§8.1):
+
+```text
+/logs?mode=live&server=1&application=nextup&service=api&levels=error,fatal&contains=timeout
+```
+
+`highlight=<event id>` marks one History row: **Show events around this
+time** (§13.1) sets it with `from`/`to` at the event time ±1 minute and the
+current scope. It is view state, not part of the query: export and cursors
+ignore it, Load older keeps it, and changing a filter drops it. The marked
+row carries accent rules above and below and `aria-current="true"`; it
+becomes the list's tab stop and is centred and focused once on arrival. If
+it is not among the loaded rows, a line above the tail line says whether
+Load older reaches it.
+
 URLs never contain credentials, tokens, or CSRF secrets. Back/forward
 restores query state.
 

@@ -1032,8 +1032,8 @@ code {
   grid-template-columns: repeat(10, minmax(0, 1fr));
 }
 
-.live-source-filter {
-  grid-column: span 3;
+.live-form .source-filters {
+  grid-column: 1 / -1;
 }
 
 .live-text-filter {
@@ -1187,6 +1187,12 @@ code {
   font-size: var(--text-sm);
 }
 
+.event-detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
 .event-detail-header,
 .detail-section-heading {
   display: flex;
@@ -1273,6 +1279,20 @@ code {
 
 .log-row:hover {
   background: var(--surface-hover);
+}
+
+/* The event "Show events around this time" opened History for (DESIGN.md
+   §13.1): accent rules above and below, a shape cue independent of the
+   severity edge, hover, and keyboard selection. */
+.log-row[data-highlighted] {
+  box-shadow: inset 0 2px 0 var(--accent), inset 0 -2px 0 var(--accent);
+}
+
+.highlight-notice {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  color: var(--text-secondary);
+  font-size: 0.85rem;
 }
 
 .log-row > * {
@@ -1995,7 +2015,6 @@ kbd {
   }
 
   .source-filters,
-  .live-source-filter,
   .time-filters,
   .choice-filters,
   .text-filters,
@@ -2005,7 +2024,6 @@ kbd {
   }
 
   .source-filters,
-  .live-source-filter,
   .structured-filters {
     grid-template-columns: repeat(2, minmax(8rem, 1fr));
   }
@@ -2063,7 +2081,6 @@ kbd {
   }
 
   .source-filters label,
-  .live-source-filter label,
   .time-filters label,
   .structured-filters label {
     grid-column: 1;

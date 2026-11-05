@@ -357,3 +357,51 @@ func liveTestEvent(
 		},
 	}
 }
+
+func TestLiveBrokerMatchesSourceScopeKeys(t *testing.T) {
+	broker := startLiveBroker(t, LiveBrokerOptions{})
+	scoped := subscribeLive(t, broker, LiveFilter{Scope: SourceScope{
+		ServerID: 1, Project: "shop", Application: "api",
+	}})
+	event := func(id, sourceID, serverID int64, project, application string) CommittedEvent {
+		committed := liveTestEvent(id, sourceID, LevelInfo, StreamStdout, "event")
+		committed.Event.Source = SourceIdentity{
+			ServerID: serverID, Project: project, Environment: "production",
+			Application: application, Service: "web",
+		}
+		return committed
+	}
+	if !broker.TryPublish([]CommittedEvent{
+		event(1, 1, 2, "shop", "api"),   // other server
+		event(2, 2, 1, "blog", "api"),   // other project
+		event(3, 3, 1, "shop", "admin"), // other application
+		event(4, 4, 1, "shop", "api"),   // in scope
+	}) {
+		t.Fatal("batch was not accepted")
+	}
+	if message := nextLive(t, scoped); message.Event.ID != 4 {
+		t.Fatalf("scoped ID = %d, want 4", message.Event.ID)
+	}
+
+	// Source controls reach a scoped subscription only for sources it has
+	// delivered, so another source's removal never clears its view.
+	if !broker.TryPublishControl(LiveControl{Type: LiveControlSourceRemoved, SourceID: 1}) ||
+		!broker.TryPublishControl(LiveControl{Type: LiveControlSourceRemoved, SourceID: 4}) {
+		t.Fatal("control was not accepted")
+	}
+	message := nextLive(t, scoped)
+	if message.Type != LiveMessageControl || message.Control.SourceID != 4 {
+		t.Fatalf("scoped control = %#v, want source 4", message)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+	if _, err := scoped.Next(ctx); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("unexpected scoped message: %v", err)
+	}
+
+	if _, err := broker.Subscribe(context.Background(), LiveFilter{
+		Scope: SourceScope{Service: "bad\x01key"},
+	}); !errors.Is(err, ErrInvalidLiveFilter) {
+		t.Fatalf("invalid scope error = %v", err)
+	}
+}

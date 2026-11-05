@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -28,7 +29,7 @@ func (b *Browser) eventDetail(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	full, valid := parseFullDetail(r)
+	full, scope, valid := parseEventDetailQuery(r)
 	if !valid {
 		_ = b.ui.EventError(w, http.StatusBadRequest, webui.EventErrorView{
 			Message: "The event detail request is invalid.",
@@ -50,7 +51,7 @@ func (b *Browser) eventDetail(w http.ResponseWriter, r *http.Request) {
 		b.renderEventReadError(w, r)
 		return
 	}
-	view, err := buildEventDetailView(event, full, requestZone(r))
+	view, err := buildEventDetailView(event, full, scope, requestZone(r))
 	if err != nil {
 		b.renderEventReadError(w, r)
 		return
@@ -60,21 +61,32 @@ func (b *Browser) eventDetail(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func parseFullDetail(r *http.Request) (bool, bool) {
+// parseEventDetailQuery reads ?full=1 and the current source scope, which
+// the detail only uses to build its "Show events around this time" link.
+func parseEventDetailQuery(r *http.Request) (bool, logs.SourceScope, bool) {
 	values := r.URL.Query()
-	for key := range values {
-		if key != "full" {
-			return false, false
+	for key, entries := range values {
+		switch key {
+		case "full", "server", "project", "environment", "application", "service":
+		default:
+			return false, logs.SourceScope{}, false
 		}
+		if len(entries) != 1 {
+			return false, logs.SourceScope{}, false
+		}
+	}
+	scope, err := logs.ParseSourceScope(values)
+	if err != nil {
+		return false, logs.SourceScope{}, false
 	}
 	fullValues, present := values["full"]
 	if !present {
-		return false, true
+		return false, scope, true
 	}
-	if len(fullValues) != 1 || fullValues[0] != "1" {
-		return false, false
+	if fullValues[0] != "1" {
+		return false, logs.SourceScope{}, false
 	}
-	return true, true
+	return true, scope, true
 }
 
 func (b *Browser) renderEventReadError(w http.ResponseWriter, r *http.Request) {
@@ -87,6 +99,7 @@ func (b *Browser) renderEventReadError(w http.ResponseWriter, r *http.Request) {
 func buildEventDetailView(
 	event logs.HistoryEvent,
 	full bool,
+	scope logs.SourceScope,
 	zone displayZone,
 ) (webui.EventDetailView, error) {
 	attributes, err := stableAttributes(event.AttributesJSON)
@@ -97,10 +110,13 @@ func buildEventDetailView(
 	raw, rawTruncated := detailText(event.MessageRaw, full)
 	attributesText, attributesTruncated := detailText(attributes, full)
 	detailID := fmt.Sprintf("event-detail-%d", event.ID)
+	fullValues := url.Values{"full": {"1"}}
+	scope.Set(fullValues)
 	view := webui.EventDetailView{
 		ID:                  event.ID,
 		DetailID:            detailID,
-		FullURL:             fmt.Sprintf("/logs/events/%d?full=1", event.ID),
+		FullURL:             fmt.Sprintf("/logs/events/%d?", event.ID) + fullValues.Encode(),
+		SurroundingURL:      surroundingURL(scope, time.UnixMicro(event.EventAtUS), event.ID),
 		Full:                full,
 		Message:             message,
 		MessageBytes:        len([]byte(event.MessageText)),

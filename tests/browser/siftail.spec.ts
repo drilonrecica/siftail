@@ -730,6 +730,132 @@ test("Live pause, pending, clear-view, filters, reconnect, focus, and safe rende
   )).toBe(1);
 });
 
+test("History and Live share one filter model across mode switches", async ({ page }) => {
+  await login(page);
+  await page.locator("#server-filter").selectOption("1");
+  await page.locator("#project-filter").selectOption("browser-project");
+  await page.locator("#application-filter").selectOption("api");
+  await expect(page).toHaveURL(/application=api/);
+  await page.getByRole("button", { name: "Errors" }).click();
+  await expect(page).toHaveURL(/levels=error%2Cfatal/);
+  await page.locator("#stream-unknown").uncheck();
+  await expect(page).toHaveURL(/streams=stdout%2Cstderr/);
+  await page.locator("#contains-filter").fill("carried");
+  await expect(page).toHaveURL(/contains=carried/);
+
+  // History → Live with the L shortcut carries scope, levels, streams, text.
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  await page.keyboard.press("l");
+  await expect(page).toHaveURL(/mode=live/);
+  const live = new URL(page.url()).searchParams;
+  expect(live.get("server")).toBe("1");
+  expect(live.get("project")).toBe("browser-project");
+  expect(live.get("application")).toBe("api");
+  expect(live.get("levels")).toBe("error,fatal");
+  expect(live.get("streams")).toBe("stdout,stderr");
+  expect(live.get("contains")).toBe("carried");
+  await expect(page.locator("#live-server-filter")).toHaveValue("1");
+  await expect(page.locator("#live-project-filter")).toHaveValue("browser-project");
+  await expect(page.locator("#live-application-filter")).toHaveValue("api");
+  await expect(page.locator("#level-info")).not.toBeChecked();
+  await expect(page.locator("#level-error")).toBeChecked();
+  await expect(page.locator("#stream-unknown")).not.toBeChecked();
+  await expect(page.locator("#live-contains-filter")).toHaveValue("carried");
+  await expect(page.locator("[data-live-status]")).toHaveText("Live");
+
+  // The Live scope filters the stream by source keys.
+  await page.locator("#live-contains-filter").fill("scoped-live");
+  await expect(page).toHaveURL(/contains=scoped-live/);
+  await expect(page.locator("[data-live-status]")).toHaveText("Live");
+  await ingestSource(["scoped-live other app"], "worker", "web", "worker-container", "worker-1");
+  await ingestLive(["scoped-live in scope"]);
+  await expect(page.locator("#live-rows .log-row")).toHaveCount(1);
+  await expect(page.locator("#live-rows .row-message")).toHaveText("scoped-live in scope");
+
+  // Live → History with the segmented control carries the edited state.
+  await page.locator(".mode-switch").getByRole("link", { name: "History" }).click();
+  await expect(page).toHaveURL(/mode=history/);
+  const history = new URL(page.url()).searchParams;
+  expect(history.get("server")).toBe("1");
+  expect(history.get("application")).toBe("api");
+  expect(history.get("levels")).toBe("error,fatal");
+  expect(history.get("streams")).toBe("stdout,stderr");
+  expect(history.get("contains")).toBe("scoped-live");
+  expect(history.get("from")).toBeTruthy();
+  await expect(page.locator("#application-filter")).toHaveValue("api");
+  await expect(page.locator("#contains-filter")).toHaveValue("scoped-live");
+  await expect(page.locator(".log-row .row-message")).toHaveText(["scoped-live in scope"]);
+
+  // L again, then a Live scope change re-renders the cascade and H re-renders the cascade.
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  await page.keyboard.press("l");
+  await expect(page).toHaveURL(/mode=live/);
+  await page.locator("#live-application-filter").selectOption("");
+  await expect(page).not.toHaveURL(/application=/);
+  await expect(page.locator("#live-project-filter")).toHaveValue("browser-project");
+  await expect(page.locator("[data-live-status]")).toHaveText("Live");
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  await page.keyboard.press("h");
+  await expect(page).toHaveURL(/mode=history/);
+  expect(new URL(page.url()).searchParams.get("project")).toBe("browser-project");
+  expect(new URL(page.url()).searchParams.has("application")).toBe(false);
+});
+
+test("Show events around this time lands on the event from History and Live", async ({
+  page,
+}) => {
+  await login(page);
+  await page.locator("#server-filter").selectOption("1");
+  await expect(page).toHaveURL(/server=1/);
+  await expect(page.locator(".log-row")).toHaveCount(200);
+
+  const row = page.locator("#history-rows > .log-row").nth(120);
+  const eventID = await row.getAttribute("data-event-id");
+  const datetime = await row.locator("time").getAttribute("datetime");
+  await row.locator(".event-toggle").click();
+  const around = row.getByRole("link", { name: "Show events around this time" });
+  await expect(around).toBeVisible();
+  await around.click();
+
+  await expect(page).toHaveURL(new RegExp(`highlight=${eventID}`));
+  const values = new URL(page.url()).searchParams;
+  const at = Date.parse(datetime ?? "");
+  expect(Date.parse(values.get("from") ?? "")).toBe(at - 60_000);
+  expect(Date.parse(values.get("to") ?? "")).toBe(at + 60_000);
+  expect(values.get("server")).toBe("1");
+  const highlighted = page.locator("#history-rows > .log-row[data-highlighted]");
+  await expect(highlighted).toHaveCount(1);
+  await expect(highlighted).toHaveAttribute("data-event-id", eventID ?? "");
+  await expect(highlighted).toHaveAttribute("aria-current", "true");
+  await expect(highlighted).toBeFocused();
+  await expect(highlighted).toBeInViewport();
+  // Events both before and after the hit are on screen.
+  const rows = page.locator("#history-rows > .log-row");
+  const index = await rows.evaluateAll(
+    (elements) => elements.findIndex((element) => element.hasAttribute("data-highlighted")),
+  );
+  expect(index).toBeGreaterThan(0);
+  expect(await rows.count()).toBeGreaterThan(index + 1);
+  await page.screenshot({
+    path: ".playwright-artifacts/sft-116-surrounding-desktop.png",
+  });
+
+  // From Live, the link opens History around the streamed event.
+  await page.goto("/logs?mode=live&server=1&application=api");
+  await expect(page.locator("[data-live-status]")).toHaveText("Live");
+  await ingestLive(["surrounding-live-hit"]);
+  const liveRow = page.locator("#live-rows .log-row").first();
+  await expect(liveRow).toContainText("surrounding-live-hit");
+  const liveID = await liveRow.getAttribute("data-event-id");
+  await liveRow.locator(".event-toggle").click();
+  await liveRow.getByRole("link", { name: "Show events around this time" }).click();
+  await expect(page).toHaveURL(new RegExp(`highlight=${liveID}`));
+  expect(new URL(page.url()).searchParams.get("application")).toBe("api");
+  const liveHit = page.locator("#history-rows > .log-row[data-highlighted]");
+  await expect(liveHit).toContainText("surrounding-live-hit");
+  await expect(liveHit).toBeFocused();
+});
+
 test("Live enforces rendered and pending caps and does not steal scroll", async ({ page }) => {
   test.setTimeout(90_000);
   await login(page);

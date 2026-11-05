@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"net/url"
 	"sort"
-	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -14,15 +13,8 @@ import (
 	webui "github.com/drilonrecica/siftail/internal/web/ui"
 )
 
-type livePageQuery struct {
-	SourceID int64
-	Levels   []logs.Level
-	Streams  []logs.Stream
-	Contains string
-}
-
 func (b *Browser) livePage(w http.ResponseWriter, r *http.Request) {
-	query, err := parseLivePageQuery(r.URL.Query())
+	filter, err := parseLivePageQuery(r.URL.Query())
 	if err != nil {
 		http.Error(w, "Check the Live filters.", http.StatusBadRequest)
 		return
@@ -31,55 +23,55 @@ func (b *Browser) livePage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Logs are temporarily unavailable.", http.StatusServiceUnavailable)
 		return
 	}
-	sources, err := b.history.LiveSources(r.Context())
+	catalog, err := b.history.Catalog(r.Context(), filter.Scope)
 	if err != nil {
 		http.Error(w, "Logs are temporarily unavailable.", http.StatusServiceUnavailable)
 		return
 	}
 	shell := b.shellBase(w, r, "live")
-	shell.Live = buildLiveView(query, sources)
+	shell.Live = buildLiveView(filter, catalog)
 	shell.Live.Zone = shell.Prefs.Timezone
 	if err := b.ui.Shell(w, http.StatusOK, shell); err != nil {
 		http.Error(w, "Logs are temporarily unavailable.", http.StatusInternalServerError)
 	}
 }
 
-func parseLivePageQuery(values url.Values) (livePageQuery, error) {
+// parseLivePageQuery reads the shared filter model (logFilter) from a Live
+// page URL. It accepts exactly the History names for scope, levels,
+// streams, and contains, so a History URL's filters open Live unchanged.
+func parseLivePageQuery(values url.Values) (logFilter, error) {
 	allowed := map[string]struct{}{
-		"mode": {}, "source": {}, "levels": {}, "streams": {}, "contains": {},
+		"mode": {}, "server": {}, "project": {}, "environment": {},
+		"application": {}, "service": {}, "levels": {}, "streams": {}, "contains": {},
 	}
 	for key, entries := range values {
 		if _, ok := allowed[key]; !ok {
-			return livePageQuery{}, fmt.Errorf("unknown Live parameter %q", key)
+			return logFilter{}, fmt.Errorf("unknown Live parameter %q", key)
 		}
 		if len(entries) != 1 {
-			return livePageQuery{}, fmt.Errorf("Live parameter %q must occur once", key)
+			return logFilter{}, fmt.Errorf("Live parameter %q must occur once", key)
 		}
 	}
 	if values.Get("mode") != "live" {
-		return livePageQuery{}, errors.New("mode must be live")
+		return logFilter{}, errors.New("mode must be live")
 	}
-	var query livePageQuery
-	if source := values.Get("source"); source != "" {
-		parsed, err := strconv.ParseInt(source, 10, 64)
-		if err != nil || parsed <= 0 {
-			return livePageQuery{}, errors.New("source must be a positive integer")
-		}
-		query.SourceID = parsed
-	}
+	var filter logFilter
 	var err error
-	if query.Levels, err = parseLivePageLevels(values.Get("levels")); err != nil {
-		return livePageQuery{}, err
+	if filter.Scope, err = logs.ParseSourceScope(values); err != nil {
+		return logFilter{}, err
 	}
-	if query.Streams, err = parseLivePageStreams(values.Get("streams")); err != nil {
-		return livePageQuery{}, err
+	if filter.Levels, err = parseLivePageLevels(values.Get("levels")); err != nil {
+		return logFilter{}, err
 	}
-	query.Contains = values.Get("contains")
-	if !utf8.ValidString(query.Contains) || len(query.Contains) > logs.MaxTextFilterBytes ||
-		strings.ContainsRune(query.Contains, 0) {
-		return livePageQuery{}, errors.New("contains is invalid")
+	if filter.Streams, err = parseLivePageStreams(values.Get("streams")); err != nil {
+		return logFilter{}, err
 	}
-	return query, nil
+	filter.Contains = values.Get("contains")
+	if !utf8.ValidString(filter.Contains) || len(filter.Contains) > logs.MaxTextFilterBytes ||
+		strings.ContainsRune(filter.Contains, 0) {
+		return logFilter{}, errors.New("contains is invalid")
+	}
+	return filter, nil
 }
 
 func parseLivePageLevels(value string) ([]logs.Level, error) {
@@ -119,61 +111,43 @@ func parseLivePageSet[T ~string](value string, order []T, name string) ([]T, err
 	return result, nil
 }
 
-func buildLiveView(query livePageQuery, sources []logs.LiveSourceOption) webui.LiveView {
-	view := webui.LiveView{
-		CanonicalURL:  livePageURL(query),
-		StreamURL:     liveStreamURL(query),
-		HistoryURL:    "/logs",
-		SourceSummary: "All sources",
-		Levels:        levelChoices(query.Levels),
-		Streams:       streamChoices(query.Streams),
-		LevelsValue:   joinLevels(query.Levels),
-		StreamsValue:  joinStreams(query.Streams),
-		Contains:      query.Contains,
+func buildLiveView(filter logFilter, catalog logs.SourceCatalog) webui.LiveView {
+	scope := filter.Scope
+	return webui.LiveView{
+		CanonicalURL: filter.liveURL(),
+		StreamURL:    liveStreamURL(filter),
+		HistoryURL:   filter.historyURL(),
+		SourceSummary: sourceSummary(logs.HistoryQuery{
+			ServerID: scope.ServerID, Project: scope.Project,
+			Environment: scope.Environment, Application: scope.Application,
+			Service: scope.Service,
+		}, catalog),
+		Servers:      serverOptions(catalog.Servers, scope.ServerID),
+		Projects:     sourceOptions(catalog.Projects, scope.Project),
+		Environments: sourceOptions(catalog.Environments, scope.Environment),
+		Applications: sourceOptions(catalog.Applications, scope.Application),
+		Services:     sourceOptions(catalog.Services, scope.Service),
+		Levels:       levelChoices(filter.Levels),
+		Streams:      streamChoices(filter.Streams),
+		LevelsValue:  joinLevels(filter.Levels),
+		StreamsValue: joinStreams(filter.Streams),
+		Contains:     filter.Contains,
 	}
-	for _, source := range sources {
-		selected := source.ID == query.SourceID
-		view.Sources = append(view.Sources, webui.SelectOption{
-			Value: strconv.FormatInt(source.ID, 10),
-			Label: source.Label, Selected: selected,
-		})
-		if selected {
-			view.SourceSummary = source.Label
-		}
-	}
-	return view
 }
 
-func livePageURL(query livePageQuery) string {
-	values := url.Values{"mode": {"live"}}
-	if query.SourceID > 0 {
-		values.Set("source", strconv.FormatInt(query.SourceID, 10))
-	}
-	if levels := joinLevels(query.Levels); levels != "" {
-		values.Set("levels", levels)
-	}
-	if streams := joinStreams(query.Streams); streams != "" {
-		values.Set("streams", streams)
-	}
-	if query.Contains != "" {
-		values.Set("contains", query.Contains)
-	}
-	return "/logs?" + values.Encode()
-}
-
-func liveStreamURL(query livePageQuery) string {
+// liveStreamURL is the SSE subscription for the filter. The stream API
+// takes repeated level and stream entries (parseLiveFilter).
+func liveStreamURL(filter logFilter) string {
 	values := url.Values{}
-	if query.SourceID > 0 {
-		values.Set("source", strconv.FormatInt(query.SourceID, 10))
-	}
-	for _, level := range query.Levels {
+	filter.Scope.Set(values)
+	for _, level := range filter.Levels {
 		values.Add("level", string(level))
 	}
-	for _, stream := range query.Streams {
+	for _, stream := range filter.Streams {
 		values.Add("stream", string(stream))
 	}
-	if query.Contains != "" {
-		values.Set("contains", query.Contains)
+	if filter.Contains != "" {
+		values.Set("contains", filter.Contains)
 	}
 	if encoded := values.Encode(); encoded != "" {
 		return "/logs/live/stream?" + encoded

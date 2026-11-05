@@ -371,7 +371,7 @@ func (b *Browser) renderHistoryExportError(
 	message string,
 ) {
 	if query.FromUS > 0 && query.ToUS > query.FromUS {
-		view, err := b.historyView(r, query, false)
+		view, err := b.historyView(r, query, 0, false)
 		if err == nil {
 			view.ExportError = message
 			shell := b.shellBase(w, r, "history")

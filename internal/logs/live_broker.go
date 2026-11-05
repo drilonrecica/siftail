@@ -12,13 +12,14 @@ import (
 )
 
 const (
-	defaultLiveSubscribers       = 16
-	defaultLiveMessages          = 256
-	defaultLiveBytes       int64 = 2 << 20
-	defaultBrokerCommands        = 256
-	defaultBrokerEvents          = 10_000
-	defaultBrokerBytes     int64 = 16 << 20
-	maxLiveFilterValues          = 256
+	defaultLiveSubscribers        = 16
+	defaultLiveMessages           = 256
+	defaultLiveBytes        int64 = 2 << 20
+	defaultBrokerCommands         = 256
+	defaultBrokerEvents           = 10_000
+	defaultBrokerBytes      int64 = 16 << 20
+	maxLiveFilterValues           = 256
+	maxLiveDeliveredSources       = 4096
 )
 
 var (
@@ -41,8 +42,13 @@ type CommittedEvent struct {
 
 // LiveFilter contains exact canonical filters. Empty fields match every
 // committed event. The broker copies and validates filters on subscription.
+//
+// Scope is the source hierarchy History filters by (DESIGN.md §8.1): it
+// matches canonical source keys, so a source that first appears while a
+// subscription is open still matches its scope.
 type LiveFilter struct {
 	SourceIDs []int64
+	Scope     SourceScope
 	Levels    []Level
 	Streams   []Stream
 	Contains  string
@@ -138,6 +144,8 @@ type subscribeResult struct {
 
 type compiledLiveFilter struct {
 	sources  map[int64]struct{}
+	scope    SourceScope
+	scoped   bool
 	levels   map[Level]struct{}
 	streams  map[Stream]struct{}
 	contains string
@@ -148,6 +156,9 @@ func (f compiledLiveFilter) matches(event CommittedEvent) bool {
 		if _, ok := f.sources[event.SourceID]; !ok {
 			return false
 		}
+	}
+	if f.scoped && !f.scope.matches(event.Event.Source) {
+		return false
 	}
 	if len(f.levels) > 0 {
 		if _, ok := f.levels[event.Event.Level]; !ok {
@@ -249,6 +260,7 @@ func (b *LiveBroker) handleCommand(subscriptions map[uint64]*LiveSubscription, c
 				if !subscription.filter.matches(event) {
 					continue
 				}
+				subscription.recordDelivered(event.SourceID)
 				if !subscription.enqueue(
 					LiveMessage{Type: LiveMessageLog, Event: event},
 					liveMessageBytes(event),
@@ -259,10 +271,8 @@ func (b *LiveBroker) handleCommand(subscriptions map[uint64]*LiveSubscription, c
 		}
 	case livePublishControl:
 		for id, subscription := range subscriptions {
-			if command.control.SourceID > 0 && len(subscription.filter.sources) > 0 {
-				if _, ok := subscription.filter.sources[command.control.SourceID]; !ok {
-					continue
-				}
+			if command.control.SourceID > 0 && !subscription.wantsSourceControl(command.control.SourceID) {
+				continue
 			}
 			if !subscription.enqueue(
 				LiveMessage{Type: LiveMessageControl, Control: command.control}, 128,
@@ -525,6 +535,11 @@ func compileLiveFilter(filter LiveFilter) (compiledLiveFilter, error) {
 		return compiledLiveFilter{}, fmt.Errorf("%w: too many values", ErrInvalidLiveFilter)
 	}
 	compiled := compiledLiveFilter{}
+	if err := filter.Scope.Validate(); err != nil {
+		return compiledLiveFilter{}, fmt.Errorf("%w: scope", ErrInvalidLiveFilter)
+	}
+	compiled.scope = filter.Scope
+	compiled.scoped = !filter.Scope.IsZero()
 	for _, sourceID := range filter.SourceIDs {
 		if sourceID <= 0 {
 			return compiledLiveFilter{}, fmt.Errorf("%w: source ID", ErrInvalidLiveFilter)
@@ -626,6 +641,12 @@ type LiveSubscription struct {
 	// A prior broker overflow must not truncate a later subscription.
 	lossEpoch uint64
 	filter    compiledLiveFilter
+	// delivered records the source IDs this scoped subscription has received
+	// events from, so a source lifecycle control reaches only subscribers
+	// that may show that source's rows. Only the broker goroutine touches
+	// it; past maxLiveDeliveredSources every control is forwarded.
+	delivered         map[int64]struct{}
+	deliveredOverflow bool
 
 	mu       sync.Mutex
 	queue    []queuedLiveMessage
@@ -752,4 +773,38 @@ func (s *LiveSubscription) signal() {
 	case s.notify <- struct{}{}:
 	default:
 	}
+}
+
+func (s *LiveSubscription) recordDelivered(sourceID int64) {
+	if !s.filter.scoped || len(s.filter.sources) > 0 || s.deliveredOverflow {
+		return
+	}
+	if _, ok := s.delivered[sourceID]; ok {
+		return
+	}
+	if len(s.delivered) >= maxLiveDeliveredSources {
+		s.deliveredOverflow = true
+		s.delivered = nil
+		return
+	}
+	if s.delivered == nil {
+		s.delivered = make(map[int64]struct{})
+	}
+	s.delivered[sourceID] = struct{}{}
+}
+
+// wantsSourceControl reports whether a lifecycle control for sourceID can
+// affect rows this subscription shows. Unfiltered subscriptions receive
+// every control; explicit source sets receive their own; scoped ones receive
+// controls for sources they have delivered.
+func (s *LiveSubscription) wantsSourceControl(sourceID int64) bool {
+	if len(s.filter.sources) > 0 {
+		_, ok := s.filter.sources[sourceID]
+		return ok
+	}
+	if !s.filter.scoped || s.deliveredOverflow {
+		return true
+	}
+	_, ok := s.delivered[sourceID]
+	return ok
 }

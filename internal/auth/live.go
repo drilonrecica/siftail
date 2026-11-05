@@ -20,10 +20,15 @@ import (
 const livePreviewBytes = 8 << 10
 
 var liveParameters = map[string]struct{}{
-	"source":   {},
-	"level":    {},
-	"stream":   {},
-	"contains": {},
+	"source":      {},
+	"server":      {},
+	"project":     {},
+	"environment": {},
+	"application": {},
+	"service":     {},
+	"level":       {},
+	"stream":      {},
+	"contains":    {},
 }
 
 type liveLogPayload struct {
@@ -220,6 +225,16 @@ func parseLiveFilter(values url.Values) (logs.LiveFilter, error) {
 		}
 	}
 	var filter logs.LiveFilter
+	for _, name := range []string{"server", "project", "environment", "application", "service"} {
+		if len(values[name]) > 1 {
+			return logs.LiveFilter{}, fmt.Errorf("%s must occur once", name)
+		}
+	}
+	scope, err := logs.ParseSourceScope(values)
+	if err != nil {
+		return logs.LiveFilter{}, err
+	}
+	filter.Scope = scope
 	if entries := values["source"]; len(entries) > 256 {
 		return logs.LiveFilter{}, errors.New("too many source filters")
 	} else {

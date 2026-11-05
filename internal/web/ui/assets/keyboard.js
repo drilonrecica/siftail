@@ -302,6 +302,19 @@
     });
   });
 
+  // "Show events around this time" opens History with one row highlighted
+  // (DESIGN.md §13.1). Land on it once: make it the list's tab stop, centre
+  // it, and focus it, so the operator reads what came before and after.
+  const landOnHighlight = () => {
+    const row = document.querySelector("#history-rows > .log-row[data-highlighted]");
+    if (!(row instanceof HTMLElement) || row.hasAttribute("data-highlight-landed")) return;
+    row.setAttribute("data-highlight-landed", "");
+    document.querySelector("[data-highlight-missing]")?.remove();
+    selectRow(row);
+    row.focus({ preventScroll: true });
+    row.scrollIntoView({ block: "center" });
+  };
+
   window.siftailKeyboard = Object.freeze({
     // register(handler): handler(event) returns true when it consumed the
     // key; the keyboard module then prevents the default. Handlers see every
@@ -314,6 +327,10 @@
     // syncRows(): re-establish the row list's tab stop after rows were
     // added, removed, or replaced.
     syncRows,
+    // landOnHighlight(): focus the highlighted History row the first time
+    // it is rendered, including after Load older reaches it.
+    landOnHighlight,
   });
   syncRows();
+  landOnHighlight();
 })();

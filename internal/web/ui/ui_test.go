@@ -246,7 +246,7 @@ func TestLiveShellRendersExplicitEscapedBoundedWorkspace(t *testing.T) {
 		HistoryURL:    "/logs",
 		Zone:          "Europe/Berlin",
 		SourceSummary: `API <unsafe>`,
-		Sources: []SelectOption{{
+		Servers: []SelectOption{{
 			Value: "1", Label: `API <unsafe>`, Selected: true,
 		}},
 		Levels:       []FilterChoice{{ID: "level-error", Value: "error", Label: "error", Checked: true}},

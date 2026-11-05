@@ -181,6 +181,9 @@ type HistoryRowView struct {
 	Source       string
 	Message      string
 	ToggleLabel  string
+	// Highlighted marks the event "Show events around this time" opened
+	// History for (DESIGN.md §13.1).
+	Highlighted bool
 }
 
 // DetailField is one labelled value. Datetime, when set, is the UTC RFC3339
@@ -209,6 +212,9 @@ type EventDetailView struct {
 	Raw                 string
 	RawBytes            int
 	RawTruncated        bool
+	// SurroundingURL opens History at the event's time ±1 minute with the
+	// current scope and this event highlighted (DESIGN.md §13.1).
+	SurroundingURL string
 }
 
 type EventErrorView struct {
@@ -232,53 +238,65 @@ type HistoryView struct {
 	// FromText and ToText render them in the display zone, Zone names it,
 	// and ShowDate widens rows to carry the day when the range spans more
 	// than one (DESIGN.md §12.2).
-	From           string
-	To             string
-	FromText       string
-	ToText         string
-	Zone           string
-	ShowDate       bool
-	RangeSummary   string
-	SourceSummary  string
-	Presets        []PresetLink
-	Servers        []SelectOption
-	Projects       []SelectOption
-	Environments   []SelectOption
-	Applications   []SelectOption
-	Services       []SelectOption
-	Containers     []SelectOption
-	Levels         []FilterChoice
-	Streams        []FilterChoice
-	LevelsValue    string
-	StreamsValue   string
-	Contains       string
-	Excludes       string
-	RequestID      string
-	Logger         string
-	HTTPMethod     string
-	HTTPStatus     string
-	ErrorType      string
-	Rows           []HistoryRowView
-	EmptyTitle     string
-	EmptyMessage   string
-	EmptyActions   []ActionLink
-	LoadedCount    int
-	LoadedLabel    string
-	HasMore        bool
-	NextURL        string
-	PrevURL        string
-	GoLiveURL      string
-	Error          string
-	ErrorRequestID string
-	Announcement   string
-	ExportFilters  []DetailField
-	ExportError    string
+	From          string
+	To            string
+	FromText      string
+	ToText        string
+	Zone          string
+	ShowDate      bool
+	RangeSummary  string
+	SourceSummary string
+	Presets       []PresetLink
+	Servers       []SelectOption
+	Projects      []SelectOption
+	Environments  []SelectOption
+	Applications  []SelectOption
+	Services      []SelectOption
+	Containers    []SelectOption
+	Levels        []FilterChoice
+	Streams       []FilterChoice
+	LevelsValue   string
+	StreamsValue  string
+	Contains      string
+	Excludes      string
+	RequestID     string
+	Logger        string
+	HTTPMethod    string
+	HTTPStatus    string
+	ErrorType     string
+	Rows          []HistoryRowView
+	EmptyTitle    string
+	EmptyMessage  string
+	EmptyActions  []ActionLink
+	LoadedCount   int
+	LoadedLabel   string
+	HasMore       bool
+	NextURL       string
+	PrevURL       string
+	GoLiveURL     string
+	// LiveURL is Live with the shared filter model (DESIGN.md §8.1).
+	LiveURL string
+	// HighlightMissing explains where a highlighted event is when it is not
+	// among the loaded rows; empty when it is, or when none is highlighted.
+	HighlightMissing string
+	Error            string
+	ErrorRequestID   string
+	Announcement     string
+	ExportFilters    []DetailField
+	ExportError      string
 }
 
 func (v HistoryView) ModeSwitch() ModeSwitchView {
 	return ModeSwitchView{
-		HistoryURL: v.CanonicalURL, LiveURL: "/logs?mode=live", Active: "history",
+		HistoryURL: v.CanonicalURL, LiveURL: v.liveURL(), Active: "history",
 	}
+}
+
+func (v HistoryView) liveURL() string {
+	if v.LiveURL == "" {
+		return "/logs?mode=live"
+	}
+	return v.LiveURL
 }
 
 func (v HistoryView) EmptyState() EmptyStateView {
@@ -295,12 +313,17 @@ type LiveView struct {
 	StreamURL     string
 	HistoryURL    string
 	SourceSummary string
-	Sources       []SelectOption
-	Levels        []FilterChoice
-	Streams       []FilterChoice
-	LevelsValue   string
-	StreamsValue  string
-	Contains      string
+	// The source cascade is the same as History's (DESIGN.md §8.1, §9.1).
+	Servers      []SelectOption
+	Projects     []SelectOption
+	Environments []SelectOption
+	Applications []SelectOption
+	Services     []SelectOption
+	Levels       []FilterChoice
+	Streams      []FilterChoice
+	LevelsValue  string
+	StreamsValue string
+	Contains     string
 }
 
 func (v LiveView) ModeSwitch() ModeSwitchView {

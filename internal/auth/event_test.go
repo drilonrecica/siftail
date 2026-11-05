@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/drilonrecica/siftail/internal/logs"
 )
 
 func TestEventDetailRequiresAuthenticationAndEscapesCompleteMetadata(t *testing.T) {
@@ -157,5 +159,20 @@ func TestEventDetailDatabaseFailureIsPayloadFree(t *testing.T) {
 		!strings.Contains(response.Body.String(), "database is temporarily unavailable") ||
 		strings.Contains(strings.ToLower(response.Body.String()), "sqlite") {
 		t.Fatalf("database failure = %d %q", response.Code, response.Body.String())
+	}
+}
+
+func TestEventDetailFullURLKeepsTheScope(t *testing.T) {
+	view, err := buildEventDetailView(logs.HistoryEvent{ID: 5, EventAtUS: 1},
+		false, logs.SourceScope{ServerID: 2, Service: "web"}, utcDisplayZone)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if view.FullURL != "/logs/events/5?full=1&server=2&service=web" {
+		t.Fatalf("FullURL = %q", view.FullURL)
+	}
+	if !strings.Contains(view.SurroundingURL, "highlight=5") ||
+		!strings.Contains(view.SurroundingURL, "service=web") {
+		t.Fatalf("SurroundingURL = %q", view.SurroundingURL)
 	}
 }

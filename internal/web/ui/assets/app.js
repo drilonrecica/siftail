@@ -471,6 +471,7 @@
     enhanceRangeInputs(event.target);
     updateHistoryCount();
     window.siftailKeyboard?.syncRows();
+    window.siftailKeyboard?.landOnHighlight();
     if (event.target.matches?.(".event-detail-slot") &&
       event.target.firstElementChild) {
       const row = event.target.closest(".log-row");

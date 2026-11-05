@@ -161,6 +161,7 @@
       </div>
     </form>
   </dialog>
+  {{if .HighlightMissing}}<p class="highlight-notice" data-highlight-missing>{{.HighlightMissing}}</p>{{end}}
   {{template "history-tail" .}}
   {{if not .Rows}}{{template "empty-state.html" .EmptyState}}{{end}}
   {{/* One tab stop: keyboard.js keeps a roving tabindex over the rows
@@ -189,7 +190,7 @@
 {{end}}
 
 {{define "history-row"}}
-<div class="log-row level-{{.Level}}" role="listitem" data-event-id="{{.ID}}" tabindex="-1">
+<div class="log-row level-{{.Level}}" role="listitem" data-event-id="{{.ID}}" tabindex="-1"{{if .Highlighted}} data-highlighted aria-current="true"{{end}}>
   <button class="event-toggle" type="button" tabindex="-1" aria-label="{{.ToggleLabel}}"
           aria-expanded="false" aria-controls="{{.DetailID}}"
           hx-get="{{.DetailURL}}" hx-target="#{{.DetailID}}" hx-swap="innerHTML"

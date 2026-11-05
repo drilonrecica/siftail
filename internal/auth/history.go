@@ -21,18 +21,19 @@ func (b *Browser) historyPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	values := cloneURLValues(r.URL.Query())
+	highlight, highlightErr := takeHighlight(values)
 	query, err := logs.ParseHistoryQuery(values, b.now())
-	if err != nil {
+	if err != nil || highlightErr != nil {
 		b.renderHistoryShellError(w, r, http.StatusBadRequest,
 			"Check the time range and filters.", "")
 		return
 	}
 	if historyRangeNeedsResolution(values) {
 		query.Cursor = ""
-		http.Redirect(w, r, historyURL(query), http.StatusSeeOther)
+		http.Redirect(w, r, withHighlight(historyURL(query), highlight), http.StatusSeeOther)
 		return
 	}
-	view, err := b.historyView(r, query, false)
+	view, err := b.historyView(r, query, highlight, false)
 	if err != nil {
 		status, message, requestID := historyHTTPError(r, err)
 		b.renderHistoryShellError(w, r, status, message, requestID)
@@ -67,8 +68,9 @@ func (b *Browser) historyRows(w http.ResponseWriter, r *http.Request) {
 	prependPage := hasPrepend
 	values.Del("append")
 	values.Del("prepend")
+	highlight, highlightErr := takeHighlight(values)
 	query, err := logs.ParseHistoryQuery(values, b.now())
-	if err != nil || (appendPage && query.Cursor == "") ||
+	if err != nil || highlightErr != nil || (appendPage && query.Cursor == "") ||
 		(prependPage && (query.Cursor == "" || query.Direction != logs.DirectionNewer)) {
 		view := webui.HistoryView{
 			CanonicalURL: "/logs",
@@ -78,7 +80,7 @@ func (b *Browser) historyRows(w http.ResponseWriter, r *http.Request) {
 		_ = b.ui.HistoryError(w, http.StatusBadRequest, view)
 		return
 	}
-	view, err := b.historyView(r, query, appendPage || prependPage)
+	view, err := b.historyView(r, query, highlight, appendPage || prependPage)
 	if err != nil {
 		status, message, requestID := historyHTTPError(r, err)
 		view = webui.HistoryView{
@@ -116,6 +118,7 @@ func historyErrorHeaders(w http.ResponseWriter) {
 func (b *Browser) historyView(
 	r *http.Request,
 	query logs.HistoryQuery,
+	highlight int64,
 	appendPage bool,
 ) (webui.HistoryView, error) {
 	if b.history == nil {
@@ -133,7 +136,7 @@ func (b *Browser) historyView(
 	if err != nil {
 		return webui.HistoryView{}, err
 	}
-	view := buildHistoryView(query, page, catalog, b.now(), requestZone(r))
+	view := buildHistoryView(query, page, catalog, b.now(), requestZone(r), highlight)
 	if appendPage {
 		noun := "events"
 		if len(view.Rows) == 1 {
@@ -158,12 +161,15 @@ func buildHistoryView(
 	catalog logs.SourceCatalog,
 	now time.Time,
 	zone displayZone,
+	highlight int64,
 ) webui.HistoryView {
 	from := time.UnixMicro(query.FromUS).UTC()
 	to := time.UnixMicro(query.ToUS).UTC()
 	showDate := to.Sub(from) > 24*time.Hour
+	filter := historyLogFilter(query)
 	view := webui.HistoryView{
-		CanonicalURL:  historyURL(query),
+		CanonicalURL:  withHighlight(historyURL(query), highlight),
+		LiveURL:       filter.liveURL(),
 		ExportURL:     "/logs/export?" + query.CanonicalQuery(),
 		From:          datetime(from),
 		To:            datetime(to),
@@ -243,6 +249,15 @@ func buildHistoryView(
 		}
 	}
 
+	// Event detail carries the current scope so its "Show events around this
+	// time" link keeps it (DESIGN.md §13.1).
+	detailQuery := url.Values{}
+	query.Scope().Set(detailQuery)
+	detailSuffix := ""
+	if encoded := detailQuery.Encode(); encoded != "" {
+		detailSuffix = "?" + encoded
+	}
+	highlightFound := false
 	view.Rows = make([]webui.HistoryRowView, len(page.Events))
 	for index, event := range page.Events {
 		eventTime := time.UnixMicro(event.EventAtUS)
@@ -257,7 +272,7 @@ func buildHistoryView(
 		view.Rows[index] = webui.HistoryRowView{
 			ID:           event.ID,
 			DetailID:     fmt.Sprintf("event-detail-%d", event.ID),
-			DetailURL:    fmt.Sprintf("/logs/events/%d", event.ID),
+			DetailURL:    fmt.Sprintf("/logs/events/%d", event.ID) + detailSuffix,
 			TimestampUTC: datetime(eventTime),
 			Timestamp:    zone.row(eventTime, showDate),
 			Level:        string(event.Level),
@@ -265,14 +280,16 @@ func buildHistoryView(
 			Source:       source,
 			Message:      message,
 			ToggleLabel:  webui.RowToggleLabel(string(event.Level), source, message),
+			Highlighted:  highlight > 0 && event.ID == highlight,
 		}
+		highlightFound = highlightFound || view.Rows[index].Highlighted
 	}
 	if page.HasMore && query.Direction == logs.DirectionOlder {
 		next := query
 		next.Cursor = page.NextCursor
 		values := next.CanonicalValues(true)
 		values.Set("append", "1")
-		view.NextURL = "/logs/rows?" + values.Encode()
+		view.NextURL = withHighlight("/logs/rows?"+values.Encode(), highlight)
 	}
 	// The tail line's Load newer control (DESIGN.md §12.6). A newer-direction
 	// page continues its own traversal while more rows exist, then keeps
@@ -292,11 +309,18 @@ func buildHistoryView(
 		newer.Cursor = newerCursor
 		values := newer.CanonicalValues(true)
 		values.Set("prepend", "1")
-		view.PrevURL = "/logs/rows?" + values.Encode()
+		view.PrevURL = withHighlight("/logs/rows?"+values.Encode(), highlight)
 	}
 	// Offer the Go live jump when the queried range reaches the present.
 	if time.UnixMicro(query.ToUS).After(now.Add(-5 * time.Minute)) {
-		view.GoLiveURL = "/logs?mode=live"
+		view.GoLiveURL = filter.liveURL()
+	}
+	if highlight > 0 && !highlightFound {
+		if page.HasMore && query.Direction == logs.DirectionOlder {
+			view.HighlightMissing = "The highlighted event is further down. Load older events to reach it."
+		} else {
+			view.HighlightMissing = "The highlighted event is not in these results."
+		}
 	}
 	return view
 }
