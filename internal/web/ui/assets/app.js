@@ -133,6 +133,32 @@
     { capture: true },
   );
 
+  // Collapses a row's details. Focus stays on the row when the row itself
+  // collapsed them (Enter on the selected row); otherwise it returns to the
+  // row's toggle (DESIGN.md §13.6).
+  const collapseDetails = (toggle) => {
+    const slot = document.getElementById(toggle.getAttribute("aria-controls") || "");
+    slot?.replaceChildren();
+    toggle.setAttribute("aria-expanded", "false");
+    toggle.textContent = "›";
+    const row = toggle.closest(".log-row");
+    if (document.activeElement !== row) toggle.focus({ preventScroll: true });
+  };
+
+  // A click on an expanded toggle (the chevron, or Enter on the row, which
+  // clicks it) collapses. This runs in the capture phase so the toggle's own
+  // htmx listener never sees the click: otherwise htmx would fetch the detail
+  // again and re-expand the row after it collapsed (audit UX-03).
+  document.addEventListener("click", (event) => {
+    const toggle = event.target instanceof Element
+      ? event.target.closest(".event-toggle[aria-expanded='true']")
+      : null;
+    if (!toggle) return;
+    event.preventDefault();
+    event.stopPropagation();
+    collapseDetails(toggle);
+  }, { capture: true });
+
   document.addEventListener("click", (event) => {
     const openExport = event.target.closest("[data-open-export]");
     if (openExport) {
@@ -154,14 +180,11 @@
     }
     const collapse = event.target.closest("[data-collapse-detail]");
     if (collapse) {
-      const slot = collapse.closest(".event-detail-slot");
-      const row = slot?.closest(".log-row");
-      const toggle = row?.querySelector(".event-toggle");
-      slot?.replaceChildren();
+      const toggle = collapse.closest(".log-row")?.querySelector(".event-toggle");
       if (toggle) {
-        toggle.setAttribute("aria-expanded", "false");
-        toggle.textContent = "›";
-        toggle.focus({ preventScroll: true });
+        collapseDetails(toggle);
+      } else {
+        collapse.closest(".event-detail-slot")?.replaceChildren();
       }
       return;
     }
@@ -185,17 +208,6 @@
       }).catch(() => {
         copy.textContent = "Copy failed";
       });
-      return;
-    }
-    const expandedToggle = event.target.closest(".event-toggle[aria-expanded='true']");
-    if (expandedToggle) {
-      event.preventDefault();
-      event.stopPropagation();
-      const slot = document.getElementById(expandedToggle.getAttribute("aria-controls"));
-      slot?.replaceChildren();
-      expandedToggle.setAttribute("aria-expanded", "false");
-      expandedToggle.textContent = "›";
-      expandedToggle.focus({ preventScroll: true });
       return;
     }
     const rangeButton = event.target.closest("[data-focus-range]");
@@ -369,7 +381,9 @@
     prepareResponsiveHistory(event.target);
     enhanceRangeInputs(event.target);
     updateHistoryCount();
-    if (event.target.matches?.(".event-detail-slot")) {
+    window.siftailKeyboard?.syncRows();
+    if (event.target.matches?.(".event-detail-slot") &&
+      event.target.firstElementChild) {
       const row = event.target.closest(".log-row");
       const toggle = row?.querySelector(".event-toggle");
       if (toggle) {

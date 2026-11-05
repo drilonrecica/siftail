@@ -159,13 +159,10 @@
     </form>
   </dialog>
   {{template "history-tail" .}}
-  <div id="history-rows" class="log-list" tabindex="-1">
-    {{if .Rows}}
-      {{range .Rows}}{{template "history-row" .}}{{end}}
-    {{else}}
-      {{template "empty-state.html" .EmptyState}}
-    {{end}}
-  </div>
+  {{if not .Rows}}{{template "empty-state.html" .EmptyState}}{{end}}
+  {{/* One tab stop: keyboard.js keeps a roving tabindex over the rows
+       (DESIGN.md §32.3). Only rows are children of the list. */}}
+  <div id="history-rows" class="log-list" role="list" aria-label="History log events">{{range .Rows}}{{template "history-row" .}}{{end}}</div>
   {{template "history-pagination" .}}
   <p id="history-update-status" class="visually-hidden" role="status" aria-live="polite"></p>
   {{end}}
@@ -186,8 +183,8 @@
 {{end}}
 
 {{define "history-row"}}
-<article class="log-row level-{{.Level}}" data-event-id="{{.ID}}" tabindex="-1">
-  <button class="event-toggle" type="button" aria-label="Show details for event {{.ID}}"
+<div class="log-row level-{{.Level}}" role="listitem" data-event-id="{{.ID}}" tabindex="-1">
+  <button class="event-toggle" type="button" tabindex="-1" aria-label="{{.ToggleLabel}}"
           aria-expanded="false" aria-controls="{{.DetailID}}"
           hx-get="{{.DetailURL}}" hx-target="#{{.DetailID}}" hx-swap="innerHTML"
           hx-disabled-elt="this">›</button>
@@ -197,7 +194,7 @@
   <span class="row-message">{{.Message}}</span>
   <span class="row-stream">{{.Stream}}</span>
   <div id="{{.DetailID}}" class="event-detail-slot"></div>
-</article>
+</div>
 {{end}}
 
 {{define "history-pagination"}}

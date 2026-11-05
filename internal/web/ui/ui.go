@@ -176,6 +176,7 @@ type HistoryRowView struct {
 	Stream       string
 	Source       string
 	Message      string
+	ToggleLabel  string
 }
 
 type DetailField struct {
@@ -542,6 +543,32 @@ func SeverityCode(level string) string {
 		return code
 	}
 	return "UNK"
+}
+
+// rowToggleMessageRunes bounds the message prefix in a row's detail-toggle
+// name; live.js uses the same bound.
+const rowToggleMessageRunes = 60
+
+// RowToggleLabel names a log row's detail toggle from its content: severity
+// code, source, and the first line of the message preview, never the event
+// ID (DESIGN.md §32.3). live.js builds the same label for browser rows.
+func RowToggleLabel(level, source, message string) string {
+	prefix := message
+	cut := false
+	if line, _, found := strings.Cut(prefix, "\n"); found {
+		prefix, cut = line, true
+	}
+	prefix = strings.TrimSpace(prefix)
+	if runes := []rune(prefix); len(runes) > rowToggleMessageRunes {
+		prefix, cut = strings.TrimSpace(string(runes[:rowToggleMessageRunes])), true
+	}
+	if cut && !strings.HasSuffix(prefix, "…") {
+		prefix += "…"
+	}
+	if prefix == "" {
+		prefix = "empty message"
+	}
+	return "Details: " + SeverityCode(level) + " " + source + ", " + prefix
 }
 
 // PaginationView renders the shared bidirectional pagination component.

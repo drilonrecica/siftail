@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/sha512"
 	"encoding/hex"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -415,6 +416,7 @@ func TestHistoryFragmentsRenderFocusedEscapedState(t *testing.T) {
 			TimestampUTC: "2026-07-28T00:30:00Z",
 			Timestamp:    "00:30:00.000 UTC", Level: "error", Stream: "stderr",
 			Source: `API <unsafe>`, Message: `<img src=x onerror=alert(1)>`,
+			ToggleLabel: RowToggleLabel("error", `API <unsafe>`, `<img src=x onerror=alert(1)>`),
 		}},
 		LoadedCount: 1,
 		HasMore:     true,
@@ -436,6 +438,9 @@ func TestHistoryFragmentsRenderFocusedEscapedState(t *testing.T) {
 		`hx-disabled-elt="this"`,
 		`aria-controls="event-detail-7"`,
 		`hx-get="/logs/events/7"`,
+		`id="history-rows" class="log-list" role="list" aria-label="History log events"`,
+		`class="log-row level-error" role="listitem" data-event-id="7" tabindex="-1"`,
+		`tabindex="-1" aria-label="Details: ERR API &lt;unsafe&gt;, &lt;img src=x onerror=alert(1)&gt;"`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("History fragment missing %q", want)
@@ -443,6 +448,9 @@ func TestHistoryFragmentsRenderFocusedEscapedState(t *testing.T) {
 	}
 	if strings.Contains(body, `<img src=x`) || strings.Contains(body, `<script>alert`) {
 		t.Fatal("History fragment emitted unescaped event/filter data")
+	}
+	if strings.Contains(body, "for event 7") || strings.Contains(body, "<article") {
+		t.Fatal("History rows must be listitems with content-named toggles")
 	}
 
 	view.Announcement = "1 additional event loaded."
@@ -710,5 +718,45 @@ func TestLiveSeverityCodesMirrorGoMap(t *testing.T) {
 	}
 	if !strings.Contains(script, "severityCodes[level]") {
 		t.Error("live.js does not render severity through the shared code map")
+	}
+}
+
+func TestRowToggleLabelNamesRowsFromContent(t *testing.T) {
+	long := strings.Repeat("é", 70)
+	for _, test := range []struct {
+		level, source, message, want string
+	}{
+		{"error", "api/web", "Database connection failed", "Details: ERR api/web, Database connection failed"},
+		{"warn", "api/web", "  first line\nsecond line", "Details: WRN api/web, first line…"},
+		{"fatal", "worker", long, "Details: FTL worker, " + strings.Repeat("é", 60) + "…"},
+		{"bogus", "worker", "", "Details: UNK worker, empty message"},
+		{"info", "api/web", "already cut…", "Details: INF api/web, already cut…"},
+	} {
+		if got := RowToggleLabel(test.level, test.source, test.message); got != test.want {
+			t.Errorf("RowToggleLabel(%q, %q, %q) = %q, want %q",
+				test.level, test.source, test.message, got, test.want)
+		}
+	}
+}
+
+func TestLiveRowsMirrorHistoryRowSemantics(t *testing.T) {
+	liveAsset, err := files.ReadFile("assets/live.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(liveAsset)
+	for _, want := range []string{
+		fmt.Sprintf("const toggleMessageRunes = %d;", rowToggleMessageRunes),
+		`row.setAttribute("role", "listitem");`,
+		"toggle.tabIndex = -1;",
+		"toggleLabel(code, sourceText, messageText)",
+		"return `Details: ${code} ${source}, ${prefix}`;",
+	} {
+		if !strings.Contains(script, want) {
+			t.Errorf("live.js row rendering missing %q", want)
+		}
+	}
+	if strings.Contains(script, "for event ${id}") {
+		t.Error("live.js names detail toggles by event ID")
 	}
 }

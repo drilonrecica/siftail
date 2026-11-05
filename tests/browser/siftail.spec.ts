@@ -285,7 +285,7 @@ test("inline details remain hostile text and preserve focus and clipboard conten
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
   await login(page);
   const hostileRow = page.locator(".log-row").filter({ hasText: "needle-hostile" });
-  const toggle = hostileRow.getByRole("button", { name: /Show details/ });
+  const toggle = hostileRow.getByRole("button", { name: /^Details: \w{3} .*needle-hostile/ });
   await toggle.focus();
   await toggle.press("Enter");
   const detail = hostileRow.locator(".event-detail");
@@ -305,6 +305,207 @@ test("inline details remain hostile text and preserve focus and clipboard conten
   await detail.getByRole("button", { name: "Collapse details" }).click();
   await expect(toggle).toBeFocused();
   await expect(toggle).toHaveAttribute("aria-expanded", "false");
+});
+
+// Counts detail fetches so a collapse can be shown not to re-request (UX-03).
+function countDetailRequests(page: Page): () => number {
+  let count = 0;
+  page.on("request", (request) => {
+    if (/\/logs\/events\/\d+/.test(new URL(request.url()).pathname)) count += 1;
+  });
+  return () => count;
+}
+
+const severityCode = "(TRC|DBG|INF|WRN|ERR|FTL|UNK)";
+
+test("History rows are one roving tab stop with content-named toggles and collapse", async ({
+  page,
+}) => {
+  await login(page);
+  const list = page.getByRole("list", { name: "History log events" });
+  const rows = list.getByRole("listitem");
+  await expect(rows).toHaveCount(200);
+  await expect(list).toMatchAriaSnapshot(`
+    - list "History log events":
+      - listitem:
+        - 'button /^Details: ${severityCode} \\S+, .+/ [expanded=false]'
+  `);
+
+  // Toggles are named from content, never from the event ID, and none is a
+  // tab stop of its own.
+  const labels = await list.locator(".event-toggle").evaluateAll((toggles) =>
+    toggles.map((toggle) => ({
+      label: toggle.getAttribute("aria-label") ?? "",
+      id: toggle.closest(".log-row")?.getAttribute("data-event-id") ?? "",
+      tabIndex: (toggle as HTMLElement).tabIndex,
+    })));
+  for (const { label, id, tabIndex } of labels) {
+    expect(label).toMatch(new RegExp(`^Details: ${severityCode} \\S+, .+`));
+    expect(label).not.toContain(`event ${id}`);
+    expect(tabIndex).toBe(-1);
+  }
+
+  // One tab stop: the newest (first) row. Tab enters it, the next Tab leaves
+  // the list for Load older.
+  await expect(list.locator('.log-row[tabindex="0"]')).toHaveCount(1);
+  await expect(rows.first()).toHaveAttribute("tabindex", "0");
+  await page.locator("[data-open-export]").focus();
+  for (let press = 0; press < 5; press += 1) {
+    await page.keyboard.press("Tab");
+    if (await rows.first().evaluate((row) => row === document.activeElement)) break;
+  }
+  await expect(rows.first()).toBeFocused();
+  await expect(rows.first()).toHaveAttribute("aria-label", /^Row 1 of 200: /);
+  await page.keyboard.press("Tab");
+  await expect(page.locator("#load-older")).toBeFocused();
+
+  // Arrows and J/K move the selection and announce the position.
+  await page.keyboard.press("Shift+Tab");
+  await expect(rows.first()).toBeFocused();
+  await page.keyboard.press("ArrowDown");
+  await expect(rows.nth(1)).toBeFocused();
+  await expect(rows.nth(1)).toHaveAttribute("aria-label", /^Row 2 of 200: \w{3}, /);
+  await expect(rows.first()).not.toHaveAttribute("aria-label", /.*/);
+  await page.keyboard.press("j");
+  await expect(rows.nth(2)).toHaveAttribute("aria-label", /^Row 3 of 200: /);
+  await page.keyboard.press("ArrowUp");
+  await expect(rows.nth(1)).toBeFocused();
+  await expect(list.locator('.log-row[tabindex="0"]')).toHaveCount(1);
+
+  // Leaving and re-entering the list returns to the selected row.
+  await page.keyboard.press("Tab");
+  await page.keyboard.press("Shift+Tab");
+  await expect(rows.nth(1)).toBeFocused();
+
+  // Enter on the selected row expands; Enter on the expanded row collapses
+  // without fetching again, and the row stays collapsed.
+  const detailRequests = countDetailRequests(page);
+  const row = rows.nth(1);
+  const toggle = row.locator(".event-toggle");
+  await page.keyboard.press("Enter");
+  await expect(row.locator(".event-detail")).toBeFocused();
+  await expect(toggle).toHaveAttribute("aria-expanded", "true");
+  expect(detailRequests()).toBe(1);
+  await row.focus();
+  await page.keyboard.press("Enter");
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  await expect(row.locator(".event-detail")).toHaveCount(0);
+  await expect(row).toBeFocused();
+  await page.waitForLoadState("networkidle");
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  expect(detailRequests()).toBe(1);
+
+  // Space on the selected row toggles too.
+  await page.keyboard.press("Space");
+  await expect(row.locator(".event-detail")).toBeVisible();
+  await row.focus();
+  await page.keyboard.press("Space");
+  await expect(row.locator(".event-detail")).toHaveCount(0);
+
+  // The chevron: click expands, click on the expanded chevron collapses.
+  const before = detailRequests();
+  await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-expanded", "true");
+  await expect(row.locator(".event-detail")).toBeVisible();
+  await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  await expect(row.locator(".event-detail")).toHaveCount(0);
+  await expect(toggle).toBeFocused();
+  await page.waitForLoadState("networkidle");
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  expect(detailRequests()).toBe(before + 1);
+
+  // Esc clears the selection: the tab stop returns to the newest row.
+  await row.focus();
+  await page.keyboard.press("Escape");
+  await expect(rows.first()).toHaveAttribute("tabindex", "0");
+  await expect(row).toHaveAttribute("tabindex", "-1");
+
+  // The list is a widget, not a shortcut: arrows and Enter keep working with
+  // single-key shortcuts off.
+  await setShortcuts(page, "off");
+  await rows.first().focus();
+  await page.keyboard.press("ArrowDown");
+  await expect(rows.nth(1)).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(rows.nth(1).locator(".event-detail")).toBeVisible();
+
+  // axe at the top of the page, with a row expanded: scrolled down, the
+  // sticky header partially covers the filter links and axe counts that as
+  // a target-size failure.
+  await page.evaluate(() => window.scrollTo(0, 0));
+  const results = await new AxeBuilder({ page })
+    .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"])
+    .analyze();
+  expect(results.violations.map((violation) => violation.id)).toEqual([]);
+});
+
+test("Live rows keep the roving tab stop on the newest or selected row and collapse", async ({
+  page,
+}) => {
+  await login(page);
+  await page.locator(".mode-switch").getByRole("link", { name: "Live" }).click();
+  await expect(page.locator("[data-live-status]")).toHaveText("Live");
+  const list = page.getByRole("list", { name: "Live log events" });
+  await expect(page.locator("[data-live-empty]")).toBeVisible();
+
+  await ingestLive(["live-roving-0", "live-roving-1\nsecond line", "live-roving-2"]);
+  const rows = list.getByRole("listitem");
+  await expect(rows).toHaveCount(3);
+  await expect(page.locator("[data-live-empty]")).toBeHidden();
+  await expect(list).toMatchAriaSnapshot(`
+    - list "Live log events":
+      - listitem:
+        - 'button "Details: ERR api/web, live-roving-0" [expanded=false]'
+      - listitem:
+        - 'button "Details: INF api/web, live-roving-1…" [expanded=false]'
+      - listitem:
+        - 'button "Details: INF api/web, live-roving-2" [expanded=false]'
+  `);
+
+  // The newest row (the last, nearest the tail line) is the tab stop.
+  await expect(list.locator('.log-row[tabindex="0"]')).toHaveCount(1);
+  await expect(rows.last()).toHaveAttribute("tabindex", "0");
+  await ingestLive(["live-roving-3"]);
+  await expect(rows).toHaveCount(4);
+  await expect(rows.last()).toHaveAttribute("tabindex", "0");
+  await expect(list.locator('.log-row[tabindex="0"]')).toHaveCount(1);
+
+  // A selected row keeps the tab stop while new events arrive.
+  await rows.last().focus();
+  await expect(rows.last()).toHaveAttribute("aria-label", /^Row 4 of 4: ERR, api\/web, live-roving-3/);
+  await page.keyboard.press("ArrowUp");
+  await expect(rows.nth(2)).toBeFocused();
+  await expect(rows.nth(2)).toHaveAttribute("aria-label", /^Row 3 of 4: /);
+  await ingestLive(["live-roving-4"]);
+  await expect(rows).toHaveCount(5);
+  await expect(rows.nth(2)).toHaveAttribute("tabindex", "0");
+  await expect(rows.last()).toHaveAttribute("tabindex", "-1");
+
+  // Enter in both states, then the chevron in both states.
+  const detailRequests = countDetailRequests(page);
+  const row = rows.nth(2);
+  const toggle = row.locator(".event-toggle");
+  await row.focus();
+  await page.keyboard.press("Enter");
+  await expect(toggle).toHaveAttribute("aria-expanded", "true");
+  await row.focus();
+  await page.keyboard.press("Enter");
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  await expect(row.locator(".event-detail")).toHaveCount(0);
+  await toggle.click();
+  await expect(row.locator(".event-detail")).toBeVisible();
+  await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  await expect(row.locator(".event-detail")).toHaveCount(0);
+  await page.waitForTimeout(300);
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  expect(detailRequests()).toBe(2);
+
+  // Clear view empties the list and brings the empty state back.
+  await page.getByRole("button", { name: "Clear view" }).click();
+  await expect(rows).toHaveCount(0);
+  await expect(page.locator("[data-live-empty]")).toBeVisible();
 });
 
 test("Live pause, pending, clear-view, filters, reconnect, focus, and safe rendering", async ({

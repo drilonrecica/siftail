@@ -261,6 +261,7 @@ func buildHistoryView(
 			Stream:       string(event.Stream),
 			Source:       source,
 			Message:      message,
+			ToggleLabel:  webui.RowToggleLabel(string(event.Level), source, message),
 		}
 	}
 	if page.HasMore && query.Direction == logs.DirectionOlder {

@@ -733,7 +733,10 @@ provide "Show complete stored content" within safe limits; always show size.
 ### 13.6 Inline expansion behavior
 
 Multiple rows may remain expanded; expansion state is browser-only; loading
-details keeps row context; collapse returns focus to the row's toggle.
+details keeps row context. Clicking the expanded chevron, `Enter` or `Space`
+on the expanded selected row, or **Collapse details** collapses it without a
+new request. Collapsing from the row keeps focus on the row; collapsing from
+the chevron or the detail panel returns focus to the row's toggle.
 
 ---
 
@@ -1372,10 +1375,24 @@ at the selected row (or the newest), `J`/`K` and the arrow keys move the
 selection and announce its position ("row 12 of 200"), `Enter` or `Space`
 on the selected row toggles its details, and Tab leaves the list. Detail
 toggles are named from content (severity, source, message prefix), never
-from event IDs. Row navigation works identically in History and Live and
-never traps focus inside the list. `Space` is never intercepted on a
-`button`, `a`, `summary`, `[role=button]`, or form control, so native
-activation and page scrolling keep working. `scroll-padding-top` equals the
+from event IDs.
+
+The list is `role="list"` and owns only rows (`role="listitem"`); its empty
+state sits beside it. Exactly one row has `tabindex="0"`: the row the
+operator last focused, else the newest (the first row in History, the last
+in Live, so it follows new Live events until a row is selected). Every other
+row and every detail toggle has `tabindex="-1"`. `Esc` on a row clears the
+selection and returns the tab stop to the newest row. The focused row's
+accessible name is its position and content ("Row 12 of 200: ERR, api/web,
+Database connection failed, 20:41:07.283 UTC, stderr"), set only while it
+has focus because positions change as rows load and trim. The toggle's name
+is `Details: <code> <source>, <first line of the message, at most 60
+characters>`; the server and the Live module build the same string.
+
+Row navigation works identically in History and Live and never traps focus
+inside the list. `Space` is never intercepted on a `button`, `a`, `summary`,
+`[role=button]`, or form control, so native activation and page scrolling
+keep working. `scroll-padding-top` equals the
 sticky header height so a selected row is never hidden under it.
 
 ### 32.4 Command palette
@@ -1414,7 +1431,10 @@ The **Keyboard shortcuts** preference (§19.5; On by default) satisfies WCAG
 2.1.4. When it is Off, every printable single-key shortcut is inert: `F`,
 `H`, `L`, `J`, `K`, `G`, `Space`, and `?`. `Esc`, `Ctrl/Cmd+K`, and native
 element activation (`Enter`/`Space` on a focused control) are unaffected.
-The keyboard module reads `data-shortcuts` on `<html>`; the palette module
+The row list's own keys (`↑`/`↓` on a row or its toggle, `Enter`/`Space` on
+a focused row, §32.3) are widget keys, not single-key shortcuts, and work
+when the preference is Off. The keyboard module reads `data-shortcuts` on
+`<html>`; the palette module
 registers through the keyboard module, which is the only key-event listener
 (§39).
 

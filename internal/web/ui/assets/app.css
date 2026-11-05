@@ -1097,6 +1097,12 @@ code {
   min-height: 12rem;
 }
 
+/* The empty state sits beside the list (a role=list owns only rows), so an
+   empty list takes no space. */
+.log-list:empty {
+  min-height: 0;
+}
+
 .log-row {
   display: grid;
   grid-template-columns: 2rem 8.5rem 3.5rem minmax(8rem, 0.8fr) minmax(12rem, 3fr) 4.5rem;

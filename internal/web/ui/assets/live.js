@@ -18,6 +18,7 @@
   const clearButton = workspace.querySelector("[data-live-clear]");
   const reconnectButton = workspace.querySelector("[data-live-reconnect]");
   const pendingButton = workspace.querySelector("[data-live-pending]");
+  const emptyState = workspace.querySelector("[data-live-empty]");
 
   if (
     !(form instanceof HTMLFormElement) ||
@@ -30,7 +31,8 @@
     !newestButton ||
     !clearButton ||
     !reconnectButton ||
-    !pendingButton
+    !pendingButton ||
+    !emptyState
   ) {
     return;
   }
@@ -77,22 +79,18 @@
     pendingButton.textContent = `↓ ${pending.length} new ${pending.length === 1 ? "event" : "events"}`;
   };
 
+  // The empty state sits beside the role=list, which owns only rows.
   const removeEmptyState = () => {
-    rows.querySelector("[data-live-empty]")?.remove();
+    emptyState.hidden = true;
   };
 
   const ensureEmptyState = () => {
-    if (rows.querySelector(".log-row") || rows.querySelector("[data-live-empty]")) return;
-    const empty = document.createElement("div");
-    empty.className = "empty-state";
-    empty.dataset.liveEmpty = "";
-    const heading = document.createElement("h2");
-    heading.textContent = "Waiting for new events from this source";
-    const message = document.createElement("p");
-    message.textContent = "Live events will appear here after they are committed.";
-    empty.append(heading, message);
-    rows.append(empty);
+    emptyState.hidden = rows.firstElementChild !== null;
   };
+
+  // Keep the list's single tab stop on the selected row, else the newest
+  // (DESIGN.md §32.3); keyboard.js owns the roving tabindex.
+  const syncRows = () => window.siftailKeyboard?.syncRows();
 
   const sourceLabel = (event) => {
     const source = event.source || {};
@@ -118,19 +116,41 @@
     unknown: "UNK",
   };
 
+  // Mirrors RowToggleLabel in internal/web/ui/ui.go: the detail toggle is
+  // named from content, never from the event ID (DESIGN.md §32.3).
+  const toggleMessageRunes = 60;
+  const toggleLabel = (code, source, message) => {
+    const newline = message.indexOf("\n");
+    let cut = newline >= 0;
+    let prefix = (cut ? message.slice(0, newline) : message).trim();
+    const runes = Array.from(prefix);
+    if (runes.length > toggleMessageRunes) {
+      prefix = runes.slice(0, toggleMessageRunes).join("").trim();
+      cut = true;
+    }
+    if (cut && !prefix.endsWith("…")) prefix += "…";
+    if (prefix === "") prefix = "empty message";
+    return `Details: ${code} ${source}, ${prefix}`;
+  };
+
   const makeLiveRow = (event) => {
     const id = Number(event.id);
     if (!Number.isSafeInteger(id) || id <= 0) return null;
     const level = safeLevel(event.level);
-    const row = document.createElement("article");
+    const code = severityCodes[level] || "UNK";
+    const sourceText = sourceLabel(event);
+    const messageText = typeof event.message === "string" ? event.message : "";
+    const row = document.createElement("div");
     row.className = `log-row level-${level}`;
+    row.setAttribute("role", "listitem");
     row.dataset.eventId = String(id);
     row.tabIndex = -1;
 
     const toggle = document.createElement("button");
     toggle.className = "event-toggle";
     toggle.type = "button";
-    toggle.setAttribute("aria-label", `Show details for event ${id}`);
+    toggle.tabIndex = -1;
+    toggle.setAttribute("aria-label", toggleLabel(code, sourceText, messageText));
     toggle.setAttribute("aria-expanded", "false");
     toggle.setAttribute("aria-controls", `event-detail-${id}`);
     toggle.setAttribute("hx-get", `/logs/events/${id}`);
@@ -158,13 +178,13 @@
 
     const severity = document.createElement("span");
     severity.className = `severity severity-${level}`;
-    severity.textContent = severityCodes[level] || "UNK";
+    severity.textContent = code;
     const source = document.createElement("span");
     source.className = "row-source";
-    source.textContent = sourceLabel(event);
+    source.textContent = sourceText;
     const message = document.createElement("span");
     message.className = "row-message";
-    message.textContent = typeof event.message === "string" ? event.message : "";
+    message.textContent = messageText;
     if (event.message_truncated) message.title = "Preview truncated; open details for complete content.";
     const stream = document.createElement("span");
     stream.className = "row-stream";
@@ -198,6 +218,7 @@
     removeEmptyState();
     rows.append(row);
     trimRendered();
+    syncRows();
   };
 
   const jumpToNewest = () => {
@@ -293,6 +314,7 @@
         pending = [];
         updatePendingControl();
         ensureEmptyState();
+        syncRows();
         addNotice("This source changed and its previous rows are no longer retained.", "source-change");
         break;
       case "retention_purged":
@@ -351,6 +373,7 @@
     updatePendingControl();
     clearNotice("rendered-limit");
     ensureEmptyState();
+    syncRows();
     announcement.textContent = "Live browser view cleared. Persisted logs were not deleted.";
   };
 

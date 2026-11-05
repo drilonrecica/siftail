@@ -52,12 +52,11 @@
   </div>
   <div class="live-notices" aria-live="polite" data-live-notices></div>
   <div class="live-list-wrap" data-live-scroll>
-    <div id="live-rows" class="log-list" tabindex="0" aria-label="Live log events">
-      <div class="empty-state" data-live-empty>
-        <h2>Waiting for new events from this source</h2>
-        <p>Live events will appear here after they are committed.</p>
-      </div>
+    <div class="empty-state" data-live-empty>
+      <h2>Waiting for new events from this source</h2>
+      <p>Live events will appear here after they are committed.</p>
     </div>
+    <div id="live-rows" class="log-list" role="list" aria-label="Live log events"></div>
   </div>
   <div class="tail-line live-tail">
     <span class="tail-line-rule" aria-hidden="true"></span>

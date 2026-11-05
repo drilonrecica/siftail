@@ -48,19 +48,139 @@
     }
   };
 
+  // ---- Log rows: one tab stop with a roving tabindex (DESIGN.md §32.3) ----
+  //
+  // The list (role=list) owns only rows (role=listitem). Exactly one row has
+  // tabindex=0: the row the operator selected (data-row-selected), else the
+  // newest — the first row in History, the last in Live. Every other row and
+  // every detail toggle has tabindex=-1, so Tab enters the list once and
+  // leaves it on the next press. Modules that add or remove rows call
+  // syncRows().
   const rowContainer = () =>
     document.querySelector("#history-rows") || document.querySelector("#live-rows");
 
+  const rowsOf = (list) => Array.from(list.children).filter(
+    (child) => child.classList.contains("log-row"),
+  );
+
+  const newestRow = (list) => {
+    const rows = rowsOf(list);
+    return list.id === "live-rows" ? rows[rows.length - 1] : rows[0];
+  };
+
+  const rovingStop = (list) => list.querySelector(':scope > .log-row[tabindex="0"]');
+
+  const syncRows = () => {
+    const list = rowContainer();
+    if (!list) return;
+    const stop = rovingStop(list);
+    if (stop?.hasAttribute("data-row-selected")) return;
+    const newest = newestRow(list);
+    if (stop === newest) return;
+    if (stop) stop.tabIndex = -1;
+    if (newest) newest.tabIndex = 0;
+  };
+
+  const selectRow = (row) => {
+    const list = row.parentElement;
+    const stop = list ? rovingStop(list) : null;
+    if (stop && stop !== row) {
+      stop.tabIndex = -1;
+      stop.removeAttribute("data-row-selected");
+    }
+    row.tabIndex = 0;
+    row.setAttribute("data-row-selected", "");
+  };
+
+  // The accessible name a focused row announces: its position and content
+  // ("Row 12 of 200: ERR api/web, …"). It is set only while the row itself
+  // has focus, because positions change as rows load and trim.
+  const rowSummary = (row) => [
+    row.querySelector(".severity")?.textContent,
+    row.querySelector(".row-source")?.textContent,
+    row.querySelector(".row-message")?.textContent?.slice(0, 120),
+    row.querySelector("time")?.textContent,
+    row.querySelector(".row-stream")?.textContent,
+  ].map((part) => (part || "").trim()).filter(Boolean).join(", ");
+
+  const labelRow = (row) => {
+    const list = row.parentElement;
+    if (!list) return;
+    const rows = rowsOf(list);
+    row.setAttribute(
+      "aria-label",
+      `Row ${rows.indexOf(row) + 1} of ${rows.length}: ${rowSummary(row)}`,
+    );
+  };
+
+  const listRowOf = (target) => {
+    const row = target instanceof Element ? target.closest(".log-row") : null;
+    return row && row.parentElement === rowContainer() ? row : null;
+  };
+
+  document.addEventListener("focusin", (event) => {
+    const row = listRowOf(event.target);
+    if (!row) return;
+    selectRow(row);
+    if (event.target === row) labelRow(row);
+  });
+  document.addEventListener("focusout", (event) => {
+    if (event.target instanceof Element && event.target.matches(".log-row")) {
+      event.target.removeAttribute("aria-label");
+    }
+  });
+
+  // Esc clears the selection: the tab stop returns to the newest row.
+  const clearSelection = (row) => {
+    row.removeAttribute("data-row-selected");
+    row.blur();
+    syncRows();
+  };
+
   const moveRow = (delta) => {
-    const container = rowContainer();
-    if (!container) return;
-    const available = Array.from(container.querySelectorAll(".log-row"));
-    if (available.length === 0) return;
-    const current = available.indexOf(document.activeElement);
-    const index = delta > 0
-      ? Math.min(current + 1, available.length - 1)
-      : Math.max(current < 0 ? available.length - 1 : current - 1, 0);
-    available[index].focus({ preventScroll: false });
+    const list = rowContainer();
+    if (!list) return;
+    const rows = rowsOf(list);
+    if (rows.length === 0) return;
+    const current = rows.indexOf(listRowOf(document.activeElement));
+    if (current < 0) {
+      // Nothing focused in the list: resume at the tab stop.
+      (rovingStop(list) || rows[0]).focus({ preventScroll: false });
+      return;
+    }
+    const index = Math.max(0, Math.min(current + delta, rows.length - 1));
+    rows[index].focus({ preventScroll: false });
+  };
+
+  // Keys the row list handles itself, like any composite widget: arrows on a
+  // row or its toggle move the selection; Enter or Space on a focused row
+  // toggles its details. They are not printable single-key shortcuts, so
+  // they work when the shortcuts preference is off (§32.6). Keys inside an
+  // expanded detail panel are left to its controls.
+  const rowKey = (event) => {
+    if (event.ctrlKey || event.metaKey || event.altKey || modalOpen()) return false;
+    const row = listRowOf(event.target);
+    if (!row) return false;
+    const onRow = event.target === row;
+    if (!onRow && !(event.target instanceof Element &&
+      event.target.matches(".event-toggle"))) {
+      return false;
+    }
+    switch (event.key) {
+      case "ArrowDown":
+        moveRow(1);
+        return true;
+      case "ArrowUp":
+        moveRow(-1);
+        return true;
+      case "Enter":
+      case " ":
+        if (!onRow) return false;
+        row.querySelector(".event-toggle")?.click();
+        return true;
+      default:
+        return false;
+    }
   };
 
   const modeLink = (mode) => {
@@ -114,12 +234,6 @@
         pause.click();
         return true;
       }
-      case "enter":
-        if (document.activeElement?.matches?.(".log-row")) {
-          document.activeElement.querySelector(".event-toggle")?.click();
-          return true;
-        }
-        return false;
       default:
         return false;
     }
@@ -139,6 +253,11 @@
 
     if (isTypingContext(event.target)) return;
 
+    if (rowKey(event)) {
+      event.preventDefault();
+      return;
+    }
+
     if (event.key === "Escape") {
       // Open dialogs and the System menu close themselves; otherwise clear
       // the active row selection.
@@ -146,7 +265,7 @@
       const active = document.activeElement;
       if (active?.matches?.(".log-row")) {
         event.preventDefault();
-        active.blur();
+        clearSelection(active);
       }
       return;
     }
@@ -192,5 +311,9 @@
     },
     shortcutsEnabled,
     chordLabel,
+    // syncRows(): re-establish the row list's tab stop after rows were
+    // added, removed, or replaced.
+    syncRows,
   });
+  syncRows();
 })();
