@@ -291,3 +291,17 @@ func authorizedRequest(token, contentType, body string) *http.Request {
 	request.Header.Set("Content-Type", contentType)
 	return request
 }
+
+// The correlation ID is the one web.RequestID assigned; a client-chosen
+// X-Request-ID header is never adopted.
+func TestRequestIDIgnoresClientHeader(t *testing.T) {
+	request := httptest.NewRequest(http.MethodPost, "/ingest", nil)
+	request.Header.Set("X-Request-ID", "client-chosen")
+	if got := requestID(request); got != "" {
+		t.Fatalf("request ID without middleware = %q", got)
+	}
+	request = request.WithContext(web.ContextWithRequestID(request.Context(), "assigned"))
+	if got := requestID(request); got != "assigned" {
+		t.Fatalf("request ID = %q", got)
+	}
+}

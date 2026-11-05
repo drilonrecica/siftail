@@ -299,7 +299,7 @@ func TestDurableIngestionSubprocessSmoke(t *testing.T) {
 
 	// The fixture files carry fixed dates. Shift them so the newest event is
 	// one hour old, which keeps every event inside the default retention
-	// window on any date (DAT-10).
+	// window on any date.
 	shift := fixtureShift(time.Now())
 	plain, err := os.ReadFile(filepath.Join(root, "cmd/siftail/testdata/ingest/canonical.ndjson"))
 	if err != nil {

@@ -123,7 +123,7 @@ func TestCleanerPrunesOldestUnreferencedContainersAboveServerTarget(t *testing.T
 	}
 }
 
-// DAT-14: before pruning, a Server that had cycled through the cap rejected
+// Before pruning, a Server that had cycled through the cap rejected
 // every new container forever, even after retention purged all its events.
 func TestContainerPruneProbeUsesContainerEventIndex(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "siftail.db")

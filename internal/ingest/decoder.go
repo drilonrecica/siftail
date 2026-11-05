@@ -67,6 +67,8 @@ func (d *JSONDecoder) Decode(ctx context.Context, request DecodeRequest) (Decode
 	}
 	decompressed := &capReader{reader: source, remaining: d.limits.MaxDecompressedBytes}
 	batch := DecodedBatch{Events: make([]logs.CanonicalEvent, 0)}
+	// process owns raw: every caller hands it a fresh copy, and the
+	// normalized event may keep slices of it.
 	process := func(raw json.RawMessage) error {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -77,19 +79,9 @@ func (d *JSONDecoder) Decode(ctx context.Context, request DecodeRequest) (Decode
 		if int64(len(raw)) > d.limits.MaxEventBytes {
 			return &Error{Category: CategoryTooLarge}
 		}
-		if err := logs.ValidateJSON(raw, d.limits.MaxJSONDepth); err != nil {
+		record, err := logs.ParseRecord(raw, d.limits.MaxJSONDepth)
+		if err != nil {
 			return &Error{Category: CategoryBadRequest}
-		}
-		var fields map[string]json.RawMessage
-		if err := json.Unmarshal(raw, &fields); err != nil || fields == nil {
-			return &Error{Category: CategoryBadRequest}
-		}
-		record := logs.ReceivedRecord{Fields: fields, Raw: append([]byte(nil), raw...)}
-		if timestamp, ok := fields["date"]; ok {
-			record.Timestamp = timestamp
-		}
-		if tag, ok := fields["tag"]; ok {
-			_ = json.Unmarshal(tag, &record.Tag)
 		}
 		event, err := logs.Normalize(record, request.Server, request.ReceivedAt)
 		if err != nil {
@@ -147,9 +139,7 @@ func (d *JSONDecoder) decodeNDJSON(ctx context.Context, reader io.Reader, proces
 		if len(line) == 0 {
 			continue
 		}
-		if int64(len(line)) > d.limits.MaxEventBytes {
-			return &Error{Category: CategoryTooLarge}
-		}
+		// The scanner reuses its buffer, so the line is copied.
 		if err := process(append([]byte(nil), line...)); err != nil {
 			return err
 		}
@@ -195,15 +185,11 @@ func (d *JSONDecoder) decodeJSON(ctx context.Context, reader io.Reader, process 
 		if err := ctx.Err(); err != nil {
 			return err
 		}
+		// Decode copies the element into raw. process enforces the event
+		// size, and ParseRecord rejects an element that is not an object.
 		var raw json.RawMessage
 		if err := decoder.Decode(&raw); err != nil {
 			return err
-		}
-		if int64(len(raw)) > d.limits.MaxEventBytes {
-			return &Error{Category: CategoryTooLarge}
-		}
-		if len(bytes.TrimSpace(raw)) == 0 || bytes.TrimSpace(raw)[0] != '{' {
-			return &Error{Category: CategoryBadRequest}
 		}
 		if err := process(raw); err != nil {
 			return err

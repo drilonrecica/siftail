@@ -50,7 +50,24 @@ type ReceivedRecord struct {
 	Timestamp json.RawMessage
 	Fields    map[string]json.RawMessage
 	Raw       []byte
-	Tag       string
+	// parsed marks a record built by ParseRecord: Raw is already validated
+	// and Fields belongs to the record, so Normalize neither validates Raw
+	// again nor copies Fields before consuming it.
+	parsed bool
+}
+
+// ParseRecord validates one received JSON object and splits its top-level
+// members in the same token pass. It rejects malformed JSON, invalid UTF-8,
+// duplicate keys at any level, trailing data, a value that is not an object,
+// and nesting deeper than maxDepth or the canonical limit, whichever is
+// smaller. Field values are slices of raw, which must not change afterwards.
+// The Fluent Bit record timestamp is the "date" member.
+func ParseRecord(raw []byte, maxDepth int) (ReceivedRecord, error) {
+	fields, err := parseObject(raw, min(maxDepth, maxJSONDepth))
+	if err != nil {
+		return ReceivedRecord{}, err
+	}
+	return ReceivedRecord{Timestamp: fields["date"], Fields: fields, Raw: raw, parsed: true}, nil
 }
 
 type SourceIdentity struct {
@@ -116,16 +133,20 @@ func Normalize(record ReceivedRecord, server TrustedServer, receivedAt time.Time
 	if server.ID <= 0 {
 		return CanonicalEvent{}, fmt.Errorf("trusted server identity is invalid")
 	}
-	if !utf8.Valid(record.Raw) {
-		return CanonicalEvent{}, fmt.Errorf("record is not valid UTF-8")
-	}
-	if len(record.Raw) > 0 {
-		if err := ValidateJSON(record.Raw, maxJSONDepth); err != nil {
-			return CanonicalEvent{}, err
+	fields := record.Fields
+	if !record.parsed {
+		if !utf8.Valid(record.Raw) {
+			return CanonicalEvent{}, fmt.Errorf("record is not valid UTF-8")
 		}
+		if len(record.Raw) > 0 {
+			if err := ValidateJSON(record.Raw, maxJSONDepth); err != nil {
+				return CanonicalEvent{}, err
+			}
+		}
+		// Normalization deletes the members it consumes; a caller's map
+		// is left as it was.
+		fields = cloneFields(record.Fields)
 	}
-
-	fields := cloneFields(record.Fields)
 	eventAt, eventAtDefaulted, err := normalizeTimestamp(fields, record.Timestamp, receivedAt)
 	if err != nil {
 		return CanonicalEvent{}, err
@@ -134,7 +155,7 @@ func Normalize(record ReceivedRecord, server TrustedServer, receivedAt time.Time
 	if err != nil {
 		return CanonicalEvent{}, err
 	}
-	messageRaw, messageText, structured, err := normalizeMessage(fields, record.Raw)
+	messageRaw, messageText, structured, err := normalizeMessage(fields, record.Raw, record.parsed)
 	if err != nil {
 		return CanonicalEvent{}, err
 	}
@@ -211,8 +232,7 @@ func normalizeTimestamp(fields map[string]json.RawMessage, fluent json.RawMessag
 }
 
 func parseTimestamp(raw json.RawMessage) (time.Time, error) {
-	var text string
-	if json.Unmarshal(raw, &text) == nil {
+	if text, ok := jsonString(raw); ok {
 		value, err := time.Parse(time.RFC3339Nano, text)
 		if err != nil || value.Year() < 1 || value.Year() > 9999 {
 			return time.Time{}, errors.New("invalid timestamp")
@@ -302,53 +322,84 @@ func stableContainerName(value string) string {
 	return value
 }
 
-func normalizeMessage(fields map[string]json.RawMessage, recordRaw []byte) ([]byte, string, map[string]json.RawMessage, error) {
-	var raw json.RawMessage
-	if value, ok := fields["log"]; ok {
-		raw = value
-		delete(fields, "log")
-	} else if len(recordRaw) > 0 && (fields["message"] != nil || fields["msg"] != nil) {
-		raw = recordRaw
-		delete(fields, "message")
-		delete(fields, "msg")
+// normalizeMessage selects the application payload (DOMAIN.md §5.10, §5.11,
+// ARCHITECTURE.md §12.4). A record member "log", else "message", else "msg"
+// is the payload and keeps its exact text; the record's other members stay
+// record fields. A record with none of them is itself the payload. Only a
+// payload that is itself a JSON object, or a string holding one, yields
+// structured application fields. validated reports that recordRaw, and so
+// every member of fields, has already passed ValidateJSON.
+func normalizeMessage(fields map[string]json.RawMessage, recordRaw []byte, validated bool) ([]byte, string, map[string]json.RawMessage, error) {
+	var payload json.RawMessage
+	for _, key := range []string{"log", "message", "msg"} {
+		if value, ok := fields[key]; ok {
+			payload = value
+			delete(fields, key)
+			break
+		}
 	}
-	if len(raw) == 0 {
-		raw = recordRaw
-	}
-	if len(raw) == 0 {
-		raw = []byte("{}")
-	}
-
-	var text string
-	if json.Unmarshal(raw, &text) == nil {
-		if !utf8.ValidString(text) || len([]byte(text)) > maxMessageBytes {
+	if payload == nil {
+		// The whole record is the payload. Its members are already the
+		// record fields, so the record is not decoded a second time as
+		// structured content; that would also copy transport keys into
+		// the attributes.
+		raw := recordRaw
+		if len(raw) == 0 {
+			raw = []byte("{}")
+		}
+		if !validated {
+			if err := ValidateJSON(raw, maxJSONDepth); err != nil {
+				return nil, "", nil, err
+			}
+		}
+		if len(raw) > maxMessageBytes {
 			return nil, "", nil, ErrLimit
 		}
-		if object, err := decodeObject([]byte(text)); err == nil {
-			message := firstString(object, "message", "msg", "log")
-			if message == "" {
-				message = compactJSON([]byte(text))
-			}
-			return []byte(text), message, object, nil
-		}
-		return []byte(text), text, nil, nil
-	}
-
-	if err := ValidateJSON(raw, maxJSONDepth); err != nil {
-		return nil, "", nil, err
-	}
-	if len(raw) > maxMessageBytes {
-		return nil, "", nil, ErrLimit
-	}
-	object, err := decodeObject(raw)
-	if err != nil {
 		return append([]byte(nil), raw...), compactJSON(raw), nil, nil
 	}
-	message := firstString(object, "message", "msg", "log")
-	if message == "" {
-		message = compactJSON(raw)
+
+	if text, ok := jsonString(payload); ok {
+		if !utf8.ValidString(text) || len(text) > maxMessageBytes {
+			return nil, "", nil, ErrLimit
+		}
+		raw := []byte(text)
+		if looksLikeObject(raw) {
+			if object, err := parseObject(raw, maxJSONDepth); err == nil {
+				return raw, structuredMessage(object, raw), object, nil
+			}
+		}
+		return raw, text, nil, nil
 	}
-	return append([]byte(nil), raw...), message, object, nil
+
+	if !validated {
+		if err := ValidateJSON(payload, maxJSONDepth); err != nil {
+			return nil, "", nil, err
+		}
+	}
+	if len(payload) > maxMessageBytes {
+		return nil, "", nil, ErrLimit
+	}
+	raw := append([]byte(nil), payload...)
+	if looksLikeObject(raw) {
+		if object, err := parseObject(raw, maxJSONDepth); err == nil {
+			return raw, structuredMessage(object, raw), object, nil
+		}
+	}
+	return raw, compactJSON(raw), nil, nil
+}
+
+// structuredMessage is the searchable text of a structured payload: its own
+// message field, or its compact JSON when it has none (DOMAIN.md §5.11).
+func structuredMessage(object map[string]json.RawMessage, raw []byte) string {
+	if message := firstString(object, "message", "msg", "log"); message != "" {
+		return message
+	}
+	return compactJSON(raw)
+}
+
+func looksLikeObject(raw []byte) bool {
+	trimmed := bytes.TrimLeft(raw, " \t\r\n")
+	return len(trimmed) > 0 && trimmed[0] == '{'
 }
 
 func normalizeLevel(fields, structured map[string]json.RawMessage, message string) (string, Level, error) {
@@ -484,6 +535,10 @@ func canonicalAttributes(fields, structured map[string]json.RawMessage) ([]byte,
 	return encoded, nil
 }
 
+// isTransportField reports the record members that are transport envelope
+// already represented canonically (time, stream, source and container
+// identity) or Fluent Bit routing (tag); they are excluded from attributes
+// (DOMAIN.md §5.12).
 func isTransportField(key string) bool {
 	switch key {
 	case "date", "timestamp", "@timestamp", "time", "tag", "stream", "source",
@@ -519,8 +574,7 @@ func firstString(fields map[string]json.RawMessage, keys ...string) string {
 	}
 	for _, key := range keys {
 		if raw, ok := fields[key]; ok {
-			var value string
-			if json.Unmarshal(raw, &value) == nil {
+			if value, ok := jsonString(raw); ok {
 				delete(fields, key)
 				return value
 			}
@@ -529,8 +583,38 @@ func firstString(fields map[string]json.RawMessage, keys ...string) string {
 	return ""
 }
 
-func takeString(fields map[string]json.RawMessage, key string) string {
-	return firstString(fields, key)
+// jsonString decodes raw when it is a JSON string or null. A plain ASCII string, the
+// common case for field values, is converted directly; anything with escapes
+// or non-ASCII bytes goes through encoding/json, as does every malformed
+// value, so the result always matches json.Unmarshal.
+func jsonString(raw json.RawMessage) (string, bool) {
+	if string(raw) == "null" {
+		// json.Unmarshal accepts null into a string and leaves it empty;
+		// callers rely on that to consume a null member.
+		return "", true
+	}
+	if len(raw) < 2 || raw[0] != '"' {
+		return "", false
+	}
+	if inner := raw[1 : len(raw)-1]; raw[len(raw)-1] == '"' && plainASCII(inner) {
+		return string(inner), true
+	}
+	var value string
+	if json.Unmarshal(raw, &value) != nil {
+		return "", false
+	}
+	return value, true
+}
+
+// plainASCII reports whether value can appear verbatim between JSON quotes
+// with no decoding: printable ASCII without a quote or backslash.
+func plainASCII(value []byte) bool {
+	for _, char := range value {
+		if char < 0x20 || char >= 0x7f || char == '"' || char == '\\' {
+			return false
+		}
+	}
+	return true
 }
 
 func takeBoundedString(fields map[string]json.RawMessage, max int, keys ...string) (string, error) {
@@ -601,13 +685,46 @@ func firstNonempty(values ...string) string {
 	return ""
 }
 
-func decodeObject(raw []byte) (map[string]json.RawMessage, error) {
-	if err := ValidateJSON(raw, maxJSONDepth); err != nil {
-		return nil, err
+// parseObject validates raw exactly as ValidateJSON does and, in the same
+// token pass, returns its top-level members when it is an object. Each value
+// is the member's own bytes within raw.
+func parseObject(raw []byte, maxDepth int) (map[string]json.RawMessage, error) {
+	if !utf8.Valid(raw) {
+		return nil, errors.New("invalid UTF-8")
 	}
-	var object map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &object); err != nil || object == nil {
-		return nil, errors.New("not an object")
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	token, err := decoder.Token()
+	if err != nil || token != json.Delim('{') {
+		return nil, errors.New("not a JSON object")
+	}
+	object := make(map[string]json.RawMessage)
+	for decoder.More() {
+		keyToken, err := decoder.Token()
+		if err != nil {
+			return nil, errors.New("invalid JSON object")
+		}
+		key, ok := keyToken.(string)
+		if !ok {
+			return nil, errors.New("invalid JSON object key")
+		}
+		if _, duplicate := object[key]; duplicate {
+			return nil, errors.New("duplicate JSON key")
+		}
+		// The offset after the key precedes the colon; the offset after
+		// the value is its last byte.
+		start := decoder.InputOffset()
+		if err := validateValue(decoder, 1, maxDepth); err != nil {
+			return nil, err
+		}
+		object[key] = bytes.Trim(raw[start:decoder.InputOffset()], " \t\r\n:")
+	}
+	end, err := decoder.Token()
+	if err != nil || end != json.Delim('}') {
+		return nil, errors.New("invalid JSON object")
+	}
+	if _, err := decoder.Token(); err != io.EOF {
+		return nil, errors.New("trailing JSON data")
 	}
 	return object, nil
 }

@@ -19,7 +19,7 @@ import (
 
 // A real server whose 30-second-style WriteTimeout has already elapsed by the
 // time staging finishes must still deliver the complete artifact: the export
-// handler owns its response deadline (audit DAT-07, SEC-12).
+// handler owns its response deadline.
 func TestHistoryExportDeliveryOutlivesServerWriteTimeout(t *testing.T) {
 	fixture := newBrowserFixture(t, "https://logs.example.test", true)
 	seedBrowserHistory(t, fixture)

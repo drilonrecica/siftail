@@ -19,7 +19,7 @@ import (
 // authentication pool, token mutations through the coordinator. Every
 // ordinary reader connection is held open (exports, contains searches, an
 // active quick_check), yet authentication proceeds, and a revocation
-// committed meanwhile rejects the very next request (audit DAT-08).
+// committed meanwhile rejects the very next request.
 func TestHTTPBoundaryAuthenticatesWhileReaderPoolIsExhausted(t *testing.T) {
 	db, err := database.Open(context.Background(), filepath.Join(t.TempDir(), "siftail.db"))
 	if err != nil {

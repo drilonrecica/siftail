@@ -109,16 +109,18 @@ func (d *DB) CheckActive(
 		return report, err
 	}
 	err = coordinator.DoMaintenance(ctx, func(writer *sql.DB) error {
-		var busy int
-		if err := writer.QueryRowContext(
-			context.WithoutCancel(ctx), "PRAGMA wal_checkpoint(PASSIVE)",
-		).Scan(&busy, &report.WALFrames, &report.CheckpointedFrames); err != nil {
-			return classify("database check WAL checkpoint", err)
+		const operation = "database check WAL checkpoint"
+		result, err := WALCheckpoint(
+			context.WithoutCancel(ctx), writer, CheckpointPassive, operation,
+		)
+		if err != nil {
+			return err
 		}
-		if busy != 0 || report.CheckpointedFrames < report.WALFrames {
+		report.WALFrames, report.CheckpointedFrames = result.LogFrames, result.CheckpointedFrames
+		if !result.Complete() {
 			report.Checkpoint = "busy"
 			return &CategoryError{
-				Category: CategoryBusy, Operation: "database check WAL checkpoint",
+				Category: CategoryBusy, Operation: operation,
 			}
 		}
 		report.Checkpoint = "completed"
@@ -137,15 +139,13 @@ func CheckPath(ctx context.Context, path string, full bool) (CheckReport, error)
 	if !info.Mode().IsRegular() {
 		return CheckReport{}, errors.New("database is not a regular file")
 	}
-	query := url.Values{
+	db, err := sql.Open("sqlite3", fileURI(path, url.Values{
 		"mode":          {"ro"},
 		"_query_only":   {"on"},
 		"_busy_timeout": {"5000"},
 		"_foreign_keys": {"on"},
 		"_synchronous":  {"FULL"},
-	}
-	db, err := sql.Open("sqlite3",
-		"file:"+filepath.ToSlash(path)+"?"+query.Encode())
+	}))
 	if err != nil {
 		return CheckReport{}, classify("open database check", err)
 	}

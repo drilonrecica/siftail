@@ -64,7 +64,7 @@ func (b *Browser) historyExport(w http.ResponseWriter, r *http.Request) {
 	// The server-wide 30-second WriteTimeout starts when the request is read.
 	// Staging may legitimately run for the store's full bounded duration, so
 	// the deadline covers it plus one response write; delivery then extends
-	// it per chunk (audit DAT-07, SEC-12). A writer without deadline support
+	// it per chunk. A writer without deadline support
 	// (tests, wrappers) simply keeps its own behavior.
 	_ = controller.SetWriteDeadline(
 		b.now().Add(limits.Timeout + b.exportWriteTimeout),

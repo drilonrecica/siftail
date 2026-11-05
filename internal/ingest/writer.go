@@ -5,7 +5,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"fmt"
 	"sort"
 	"sync"
 	"time"
@@ -171,7 +170,7 @@ const savepointName = "siftail_batch"
 //
 // The source and container caches are hints: every hit is confirmed inside the
 // transaction, because source removal, Clear logs, and retention pruning delete
-// rows the writer may still cache (audit DAT-02). Should a stale ID ever reach
+// rows the writer may still cache. Should a stale ID ever reach
 // an INSERT regardless, the foreign-key failure rolls back that batch's
 // savepoint, clears its entries, and the batch is retried once, uncached, in a
 // fresh savepoint of the same group.
@@ -191,13 +190,22 @@ func (w *BatchWriter) PersistGroup(ctx context.Context, batches []*WriteBatch) [
 
 	staged := make([]transactionOutcome, len(batches))
 	failures := make([]error, len(batches))
-	err := w.coordinator.DoImmediate(ctx, func(tx database.Statements) error {
+	err := w.coordinator.DoImmediate(ctx, func(tx database.Statements) (err error) {
 		// Admission transfers persistence ownership away from the request.
 		// Request cancellation must not roll back an already admitted batch.
 		mutationCtx := context.Background()
+		statements, err := prepareGroupStatements(mutationCtx, tx)
+		if err != nil {
+			return err
+		}
+		defer func() {
+			if closeErr := statements.close(); closeErr != nil && err == nil {
+				err = &transactionFailure{err: database.Classify("finalize group statements", closeErr)}
+			}
+		}()
 		for _, index := range members {
 			staged[index], failures[index] = transactionOutcome{}, nil
-			outcome, err := w.persistBatch(mutationCtx, tx, batches[index])
+			outcome, err := w.persistBatch(mutationCtx, tx, statements, batches[index])
 			if err != nil {
 				if isTransactionLevel(err) {
 					return err
@@ -248,13 +256,42 @@ func (w *BatchWriter) PersistGroup(ctx context.Context, batches []*WriteBatch) [
 	return outcomes
 }
 
+// groupStatements are the per-event statements of one commit group, prepared
+// once on the group's pinned writer connection instead of once per event.
+type groupStatements struct {
+	insertEvent *sql.Stmt
+	loadEvent   *sql.Stmt
+}
+
+func prepareGroupStatements(ctx context.Context, tx database.Statements) (*groupStatements, error) {
+	insertEvent, err := tx.PrepareContext(ctx, insertEventSQL)
+	if err != nil {
+		return nil, database.Classify("prepare log event insert", err)
+	}
+	loadEvent, err := tx.PrepareContext(ctx, loadCanonicalEventSQL)
+	if err != nil {
+		if closeErr := insertEvent.Close(); closeErr != nil {
+			return nil, errors.Join(
+				database.Classify("prepare stable event lookup", err),
+				database.Classify("finalize log event insert", closeErr),
+			)
+		}
+		return nil, database.Classify("prepare stable event lookup", err)
+	}
+	return &groupStatements{insertEvent: insertEvent, loadEvent: loadEvent}, nil
+}
+
+func (s *groupStatements) close() error {
+	return errors.Join(s.insertEvent.Close(), s.loadEvent.Close())
+}
+
 // persistBatch runs one batch inside its own savepoint, retrying it once
 // uncached after a foreign-key failure on a stale cached ID.
-func (w *BatchWriter) persistBatch(ctx context.Context, tx database.Statements, batch *WriteBatch) (transactionOutcome, error) {
-	outcome, err := w.persistSavepoint(ctx, tx, batch)
+func (w *BatchWriter) persistBatch(ctx context.Context, tx database.Statements, statements *groupStatements, batch *WriteBatch) (transactionOutcome, error) {
+	outcome, err := w.persistSavepoint(ctx, tx, statements, batch)
 	if database.IsForeignKeyViolation(err) {
 		w.forgetBatch(batch)
-		outcome, err = w.persistSavepoint(ctx, tx, batch)
+		outcome, err = w.persistSavepoint(ctx, tx, statements, batch)
 	}
 	return outcome, err
 }
@@ -264,11 +301,11 @@ func (w *BatchWriter) persistBatch(ctx context.Context, tx database.Statements, 
 // releases it, leaving earlier batches of the group intact. A transaction-level
 // failure is returned untouched: SQLite may already have rolled back the whole
 // transaction, so the group is abandoned instead.
-func (w *BatchWriter) persistSavepoint(ctx context.Context, tx database.Statements, batch *WriteBatch) (transactionOutcome, error) {
+func (w *BatchWriter) persistSavepoint(ctx context.Context, tx database.Statements, statements *groupStatements, batch *WriteBatch) (transactionOutcome, error) {
 	if _, err := tx.ExecContext(ctx, "SAVEPOINT "+savepointName); err != nil {
 		return transactionOutcome{}, &transactionFailure{err: database.Classify("open batch savepoint", err)}
 	}
-	outcome, err := w.persistTransaction(ctx, tx, batch)
+	outcome, err := w.persistTransaction(ctx, tx, statements, batch)
 	if err != nil {
 		if isTransactionLevel(err) {
 			return transactionOutcome{}, err
@@ -342,6 +379,7 @@ func (w *BatchWriter) forgetBatch(batch *WriteBatch) {
 func (w *BatchWriter) persistTransaction(
 	ctx context.Context,
 	tx database.Statements,
+	statements *groupStatements,
 	batch *WriteBatch,
 ) (transactionOutcome, error) {
 	if batch.AuthenticatedTokenID > 0 {
@@ -477,7 +515,7 @@ func (w *BatchWriter) persistTransaction(
 			databaseContainerID = containerID
 		}
 		if event.SourceEventID != "" {
-			existing, found, err := loadCanonicalEvent(ctx, tx, sourceID, event.SourceEventID, event.Source)
+			existing, found, err := loadCanonicalEvent(ctx, statements.loadEvent, sourceID, event.SourceEventID, event.Source)
 			if err != nil {
 				return transactionOutcome{}, err
 			}
@@ -492,14 +530,7 @@ func (w *BatchWriter) persistTransaction(
 				continue
 			}
 		}
-		result, err := tx.ExecContext(ctx, `INSERT INTO log_events(
-			event_at_us, event_at_defaulted, received_at_us, source_id, container_instance_id, stream,
-			level_normalized, level_original, message_raw, message_text, attributes_json,
-			source_event_id, logger, request_id, error_type, http_method, http_path,
-			http_status, duration_ms
-		) VALUES (?, ?, ?, ?, ?, ?, ?, nullif(?, ''), ?, ?, nullif(?, ''),
-			nullif(?, ''), nullif(?, ''), nullif(?, ''), nullif(?, ''), nullif(?, ''),
-			nullif(?, ''), ?, ?)`,
+		result, err := statements.insertEvent.ExecContext(ctx,
 			event.EventAtUS, event.EventAtDefaulted, event.ReceivedAtUS, sourceID, databaseContainerID, event.Stream,
 			event.Level, event.OriginalLevel, event.MessageRaw, event.MessageText, string(event.Attributes),
 			event.SourceEventID, event.Common.Logger, event.Common.RequestID, event.Common.ErrorType,
@@ -535,6 +566,15 @@ func (w *BatchWriter) persistTransaction(
 		sourceUpdates: sourceUpdates, containerUpdates: containerUpdates,
 	}, nil
 }
+
+const insertEventSQL = `INSERT INTO log_events(
+	event_at_us, event_at_defaulted, received_at_us, source_id, container_instance_id, stream,
+	level_normalized, level_original, message_raw, message_text, attributes_json,
+	source_event_id, logger, request_id, error_type, http_method, http_path,
+	http_status, duration_ms
+) VALUES (?, ?, ?, ?, ?, ?, ?, nullif(?, ''), ?, ?, nullif(?, ''),
+	nullif(?, ''), nullif(?, ''), nullif(?, ''), nullif(?, ''), nullif(?, ''),
+	nullif(?, ''), ?, ?)`
 
 // eventTimes is the claimed and receive time of one persisted event.
 type eventTimes struct {
@@ -759,9 +799,18 @@ func updateLastSeen(
 	return nil
 }
 
+const loadCanonicalEventSQL = `SELECT
+	e.event_at_us, e.event_at_defaulted, e.stream, e.level_normalized, e.level_original,
+	e.message_raw, e.message_text, e.attributes_json, e.source_event_id,
+	e.logger, e.request_id, e.error_type, e.http_method, e.http_path,
+	e.http_status, e.duration_ms, c.container_id, c.container_name
+	FROM log_events e
+	LEFT JOIN container_instances c ON c.id=e.container_instance_id
+	WHERE e.source_id=? AND e.source_event_id=?`
+
 func loadCanonicalEvent(
 	ctx context.Context,
-	tx database.Statements,
+	lookup *sql.Stmt,
 	sourceID int64,
 	sourceEventID string,
 	source logs.SourceIdentity,
@@ -772,15 +821,7 @@ func loadCanonicalEvent(
 	var logger, requestID, errorType, method, path sql.NullString
 	var status sql.NullInt64
 	var duration sql.NullFloat64
-	err := tx.QueryRowContext(ctx, `SELECT
-		e.event_at_us, e.event_at_defaulted, e.stream, e.level_normalized, e.level_original,
-		e.message_raw, e.message_text, e.attributes_json, e.source_event_id,
-		e.logger, e.request_id, e.error_type, e.http_method, e.http_path,
-		e.http_status, e.duration_ms, c.container_id, c.container_name
-		FROM log_events e
-		LEFT JOIN container_instances c ON c.id=e.container_instance_id
-		WHERE e.source_id=? AND e.source_event_id=?`,
-		sourceID, sourceEventID).Scan(
+	err := lookup.QueryRowContext(ctx, sourceID, sourceEventID).Scan(
 		&event.EventAtUS, &event.EventAtDefaulted, &event.Stream, &event.Level, &levelOriginal,
 		&event.MessageRaw, &event.MessageText, &attributes, &event.SourceEventID,
 		&logger, &requestID, &errorType, &method, &path, &status, &duration,
@@ -820,19 +861,14 @@ func sourceCacheKey(source logs.SourceIdentity) sourceKey {
 	}
 }
 
-func nullable(value string) any {
-	if value == "" {
-		return nil
-	}
-	return value
-}
-
 // persistenceError maps a failed batch to its transport category. Only
-// storage-wide conditions (busy, I/O, corruption, full) are reported as
-// unavailable or storage-full, which the worker treats as a database failure
-// that degrades ingestion globally. Constraint and internal failures are scoped
-// to the batch that caused them (audit DAT-03): one poison batch must not gate
-// every other Server.
+// storage-wide conditions (busy, I/O, corruption, full) and a closing or
+// abandoned coordinator are reported as unavailable or storage-full, which the
+// worker treats as a database failure that degrades ingestion globally. A
+// constraint failure is the client's batch; everything else, including a
+// stale foreign key that survived the uncached retry, is a Siftail defect
+// scoped to the batch that caused it, so one poison batch never gates every
+// other Server.
 func persistenceError(err error) error {
 	var ingestErr *Error
 	if errors.As(err, &ingestErr) {
@@ -846,17 +882,11 @@ func persistenceError(err error) error {
 		case database.CategoryFull:
 			return &Error{Category: CategoryStorageFull}
 		case database.CategoryConstraint:
-			if databaseErr.ForeignKey {
-				// A stale reference that survived the uncached retry is a
-				// Siftail defect, not something the client can fix.
-				return &Error{Category: CategoryInternal}
+			if !databaseErr.ForeignKey {
+				return &Error{Category: CategoryBadRequest}
 			}
-			return &Error{Category: CategoryBadRequest}
-		default:
-			return &Error{Category: CategoryInternal}
 		}
-	}
-	if errors.Is(err, database.ErrCoordinatorClosed) || errors.Is(err, context.Canceled) ||
+	} else if errors.Is(err, database.ErrCoordinatorClosed) || errors.Is(err, context.Canceled) ||
 		errors.Is(err, context.DeadlineExceeded) {
 		return &Error{Category: CategoryUnavailable}
 	}
@@ -921,8 +951,4 @@ func (c *boundedCache[K]) Len() int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.order.Len()
-}
-
-func (c *boundedCache[K]) String() string {
-	return fmt.Sprintf("bounded cache %d/%d", c.Len(), c.capacity)
 }

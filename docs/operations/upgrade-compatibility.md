@@ -2,12 +2,12 @@
 
 **Reviewed:** 2026-11-05
 **Scope:** SFT-047 schema 1–4 fixture and recovery matrix; SFT-087 schema 5;
-SFT-090 schema 6; SFT-091 schema 7; SFT-095 schema 8
+SFT-090 schema 6; SFT-091 schema 7; SFT-095 schema 8; SFT-099 schema 9
 
 ## Supported window
 
 The current pre-public binary supports automatic forward migration from every
-checked-in historical schema fixture, versions 1 through 8. It supports a
+checked-in historical schema fixture, versions 1 through 9. It supports a
 fresh database through the same production open path. Before `1.0`, only the
 latest stable Siftail release receives ordinary support, but that release must
 continue to open every schema fixture retained in this repository.
@@ -32,7 +32,9 @@ immutable security-audit event; schema 5 adds a recreated container instance
 6 adds a stable-ID event whose time was defaulted to receive time; schema 7
 adds a late event whose event time is 30 days before its receipt. Schema 8
 changes only an index and carries the same rows as schema 7; event 15, present
-in every fixture, has the request ID the rebuilt index must find.
+in every fixture, has the request ID the rebuilt index must find. Schema 9
+adds only the security-audit row counter and carries the same rows as schema
+8, with a counter of 1.
 
 Every name, address, token, credential, timestamp, and payload is an obvious
 synthetic test value. The generator contains no production data and makes no
@@ -178,9 +180,31 @@ The migration is forward-only. A binary that supports only schema 7 refuses
 the upgraded database with its actual and supported versions and changes
 nothing. Downgrading requires restoring a backup taken before the upgrade.
 
+## Schema 9: security-audit row counter
+
+Migration `0009_security_audit_count.sql` (SFT-099) adds the one-row `STRICT`
+table `security_audit_event_count`, seeds it with the current number of
+`security_audit_events` rows, and adds `AFTER INSERT` and `AFTER DELETE`
+triggers on `security_audit_events` that keep it exact. The audit store reads
+this counter to enforce its 100,000-row cap in every audit insert instead of
+counting the table each time, which read about 100,000 index entries per
+audit event at the cap. Every writer of the audit table, including age and cap
+cleanup and the configuration-backup exclusion, goes through the triggers;
+SQLite disables its truncate optimization for a table with triggers, so even
+an unqualified `DELETE` is counted.
+
+The migration reads the audit table once (at most 100,000 rows) and writes one
+row; it does not touch application events, so the first start after the
+upgrade is not measurably longer. Backup verification and restore validation
+require the counter table for schema 9 artifacts.
+
+The migration is forward-only. A binary that supports only schema 8 refuses
+the upgraded database with its actual and supported versions and changes
+nothing. Downgrading requires restoring a backup taken before the upgrade.
+
 ## Matrix guarantees
 
-For each schema 1–8 fixture, tests:
+For each schema 1–9 fixture, tests:
 
 1. copy the immutable file and verify its pinned digest;
 2. open it through production pragmas, compatibility checks, migrations,
@@ -192,12 +216,14 @@ For each schema 1–8 fixture, tests:
 6. authenticate the representative administrator where applicable;
 7. commit a canonical event through the controlled ingestion writer and read
    it through the History store;
-8. update retention through the coordinated store with its audit event; and
+8. update retention through the coordinated store with its audit event, and
+   require the audit row counter to equal the audit row count; and
 9. prove a failing next migration leaves no partial table while already
    successful migration versions remain committed.
 
-A separate eight-case matrix creates and verifies both full and
-configuration-only backups after every historical upgrade, stops the database,
+A separate per-schema matrix (one case per fixture, nine today) creates and
+verifies both full and configuration-only backups after every historical
+upgrade, stops the database,
 restores each artifact, verifies the managed rollback, requires session and
 artifact-metadata removal, checks full-versus-configuration history semantics,
 and commits/reads a new event after restore.

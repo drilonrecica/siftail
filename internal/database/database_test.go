@@ -6,7 +6,10 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/mattn/go-sqlite3"
 )
 
 func TestOpenConfiguresDurabilityAndPools(t *testing.T) {
@@ -135,5 +138,23 @@ func TestClassifyMarksOnlyForeignKeyConstraints(t *testing.T) {
 	}
 	if IsForeignKeyViolation(errors.New("plain")) || IsForeignKeyViolation(nil) {
 		t.Fatal("unclassified error reported as a foreign-key violation")
+	}
+}
+
+// classify keeps the driver error as the cause for errors.Is and errors.As
+// while its text stays a safe category.
+func TestClassifyWrapsDriverErrorWithoutExposingIt(t *testing.T) {
+	db := openTestDB(t)
+	_, err := db.Writer().Exec("INSERT INTO no_such_table VALUES (1)")
+	classified := classify("probe", err)
+	var driverErr sqlite3.Error
+	if !errors.As(classified, &driverErr) || !errors.Is(classified, err) {
+		t.Fatalf("classified error lost its cause: %#v", classified)
+	}
+	if text := classified.Error(); text != "probe: database internal" || strings.Contains(text, "no_such_table") {
+		t.Fatalf("classified text = %q", text)
+	}
+	if done := classify("closed", sql.ErrConnDone); !errors.Is(done, sql.ErrConnDone) {
+		t.Fatalf("non-driver error lost its cause: %v", done)
 	}
 }

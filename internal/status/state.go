@@ -355,7 +355,7 @@ func (s *State) RecordIngestRejected(
 			Summary:  "Ingestion admission was temporarily saturated.",
 		})
 	} else if category == ingest.CategoryInternal {
-		// Batch-scoped (audit DAT-03): visible, but readiness and the
+		// Batch-scoped: visible, but readiness and the
 		// database category stay as they are.
 		s.appendDiagnosticLocked(Diagnostic{
 			At: at, Severity: "attention", Component: "ingestion",

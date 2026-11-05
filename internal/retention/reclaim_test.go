@@ -205,7 +205,7 @@ func TestActiveFootprintRejectsMissingInputs(t *testing.T) {
 	}
 }
 
-// DAT-13: freed pages awaiting vacuum used to keep the measured file size high,
+// Freed pages awaiting vacuum used to keep the measured file size high,
 // so size retention deleted every event. With in-use pages it stops once the
 // deletions themselves meet the target, even though almost nothing is
 // vacuumed (one page per cycle here).
@@ -266,7 +266,7 @@ func TestCleanerSizeRetentionCountsFreedPagesTowardTarget(t *testing.T) {
 	}
 }
 
-// DAT-05: reclamation runs as bounded incremental-vacuum chunks, each its own
+// Reclamation runs as bounded incremental-vacuum chunks, each its own
 // writer turn, while ingestion commits continuously through the same
 // coordinator. Run with TMPDIR on a real disk (AGENTS.md §17.2); the log line
 // names the filesystem.

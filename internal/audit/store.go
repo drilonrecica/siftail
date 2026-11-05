@@ -293,10 +293,9 @@ func (s *Store) Cleanup(
 		if remaining == 0 {
 			return nil
 		}
-		var count int64
-		if err := tx.QueryRowContext(mutationCtx,
-			"SELECT count(*) FROM security_audit_events").Scan(&count); err != nil {
-			return database.Classify("count security audit events", err)
+		count, err := storedCount(mutationCtx, tx)
+		if err != nil {
+			return err
 		}
 		excess := count - MaxRecords
 		if excess <= 0 {
@@ -326,11 +325,25 @@ func (s *Store) Cleanup(
 	return cleanup, nil
 }
 
+// storedCount reads the security audit row count that migration 0009's
+// triggers maintain, instead of counting the capped table on every insert.
+func storedCount(ctx context.Context, tx *sql.Tx) (int64, error) {
+	var count int64
+	err := tx.QueryRowContext(ctx,
+		"SELECT row_count FROM security_audit_event_count WHERE id = 1").Scan(&count)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, errors.New("security audit row counter is missing")
+	}
+	if err != nil {
+		return 0, database.Classify("read security audit row count", err)
+	}
+	return count, nil
+}
+
 func enforceCap(ctx context.Context, tx *sql.Tx) error {
-	var count int
-	if err := tx.QueryRowContext(ctx,
-		"SELECT count(*) FROM security_audit_events").Scan(&count); err != nil {
-		return database.Classify("count security audit capacity", err)
+	count, err := storedCount(ctx, tx)
+	if err != nil {
+		return err
 	}
 	excess := count - MaxRecords
 	if excess <= 0 {

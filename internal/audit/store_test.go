@@ -299,6 +299,13 @@ func TestCleanupUsesIndependentAgeAndCountBounds(t *testing.T) {
 	).Scan(&newest); err != nil || newest != event.ID {
 		t.Fatalf("newest audit ID = %d, want %d, err=%v", newest, event.ID, err)
 	}
+
+	// A configuration backup excludes audit history with an unqualified
+	// DELETE; the triggers must still count every row out.
+	if _, err := db.Writer().Exec("DELETE FROM security_audit_events"); err != nil {
+		t.Fatal(err)
+	}
+	assertTableCount(t, db.Reader(), "security_audit_events", 0)
 }
 
 func TestApplicationDeletionDoesNotDeleteAuditHistory(t *testing.T) {
@@ -447,5 +454,18 @@ func assertTableCount(t *testing.T, db *sql.DB, table string, want int) {
 	}
 	if got != want {
 		t.Fatalf("%s count = %d, want %d", table, got, want)
+	}
+	if table == "security_audit_events" {
+		// The cap reads the trigger-maintained counter, so it must always
+		// equal the real row count.
+		var stored int
+		if err := db.QueryRow(
+			"SELECT row_count FROM security_audit_event_count WHERE id = 1",
+		).Scan(&stored); err != nil {
+			t.Fatal(err)
+		}
+		if stored != got {
+			t.Fatalf("security audit counter = %d, rows = %d", stored, got)
+		}
 	}
 }

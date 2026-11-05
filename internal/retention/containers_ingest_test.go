@@ -80,8 +80,7 @@ func TestRecreatedContainerAcceptedAgainAfterPruningUnderTheCap(t *testing.T) {
 	}
 }
 
-// TestAcknowledgedLateEventIsNotPurgedByTheNextAgeRun is the audit DAT-10
-// scenario: a client with a wrong clock, or a replayed backlog, must not get
+// TestAcknowledgedLateEventIsNotPurgedByTheNextAgeRun: a client with a wrong clock, or a replayed backlog, must not get
 // 204 for events the next retention run deletes (ADR 0008).
 func TestAcknowledgedLateEventIsNotPurgedByTheNextAgeRun(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "siftail.db")

@@ -346,7 +346,7 @@ func TestIngestionRetryWithoutTimestampIsIdempotent(t *testing.T) {
 	}
 
 	// Fluent Bit resends the same chunk later: the defaulted event time
-	// differs, which is not a conflict (audit DAT-11, ADR 0007).
+	// differs, which is not a conflict (ADR 0007).
 	received = received.Add(90 * time.Second)
 	retry, done := fixture.request(context.Background(), body)
 	<-done

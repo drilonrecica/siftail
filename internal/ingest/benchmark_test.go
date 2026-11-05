@@ -122,6 +122,28 @@ func BenchmarkBatchWriterSourceResolution(b *testing.B) {
 	coordinator.Close()
 }
 
+// BenchmarkBatchWriter100Events commits 100-event batches with stable source
+// event IDs, so each event pays the dedup lookup and the INSERT. It isolates
+// per-event statement cost from the single fsync that every batch shares.
+func BenchmarkBatchWriter100Events(b *testing.B) {
+	_, coordinator, writer, serverID := benchmarkWriter(b, WriterOptions{})
+	events := make([]logs.CanonicalEvent, 100)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		for j := range events {
+			sequence := i*len(events) + j
+			events[j] = canonicalEvent(serverID, "batch-"+strconv.Itoa(sequence), "batch event", int64(sequence+1))
+		}
+		if err := writer.Persist(context.Background(), &WriteBatch{
+			Events: events, AuthenticatedServerID: serverID,
+		}); err != nil {
+			b.Fatal(err)
+		}
+	}
+	coordinator.Close()
+}
+
 func BenchmarkBatchWriterIdempotentRetry(b *testing.B) {
 	db, coordinator, writer, serverID := benchmarkWriter(b, WriterOptions{})
 	_ = db

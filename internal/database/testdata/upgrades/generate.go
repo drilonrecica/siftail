@@ -23,7 +23,7 @@ import (
 )
 
 const (
-	currentSchema = 8
+	currentSchema = 9
 	fixtureTimeUS = int64(1785196800000000)
 )
 
@@ -36,6 +36,7 @@ var migrationNames = []string{
 	"0006_event_time_defaulted.sql",
 	"0007_retention_by_receipt.sql",
 	"0008_request_time_index.sql",
+	"0009_security_audit_count.sql",
 }
 
 // foreignKeysOffDirective mirrors internal/database/migrate.go: such a

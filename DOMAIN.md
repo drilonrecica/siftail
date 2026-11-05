@@ -378,6 +378,12 @@ For structured JSON:
 - do not replace it solely with reserialized JSON if exact original bytes are available;
 - transport envelope fields need not be duplicated into raw application payload.
 
+The application payload of a received record is its `log` field, else its
+top-level `message` field, else its `msg` field, kept as that field's exact
+text; a record with none of them is itself the payload. Transport envelope
+fields of the record (time, tag, stream, source, and container identity) are
+never copied into attributes, whichever field is the payload.
+
 ### 5.11 Searchable message
 
 `message_text` is the human-readable searchable representation.

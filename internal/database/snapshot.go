@@ -6,7 +6,6 @@ import (
 	"errors"
 	"net/url"
 	"os"
-	"path/filepath"
 	"sync"
 	"time"
 )
@@ -142,9 +141,8 @@ func logicalSize(ctx context.Context, conn *sql.Conn) (int64, error) {
 }
 
 func snapshotSourceDSN(path string) string {
-	query := url.Values{
+	return fileURI(path, url.Values{
 		"mode":          {"rw"},
 		"_busy_timeout": {"5000"},
-	}
-	return "file:" + filepath.ToSlash(path) + "?" + query.Encode()
+	})
 }

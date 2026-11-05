@@ -498,8 +498,8 @@ func (a *App) ingestMux() *http.ServeMux {
 
 func (a *App) initializeIngestion() error {
 	// Ingestion authenticates through its own small read pool so exports,
-	// History searches, and the active database check can never starve it
-	// (audit DAT-08). Token mutations still commit through the coordinator,
+	// History searches, and the active database check can never starve it.
+	// Token mutations still commit through the coordinator,
 	// and every lookup reads committed state, so revocation applies to the
 	// very next request exactly as before.
 	store := sources.NewCoordinatedStore(a.db.AuthReader(), a.coordinator)

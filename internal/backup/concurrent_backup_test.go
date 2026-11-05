@@ -13,7 +13,8 @@ import (
 
 const (
 	// concurrentBackupBulkRows × concurrentBackupRowBytes ≈ 256 MiB of
-	// retained events, the multi-hundred-MB fixture DAT-04 calls for.
+	// retained events, a multi-hundred-MB fixture, so the backup
+	// runs long enough to overlap ingestion.
 	concurrentBackupBulkRows = 8192
 	concurrentBackupRowBytes = 32 << 10
 	// concurrentBackupBound is far beyond a healthy run (seconds) and far

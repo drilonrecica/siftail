@@ -106,8 +106,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	server, err := h.tokens.VerifyToken(r.Context(), token)
 	if err != nil {
 		// Only a definite mismatch is a credential failure. A database error
-		// says nothing about the token; 401 would read as a revoked token
-		// (audit DAT-08), so the client retries instead.
+		// says nothing about the token; 401 would read as a revoked token,
+		// so the client gets 503 and retries instead.
 		if errors.Is(err, sources.ErrInvalidToken) {
 			writeSafe(w, http.StatusUnauthorized)
 		} else {
@@ -192,7 +192,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				return // The client is gone; there is nobody to answer.
 			}
 			// The request timeout elapsed first. Without an explicit status
-			// net/http would send an implicit 200 (audit DAT-12). The writer
+			// net/http would send an implicit 200. The writer
 			// may still commit, which at-least-once delivery tolerates.
 			writeSafe(w, http.StatusServiceUnavailable)
 		}
@@ -294,9 +294,8 @@ func writeSafe(w http.ResponseWriter, status int) {
 	http.Error(w, http.StatusText(status), status)
 }
 
+// requestID is the correlation ID web.RequestID assigned. A client-supplied
+// X-Request-ID header is never trusted as one.
 func requestID(r *http.Request) string {
-	if id := web.RequestIDFromContext(r.Context()); id != "" {
-		return id
-	}
-	return r.Header.Get("X-Request-ID")
+	return web.RequestIDFromContext(r.Context())
 }

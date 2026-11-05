@@ -42,9 +42,9 @@ func Verify(ctx context.Context, path string) (Result, error) {
 	if err := db.PingContext(ctx); err != nil {
 		return Result{}, errors.New("read backup artifact")
 	}
-	var integrity string
-	if err := db.QueryRowContext(ctx, "PRAGMA integrity_check").Scan(&integrity); err != nil ||
-		integrity != "ok" {
+	// integrity_check reports one row per problem; a damaged artifact whose
+	// first row happened to read "ok" must still fail, so every row is read.
+	if err := database.IntegrityCheck(ctx, db); err != nil {
 		return Result{}, errors.New("backup integrity check failed")
 	}
 	var result Result
@@ -85,6 +85,9 @@ func Verify(ctx context.Context, path string) (Result, error) {
 	}
 	if result.SchemaVersion >= 4 {
 		requiredTables = append(requiredTables, "security_audit_events")
+	}
+	if result.SchemaVersion >= 9 {
+		requiredTables = append(requiredTables, "security_audit_event_count")
 	}
 	for _, table := range requiredTables {
 		var count int

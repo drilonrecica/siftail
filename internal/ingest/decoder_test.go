@@ -68,8 +68,16 @@ func TestJSONDecoderAcceptedFluentBitShapes(t *testing.T) {
 			if tt.name == "json object" && string(batch.Events[0].MessageRaw) != "one\n  two" {
 				t.Fatalf("multiline raw = %q", batch.Events[0].MessageRaw)
 			}
-			if tt.name == "structured object" && string(batch.Events[0].MessageRaw) != tt.body {
-				t.Fatalf("structured raw = %q", batch.Events[0].MessageRaw)
+			if tt.name == "structured object" {
+				// A top-level message is the payload, kept as its own text;
+				// the other members are normalized or become attributes.
+				event := batch.Events[0]
+				if string(event.MessageRaw) != "failed" || event.MessageText != "failed" ||
+					event.Level != logs.LevelError || event.OriginalLevel != "ERROR" ||
+					event.Common.RequestID != "r1" || string(event.Attributes) != `{"extra":true}` {
+					t.Fatalf("structured event = %#v (raw %q, attributes %q)",
+						event, event.MessageRaw, event.Attributes)
+				}
 			}
 		})
 	}

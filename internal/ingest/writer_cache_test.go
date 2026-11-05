@@ -29,7 +29,7 @@ func eventSource(t *testing.T, db *sql.DB, message string) int64 {
 	return id
 }
 
-// DAT-02: RemoveSource deletes a source the writer still caches. SQLite then
+// RemoveSource deletes a source the writer still caches. SQLite then
 // hands the freed rowid to the next new source, so an unverified cache hit
 // would either fail the FK forever or attach events to the wrong source.
 func TestBatchWriterReingestsAfterSourceRemovalWithReusedRowID(t *testing.T) {
@@ -136,7 +136,7 @@ func TestBatchWriterForeignKeyRetryIsBounded(t *testing.T) {
 	}
 	assertCounts(t, db.Reader(), 0, 0, 0)
 	if writer.sources.Len() != 0 || writer.containers.Len() != 0 {
-		t.Fatalf("failed batch populated caches: %s, %s", writer.sources, writer.containers)
+		t.Fatalf("failed batch populated caches: sources=%d containers=%d", writer.sources.Len(), writer.containers.Len())
 	}
 }
 
@@ -149,7 +149,7 @@ func (f *ingestionIntegration) ingest(t *testing.T, body string) {
 	}
 }
 
-// DAT-02 acceptance over HTTP: removing a cached source never poisons later
+// Over HTTP: removing a cached source never poisons later
 // ingestion; the next request gets 204 and a fresh source row.
 func TestIngestionAfterCachedSourceRemovalCreatesFreshSource(t *testing.T) {
 	fixture := newIngestionIntegration(t, 10, 1<<20)

@@ -69,6 +69,7 @@ func assertCurrentMigrationHistory(t *testing.T, db *sql.DB) {
 		"0006_event_time_defaulted.sql",
 		"0007_retention_by_receipt.sql",
 		"0008_request_time_index.sql",
+		"0009_security_audit_count.sql",
 	}
 	var got []string
 	for rows.Next() {
@@ -327,6 +328,15 @@ func exerciseProductionCriticalPaths(
 		Scan(&auditCount); err != nil || auditCount != 1 {
 		t.Fatalf("schema-%d critical audit write = %d %v",
 			origin, auditCount, err)
+	}
+	// Migration 0009 seeds the audit row counter from the historical rows,
+	// and its triggers count the audit write above.
+	var counted, stored int
+	if err := db.Reader().QueryRow(`SELECT
+		(SELECT count(*) FROM security_audit_events),
+		(SELECT row_count FROM security_audit_event_count WHERE id = 1)`).
+		Scan(&counted, &stored); err != nil || counted != stored {
+		t.Fatalf("schema-%d audit counter = %d, rows = %d, %v", origin, stored, counted, err)
 	}
 	if err := database.IntegrityCheck(
 		context.Background(), db.Writer(),

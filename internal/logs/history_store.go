@@ -17,7 +17,7 @@ const MaxCatalogOptions = 10_000
 // pages finish in milliseconds; a broad literal search that would scan for
 // longer is interrupted, releases its read snapshot and reader connection,
 // and renders the shell error state well inside the 30-second UI response
-// deadline (audit DAT-07).
+// deadline.
 const DefaultHistoryQueryTimeout = 10 * time.Second
 
 var ErrCatalogTooLarge = errors.New("historical source catalog exceeds its bounded limit")

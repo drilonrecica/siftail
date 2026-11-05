@@ -135,3 +135,111 @@ func runTestCoordinator(t *testing.T, db *DB) (*Coordinator, context.CancelFunc,
 	}
 	return coordinator, cancel, done
 }
+
+// An operation that passed admission commits even when its caller gives up,
+// so Do must report that commit rather than the caller's cancellation.
+func TestCoordinatorReportsCommitForAdmittedCanceledOperation(t *testing.T) {
+	db := openTestDB(t)
+	coordinator, cancel, done := runTestCoordinator(t, db)
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	unblock := func() { releaseOnce.Do(func() { close(release) }) }
+	// Unblock before shutdown on every path, or a failed assertion would
+	// leave Run parked inside the blocking operation.
+	defer func() {
+		unblock()
+		coordinator.Close()
+		cancel()
+		<-done
+	}()
+
+	blocking := make(chan error, 1)
+	running := make(chan struct{})
+	go func() {
+		blocking <- coordinator.Do(context.Background(), func(*sql.Tx) error {
+			close(running)
+			<-release
+			return nil
+		})
+	}()
+	<-running
+	ctx, cancelCaller := context.WithCancel(context.Background())
+	admitted := make(chan error, 1)
+	go func() {
+		admitted <- coordinator.Do(ctx, func(tx *sql.Tx) error {
+			_, err := tx.Exec("INSERT INTO settings(key,value_json,updated_at_us) VALUES('admitted','{}',1)")
+			return err
+		})
+	}()
+	deadline := time.Now().Add(5 * time.Second)
+	for len(coordinator.operations) != 1 {
+		if time.Now().After(deadline) {
+			t.Fatal("second operation was not admitted")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	cancelCaller()
+	select {
+	case err := <-admitted:
+		t.Fatalf("admitted operation returned %v before it ran", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+	unblock()
+	if err := <-blocking; err != nil {
+		t.Fatal(err)
+	}
+	if err := <-admitted; err != nil {
+		t.Fatalf("committed operation reported %v", err)
+	}
+	var count int
+	if err := db.Reader().QueryRow("SELECT count(*) FROM settings WHERE key='admitted'").Scan(&count); err != nil || count != 1 {
+		t.Fatalf("admitted rows = %d, err=%v", count, err)
+	}
+}
+
+// Close racing with submitters must leave no admitted operation unexecuted:
+// every Do either runs its operation and returns its result, or is refused
+// with ErrCoordinatorClosed, and none waits forever.
+func TestCoordinatorCloseNeverStrandsAdmittedOperations(t *testing.T) {
+	db := openTestDB(t)
+	for iteration := 0; iteration < 50; iteration++ {
+		coordinator, cancel, done := runTestCoordinator(t, db)
+		var executed, succeeded atomic.Int64
+		var submitters sync.WaitGroup
+		for i := 0; i < 32; i++ {
+			submitters.Add(1)
+			go func() {
+				defer submitters.Done()
+				err := coordinator.Do(context.Background(), func(*sql.Tx) error {
+					executed.Add(1)
+					return nil
+				})
+				switch {
+				case err == nil:
+					succeeded.Add(1)
+				case !errors.Is(err, ErrCoordinatorClosed):
+					t.Error(err)
+				}
+			}()
+		}
+		if iteration%2 == 0 {
+			coordinator.Close()
+		} else {
+			cancel()
+		}
+		finished := make(chan struct{})
+		go func() { submitters.Wait(); close(finished) }()
+		select {
+		case <-finished:
+		case <-time.After(10 * time.Second):
+			t.Fatalf("iteration %d: a submitter never received a result", iteration)
+		}
+		cancel()
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
+		if executed.Load() != succeeded.Load() {
+			t.Fatalf("iteration %d: executed %d operations, reported %d", iteration, executed.Load(), succeeded.Load())
+		}
+	}
+}

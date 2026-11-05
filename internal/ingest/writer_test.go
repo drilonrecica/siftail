@@ -621,7 +621,7 @@ func persistEvents(t *testing.T, writer *BatchWriter, serverID int64, events ...
 	}
 }
 
-// DAT-01: `docker compose up --force-recreate` and Coolify redeploys reuse the
+// `docker compose up --force-recreate` and Coolify redeploys reuse the
 // container name with a new container ID. Before migration 0005 the INSERT
 // violated UNIQUE (source_id, container_name) and blocked the server forever.
 func TestBatchWriterRecreatedContainerSameNameNewIDNeverBlocks(t *testing.T) {
@@ -864,4 +864,37 @@ func TestBatchWriterCountsLateEventsAgainstPersistedAgeLimit(t *testing.T) {
 		t.Fatalf("invalid-policy result = %#v", result)
 	}
 	assertCounts(t, db.Reader(), 1, 1, 8)
+}
+
+func TestPersistenceErrorCategories(t *testing.T) {
+	categoryErr := func(category database.Category, foreignKey bool) error {
+		return &database.CategoryError{Category: category, Operation: "test", ForeignKey: foreignKey}
+	}
+	for name, tt := range map[string]struct {
+		err  error
+		want ErrorCategory
+	}{
+		"ingest error":       {&Error{Category: CategoryForbidden}, CategoryForbidden},
+		"busy":               {categoryErr(database.CategoryBusy, false), CategoryUnavailable},
+		"io":                 {categoryErr(database.CategoryIO, false), CategoryUnavailable},
+		"corrupt":            {categoryErr(database.CategoryCorrupt, false), CategoryUnavailable},
+		"full":               {categoryErr(database.CategoryFull, false), CategoryStorageFull},
+		"constraint":         {categoryErr(database.CategoryConstraint, false), CategoryBadRequest},
+		"stale foreign key":  {categoryErr(database.CategoryConstraint, true), CategoryInternal},
+		"internal":           {categoryErr(database.CategoryInternal, false), CategoryInternal},
+		"coordinator closed": {database.ErrCoordinatorClosed, CategoryUnavailable},
+		"canceled":           {context.Canceled, CategoryUnavailable},
+		"deadline":           {fmt.Errorf("wrapped: %w", context.DeadlineExceeded), CategoryUnavailable},
+		"unknown":            {errors.New("other"), CategoryInternal},
+		// A classified internal failure stays internal even if its cause
+		// is a cancellation.
+		"internal wrapping canceled": {&database.CategoryError{
+			Category: database.CategoryInternal, Operation: "test", Err: context.Canceled,
+		}, CategoryInternal},
+	} {
+		var got *Error
+		if !errors.As(persistenceError(tt.err), &got) || got.Category != tt.want {
+			t.Errorf("%s: persistenceError = %v, want %s", name, persistenceError(tt.err), tt.want)
+		}
+	}
 }

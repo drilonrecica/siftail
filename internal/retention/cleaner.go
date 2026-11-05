@@ -360,21 +360,24 @@ func (c *Cleaner) deleteOldest(ctx context.Context, cutoff *int64) (int64, error
 // behind one step run before the next. It reports whether a reader kept a
 // checkpoint busy.
 func (c *Cleaner) reclaim(ctx context.Context) (bool, error) {
-	busy, err := c.checkpoint(ctx, "PASSIVE")
+	busy, err := c.checkpoint(ctx, database.CheckpointPassive)
 	if err != nil || busy {
 		return busy, err
 	}
 	if err := c.vacuum(ctx); err != nil {
 		return false, err
 	}
-	return c.checkpoint(ctx, "TRUNCATE")
+	return c.checkpoint(ctx, database.CheckpointTruncate)
 }
 
-func (c *Cleaner) checkpoint(ctx context.Context, mode string) (bool, error) {
+func (c *Cleaner) checkpoint(ctx context.Context, mode database.CheckpointMode) (bool, error) {
 	var busy bool
 	err := c.coordinator.DoMaintenance(ctx, func(db *sql.DB) error {
 		var err error
-		busy, err = retentionCheckpoint(db, mode)
+		result, err := database.WALCheckpoint(
+			context.WithoutCancel(ctx), db, mode, "retention WAL checkpoint",
+		)
+		busy = result.Busy
 		return err
 	})
 	if err != nil {
@@ -438,19 +441,6 @@ func incrementalVacuum(db *sql.DB, pages int) (int, error) {
 		return 0, database.Classify("inspect retention freelist", err)
 	}
 	return max(before-after, 0), nil
-}
-
-func retentionCheckpoint(db *sql.DB, mode string) (bool, error) {
-	if mode != "PASSIVE" && mode != "TRUNCATE" {
-		return false, errors.New("invalid retention checkpoint mode")
-	}
-	var busy, logFrames, checkpointed int
-	query := "PRAGMA wal_checkpoint(" + mode + ")"
-	if err := db.QueryRow(query).
-		Scan(&busy, &logFrames, &checkpointed); err != nil {
-		return false, database.Classify("retention WAL checkpoint", err)
-	}
-	return busy != 0, nil
 }
 
 func (c *Cleaner) notifyDeleted(deleted int64) {

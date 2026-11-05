@@ -28,11 +28,13 @@ type MaintenanceCoordinator interface {
 }
 
 // Statements is the statement surface shared by *sql.Tx and the pinned
-// connection of an immediate transaction.
+// connection of an immediate transaction. A statement prepared on it belongs
+// to that connection and must be closed before the transaction ends.
 type Statements interface {
 	ExecContext(context.Context, string, ...any) (sql.Result, error)
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
 	QueryRowContext(context.Context, string, ...any) *sql.Row
+	PrepareContext(context.Context, string) (*sql.Stmt, error)
 }
 
 type mutationOperation struct {
@@ -70,6 +72,11 @@ func NewCoordinator(db *sql.DB) *Coordinator {
 
 // Run owns the coordinator worker. Closing admission drains every operation
 // accepted before Close and then returns.
+//
+// Both shutdown paths call Close before draining. Close returns only after
+// every submitter that passed admission has either enqueued its operation or
+// given up, and sync.Once makes a concurrent caller wait for that too, so the
+// drain sees every admitted operation and none is left without a result.
 func (c *Coordinator) Run(ctx context.Context) error {
 	c.mu.Lock()
 	if c.started {
@@ -90,6 +97,7 @@ func (c *Coordinator) Run(ctx context.Context) error {
 			c.drain(context.Background())
 			return nil
 		case <-c.closing:
+			c.Close()
 			c.drain(context.Background())
 			return nil
 		}
@@ -130,7 +138,9 @@ func (c *Coordinator) execute(ctx context.Context, run func(*sql.Tx) error) erro
 		return classify("begin coordinated mutation", err)
 	}
 	if err := run(tx); err != nil {
-		_ = tx.Rollback()
+		if rollbackErr := tx.Rollback(); rollbackErr != nil && !errors.Is(rollbackErr, sql.ErrTxDone) {
+			return errors.Join(err, classify("roll back coordinated mutation", rollbackErr))
+		}
 		return err
 	}
 	if err := tx.Commit(); err != nil {
@@ -176,6 +186,8 @@ func abandonTransaction(ctx context.Context, conn *sql.Conn) {
 	if rollbackErr == nil {
 		return
 	}
+	// Raw's only error is the driver.ErrBadConn returned below, which is the
+	// instruction to database/sql to discard the connection, not a failure.
 	_ = conn.Raw(func(driverConn any) error {
 		if sqliteConn, ok := driverConn.(*sqlite3.SQLiteConn); ok && sqliteConn.AutoCommit() {
 			return nil
@@ -191,8 +203,10 @@ func (c *Coordinator) executeMaintenance(run func(*sql.DB) error) error {
 	return run(c.db)
 }
 
-// Do admits one operation and waits for its committed result. Once admitted,
-// caller cancellation does not remove the operation from the serialized path.
+// Do admits one operation and waits for its committed result. Caller
+// cancellation only abandons admission: once admitted, the operation runs and
+// Do reports its real outcome, so a committed mutation is never reported as
+// canceled.
 func (c *Coordinator) Do(ctx context.Context, run func(*sql.Tx) error) error {
 	if run == nil {
 		return errors.New("database mutation operation is nil")
@@ -242,12 +256,10 @@ func (c *Coordinator) submit(ctx context.Context, operation mutationOperation) e
 		return ErrCoordinatorClosed
 	}
 
-	select {
-	case err := <-operation.result:
-		return err
-	case <-ctx.Done():
-		return ctx.Err()
-	}
+	// Run drains every admitted operation, even during shutdown, so the
+	// result always arrives. Returning ctx.Err() here instead would report a
+	// mutation that still commits as canceled.
+	return <-operation.result
 }
 
 // Close rejects new operations and lets Run drain accepted work.

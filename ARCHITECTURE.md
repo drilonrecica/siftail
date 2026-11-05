@@ -562,6 +562,7 @@ A likely normalized schema includes:
 - `container_instances`;
 - `log_events`;
 - `security_audit_events`;
+- `security_audit_event_count`;
 - `diagnostic_events` if persisted.
 
 `sources` stores the complete stable logical hierarchy as bounded, typed columns. This
@@ -591,6 +592,10 @@ application-event retention never uses or deletes it. Category and outcome do
 not receive speculative indexes: the table is hard-capped at 100,000 rows, and
 the measured worst-case selective scan remains bounded. Add an index only if
 the implemented audit UI benchmarks justify its cost.
+
+Migration `0009` adds the one-row `security_audit_event_count` table, kept
+exact by `AFTER INSERT` and `AFTER DELETE` triggers on `security_audit_events`.
+The cap check in every audit insert reads it instead of counting the table.
 
 ### 10.7 Log-event schema sketch
 
@@ -896,6 +901,20 @@ Recommended:
 - preserve normalized leftover attributes as JSON;
 - store transport envelope only where necessary for debugging compatibility.
 
+Implemented selection: the record member `log`, else `message`, else `msg`, is
+the payload and keeps its exact text; any other of the three stays a record
+field and, unless normalized, an attribute. Only a payload that is a JSON
+object, or a string holding one, contributes structured application fields. A
+record with none of the three is itself the payload: `message_raw` keeps the
+record bytes and `message_text` is its compact JSON, while its members are
+normalized once as record fields, so transport envelope keys never reappear
+as attributes.
+
+Each received record is tokenized once: one validating pass rejects malformed
+JSON, invalid UTF-8, duplicate keys at any depth, trailing data, and excess
+nesting, and splits the top-level members in the same pass. A string payload
+that holds a JSON object is a separate document and is parsed once more.
+
 ---
 
 ## 13. In-memory ingestion queue
@@ -1029,6 +1048,13 @@ mutations run between groups, never inside one.
 ### 14.4 Prepared statements
 
 Prepare hot insert/upsert statements at writer initialization or per connection according to driver behavior.
+
+Implemented: the go-sqlite3 driver keeps no statement cache, so every
+unprepared `Exec` compiles its SQL again. The writer prepares the per-event
+`log_events` INSERT and the stable-ID lookup once per commit group, on the
+group's pinned writer connection, reuses them for every event of every batch
+in the group, and finalizes them before `COMMIT`. Statements that run once
+per batch or per source are not prepared.
 
 Check every error.
 
@@ -1731,7 +1757,9 @@ the configured age or the table exceeds 100,000 rows. Application-log retention 
 deletes audit records.
 
 The audit store enforces the count cap in the same transaction as every insert,
-keeping the newest 100,000 events by `(occurred_at_us, id)`. Explicit cleanup
+keeping the newest 100,000 events by `(occurred_at_us, id)`. The row count
+comes from the trigger-maintained `security_audit_event_count` row, so the
+check costs one primary-key read rather than a scan of the capped table. Explicit cleanup
 deletes at most 1,000 rows per coordinator transaction, applying the age limit
 first and then repairing any count overflow. The application root owns one
 recoverable cleanup worker that runs once at startup and then hourly. A

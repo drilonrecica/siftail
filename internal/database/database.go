@@ -17,10 +17,10 @@ import (
 )
 
 const (
-	MaxSchemaVersion = 8
+	MaxSchemaVersion = 9
 	readConnections  = 4
 	// authConnections is the dedicated read-only pool for ingestion-token
-	// verification (audit DAT-08). Exports, History searches, and active
+	// verification. Exports, History searches, and active
 	// quick_check runs share the ordinary reader pool and can hold every one
 	// of its connections; authentication must never queue behind them.
 	authConnections  = 2
@@ -140,13 +140,18 @@ func dsn(path string, readOnly bool) string {
 	if readOnly {
 		mode = "ro"
 	}
-	query := url.Values{
+	return fileURI(path, url.Values{
 		"mode":          {mode},
 		"_journal_mode": {"WAL"},
 		"_synchronous":  {"FULL"},
 		"_foreign_keys": {"on"},
 		"_busy_timeout": {"5000"},
-	}
+	})
+}
+
+// fileURI is the SQLite URI filename every connection this package opens
+// uses; query carries the open mode and the driver's connection parameters.
+func fileURI(path string, query url.Values) string {
 	return "file:" + filepath.ToSlash(path) + "?" + query.Encode()
 }
 
@@ -270,12 +275,13 @@ func (d *DB) AuthReader() *sql.DB { return d.auth }
 
 // Checkpoint requests a passive WAL checkpoint.
 func (d *DB) Checkpoint(ctx context.Context) error {
-	var busy, logFrames, checkpointed int
-	if err := d.writer.QueryRowContext(ctx, "PRAGMA wal_checkpoint(PASSIVE)").Scan(&busy, &logFrames, &checkpointed); err != nil {
-		return classify("passive WAL checkpoint", err)
+	const operation = "passive WAL checkpoint"
+	result, err := WALCheckpoint(ctx, d.writer, CheckpointPassive, operation)
+	if err != nil {
+		return err
 	}
-	if busy != 0 {
-		return &CategoryError{Category: CategoryBusy, Operation: "passive WAL checkpoint"}
+	if result.Busy {
+		return &CategoryError{Category: CategoryBusy, Operation: operation}
 	}
 	return nil
 }
@@ -283,18 +289,56 @@ func (d *DB) Checkpoint(ctx context.Context) error {
 // CheckpointTruncate incorporates every committed WAL frame into the main
 // database and truncates the stopped-server WAL before file replacement.
 func (d *DB) CheckpointTruncate(ctx context.Context) error {
-	var busy, logFrames, checkpointed int
-	if err := d.writer.QueryRowContext(
-		ctx, "PRAGMA wal_checkpoint(TRUNCATE)",
-	).Scan(&busy, &logFrames, &checkpointed); err != nil {
-		return classify("truncate WAL checkpoint", err)
+	const operation = "truncate WAL checkpoint"
+	result, err := WALCheckpoint(ctx, d.writer, CheckpointTruncate, operation)
+	if err != nil {
+		return err
 	}
-	if busy != 0 || checkpointed < logFrames {
-		return &CategoryError{
-			Category: CategoryBusy, Operation: "truncate WAL checkpoint",
-		}
+	if !result.Complete() {
+		return &CategoryError{Category: CategoryBusy, Operation: operation}
 	}
 	return nil
+}
+
+// CheckpointMode is a PRAGMA wal_checkpoint mode Siftail uses.
+type CheckpointMode string
+
+const (
+	CheckpointPassive  CheckpointMode = "PASSIVE"
+	CheckpointTruncate CheckpointMode = "TRUNCATE"
+)
+
+// WALCheckpointResult is the row PRAGMA wal_checkpoint returns.
+type WALCheckpointResult struct {
+	// Busy reports that a reader or writer prevented a complete checkpoint.
+	Busy bool
+	// LogFrames is the number of frames in the WAL.
+	LogFrames int
+	// CheckpointedFrames is the number of those frames copied back into
+	// the main database.
+	CheckpointedFrames int
+}
+
+// Complete reports whether every WAL frame reached the main database.
+func (r WALCheckpointResult) Complete() bool {
+	return !r.Busy && r.CheckpointedFrames >= r.LogFrames
+}
+
+// WALCheckpoint runs one WAL checkpoint on the writer connection db and
+// classifies a failure under operation. Interpreting a busy or partial result
+// is the caller's decision.
+func WALCheckpoint(ctx context.Context, db *sql.DB, mode CheckpointMode, operation string) (WALCheckpointResult, error) {
+	if mode != CheckpointPassive && mode != CheckpointTruncate {
+		return WALCheckpointResult{}, fmt.Errorf("%s: unsupported checkpoint mode", operation)
+	}
+	var busy int
+	var result WALCheckpointResult
+	if err := db.QueryRowContext(ctx, "PRAGMA wal_checkpoint("+string(mode)+")").
+		Scan(&busy, &result.LogFrames, &result.CheckpointedFrames); err != nil {
+		return WALCheckpointResult{}, classify(operation, err)
+	}
+	result.Busy = busy != 0
+	return result, nil
 }
 
 // QuickCheck runs SQLite's bounded startup integrity check.
@@ -369,11 +413,17 @@ type CategoryError struct {
 	// (SQLITE_CONSTRAINT_FOREIGNKEY), which callers holding cached row IDs
 	// treat as a stale reference rather than a client error.
 	ForeignKey bool
+	// Err is the driver error that was classified. Error deliberately omits
+	// it so raw SQLite text never reaches a client, while errors.Is and
+	// errors.As still see it through Unwrap.
+	Err error
 }
 
 func (e *CategoryError) Error() string {
 	return fmt.Sprintf("%s: database %s", e.Operation, e.Category)
 }
+
+func (e *CategoryError) Unwrap() error { return e.Err }
 
 type SchemaTooNewError struct {
 	Actual    int
@@ -403,6 +453,7 @@ func classify(operation string, err error) error {
 		return &CategoryError{
 			Category: category, Operation: operation,
 			ForeignKey: sqliteErr.ExtendedCode == sqlite3.ErrConstraintForeignKey,
+			Err:        err,
 		}
 	}
 	return fmt.Errorf("%s: %w", operation, err)
