@@ -119,10 +119,14 @@
     list.querySelectorAll("[role='option']").forEach((item, index) => {
       item.setAttribute("aria-selected", index === activeIndex ? "true" : "false");
     });
-    input.setAttribute(
-      "aria-activedescendant",
-      matches.length > 0 ? `palette-option-${activeIndex}` : "",
-    );
+    // An empty aria-activedescendant points at nothing; remove it instead.
+    if (matches.length > 0) {
+      input.setAttribute("aria-activedescendant", `palette-option-${activeIndex}`);
+    } else {
+      input.removeAttribute("aria-activedescendant");
+    }
+    // The popup listbox is expanded only while it shows options.
+    input.setAttribute("aria-expanded", matches.length > 0 ? "true" : "false");
     list.querySelector(`#palette-option-${activeIndex}`)?.scrollIntoView({
       block: "nearest",
     });
@@ -145,27 +149,51 @@
   };
 
   dialog.addEventListener("close", () => {
+    input.setAttribute("aria-expanded", "false");
+    input.removeAttribute("aria-activedescendant");
     if (returnFocus instanceof HTMLElement && document.contains(returnFocus)) {
       returnFocus.focus({ preventScroll: true });
     }
   });
 
   input.addEventListener("input", render);
-  input.addEventListener("keydown", (event) => {
-    if (event.key === "ArrowDown") {
-      event.preventDefault();
-      if (matches.length > 0) activeIndex = (activeIndex + 1) % matches.length;
-      syncActive();
-    } else if (event.key === "ArrowUp") {
-      event.preventDefault();
-      if (matches.length > 0) {
-        activeIndex = (activeIndex - 1 + matches.length) % matches.length;
-      }
-      syncActive();
-    } else if (event.key === "Enter") {
-      event.preventDefault();
-      if (matches.length > 0) execute(activeIndex);
+
+  // Keys reach the palette through the keyboard module, the only key-event
+  // listener (DESIGN.md §32.6, §39).
+  const keyboard = window.siftailKeyboard;
+  if (!keyboard) return;
+
+  keyboard.register((event) => {
+    if (event.target !== input) return false;
+    switch (event.key) {
+      case "ArrowDown":
+        if (matches.length > 0) activeIndex = (activeIndex + 1) % matches.length;
+        syncActive();
+        return true;
+      case "ArrowUp":
+        if (matches.length > 0) {
+          activeIndex = (activeIndex - 1 + matches.length) % matches.length;
+        }
+        syncActive();
+        return true;
+      case "Enter":
+        if (matches.length > 0) execute(activeIndex);
+        return true;
+      default:
+        return false;
     }
+  });
+
+  // Ctrl/Cmd+K is a modifier chord, not a printable single-key shortcut, so
+  // it works whatever the shortcuts preference says (§32.6). It is claimed
+  // only here, where the palette can actually open.
+  keyboard.register((event) => {
+    if (!(event.ctrlKey || event.metaKey) || event.altKey ||
+      event.key.toLowerCase() !== "k") {
+      return false;
+    }
+    open();
+    return true;
   });
 
   const paletteButton = document.querySelector("[data-palette-open]");
@@ -173,12 +201,4 @@
     paletteButton.hidden = false;
     paletteButton.addEventListener("click", open);
   }
-
-  document.addEventListener("keydown", (event) => {
-    if ((event.ctrlKey || event.metaKey) && !event.altKey &&
-      event.key.toLowerCase() === "k") {
-      event.preventDefault();
-      open();
-    }
-  });
 })();

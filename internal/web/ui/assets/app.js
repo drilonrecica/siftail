@@ -16,11 +16,21 @@
     document.documentElement.dataset.density =
       density === "comfortable" ? "comfortable" : "compact";
   };
+  // The keyboard module reads data-shortcuts on every key press, so turning
+  // shortcuts off takes effect immediately (DESIGN.md §32.6).
+  const applyShortcuts = (shortcuts) => {
+    if (shortcuts === "off") {
+      document.documentElement.dataset.shortcuts = "off";
+    } else {
+      delete document.documentElement.dataset.shortcuts;
+    }
+  };
   if (prefsForm) {
     prefsForm.addEventListener("change", () => {
       const data = new FormData(prefsForm);
       applyTheme(String(data.get("theme")));
       applyDensity(String(data.get("density")));
+      applyShortcuts(String(data.get("shortcuts")));
       void fetch(prefsForm.action, {
         method: "POST",
         headers: {
@@ -54,14 +64,31 @@
         systemMenu.open = false;
       }
     });
-    systemMenu.addEventListener("keydown", (event) => {
-      if (event.key === "Escape" && systemMenu.open) {
-        systemMenu.open = false;
-        const summary = systemMenu.querySelector("summary");
-        if (summary) summary.focus();
+    // Escape reaches the menu through the keyboard module, the only
+    // key-event listener (DESIGN.md §39).
+    window.siftailKeyboard?.register((event) => {
+      if (event.key !== "Escape" || !systemMenu.open ||
+        !(event.target instanceof Node) || !systemMenu.contains(event.target)) {
+        return false;
       }
+      systemMenu.open = false;
+      systemMenu.querySelector("summary")?.focus();
+      return true;
     });
   }
+
+  // The keyboard help's "shortcuts are off" note points at the preference:
+  // open the System menu and focus the control.
+  document.addEventListener("click", (event) => {
+    if (!(event.target instanceof Element) ||
+      !event.target.closest("[data-show-shortcuts-pref]")) {
+      return;
+    }
+    event.target.closest("dialog")?.close();
+    const menu = document.querySelector("[data-system-menu]");
+    if (menu instanceof HTMLDetailsElement) menu.open = true;
+    document.querySelector("[data-shortcuts-select]")?.focus();
+  });
 
   if (window.htmx) {
     window.htmx.config.historyCacheSize = 0;

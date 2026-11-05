@@ -4,10 +4,15 @@
     <h2 id="keyboard-help-title">Keyboard shortcuts</h2>
     <form method="dialog"><button class="button button-quiet" type="submit">Close</button></form>
   </div>
+  <div class="shortcuts-off-note notice notice-warning" data-shortcuts-off-note>
+    <p>Keyboard shortcuts are off, so single-key shortcuts do nothing. <kbd>Esc</kbd> and <kbd data-chord-key="K">Ctrl K</kbd> still work.</p>
+    <button class="button button-quiet" type="button" data-show-shortcuts-pref>Change the Shortcuts preference</button>
+  </div>
   <section aria-label="Global shortcuts">
     <h3>Everywhere</h3>
     <dl class="shortcut-list">
-      <div><dt><kbd>?</kbd></dt><dd>Open this help</dd></div>
+      <div><dt><kbd data-chord-key="K">Ctrl K</kbd></dt><dd>Open the command palette (the palette button in the header)</dd></div>
+      <div><dt><kbd>?</kbd></dt><dd>Open this help (or System → Keyboard shortcuts)</dd></div>
       <div><dt><kbd>Esc</kbd></dt><dd>Close the open overlay, or clear the selected row</dd></div>
     </dl>
   </section>
@@ -16,12 +21,12 @@
     <h3>Logs workspace</h3>
     <dl class="shortcut-list">
       <div><dt><kbd>F</kbd></dt><dd>Focus message search</dd></div>
-      <div><dt><kbd>H</kbd></dt><dd>Switch to History</dd></div>
-      <div><dt><kbd>L</kbd></dt><dd>Switch to Live</dd></div>
+      <div><dt><kbd>H</kbd></dt><dd>Switch to History (the History tab)</dd></div>
+      <div><dt><kbd>L</kbd></dt><dd>Switch to Live (the Live tab)</dd></div>
       <div><dt><kbd>J</kbd> / <kbd>K</kbd></dt><dd>Next / previous log row</dd></div>
-      <div><dt><kbd>Enter</kbd></dt><dd>Expand or collapse the selected row</dd></div>
-      <div><dt><kbd>Space</kbd></dt><dd>Pause or resume Live</dd></div>
-      <div><dt><kbd>G</kbd></dt><dd>Jump to the newest live event</dd></div>
+      <div><dt><kbd>Enter</kbd></dt><dd>Expand or collapse the selected row (its › toggle)</dd></div>
+      <div><dt><kbd>Space</kbd></dt><dd>Pause or resume Live (the Pause button; Live only)</dd></div>
+      <div><dt><kbd>G</kbd></dt><dd>Jump to the newest live event (the Jump to newest button)</dd></div>
     </dl>
   </section>
   {{else}}

@@ -9,6 +9,7 @@ import {
   navigateSystem,
   openSystemMenu,
   readState,
+  setShortcuts,
   setTheme,
   siftailEnvironment,
 } from "./support";
@@ -498,6 +499,219 @@ test("shortcuts are scoped to Logs, discoverable, and inert on form pages", asyn
   await page.keyboard.press("Escape");
 });
 
+// Records, after every document-level handler ran, whether a Space keydown
+// was default-prevented, so a test can tell "the keyboard layer took Space"
+// apart from native activation.
+async function watchSpace(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const record: boolean[] = [];
+    (window as unknown as { spacePrevented: boolean[] }).spacePrevented = record;
+    window.addEventListener("keydown", (event) => {
+      if (event.key === " ") record.push(event.defaultPrevented);
+    });
+  });
+}
+
+async function lastSpacePrevented(page: Page): Promise<boolean | undefined> {
+  return page.evaluate(() => {
+    const record = (window as unknown as { spacePrevented: boolean[] }).spacePrevented;
+    return record[record.length - 1];
+  });
+}
+
+test("Space keeps native activation on controls in History and Live", async ({ page }) => {
+  await login(page);
+  await watchSpace(page);
+
+  // History has no pause control: Space from the page body is left to the
+  // browser (page scrolling).
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  await page.keyboard.press("Space");
+  expect(await lastSpacePrevented(page)).toBe(false);
+
+  // A summary toggles its disclosure natively.
+  const disclosure = page.locator(".history-filter-disclosure").first();
+  await expect(disclosure).toHaveAttribute("open", "");
+  await disclosure.locator("summary").first().focus();
+  await page.keyboard.press("Space");
+  expect(await lastSpacePrevented(page)).toBe(false);
+  await expect(disclosure).not.toHaveAttribute("open", "");
+  await page.keyboard.press("Space");
+  await expect(disclosure).toHaveAttribute("open", "");
+
+  // A button activates natively.
+  await page.locator("[data-palette-open]").focus();
+  await page.keyboard.press("Space");
+  expect(await lastSpacePrevented(page)).toBe(false);
+  const palette = page.getByRole("dialog", { name: "Command palette" });
+  await expect(palette).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(palette).toBeHidden();
+
+  // Live: Space on the Pause button activates it exactly once (a second,
+  // shortcut-driven click would toggle it straight back to Live).
+  await page.keyboard.press("l");
+  await expect(page).toHaveURL(/mode=live/);
+  await expect(page.locator("[data-live-status]")).toHaveText("Live");
+  await watchSpace(page);
+  await page.locator("[data-live-pause]").focus();
+  await page.keyboard.press("Space");
+  expect(await lastSpacePrevented(page)).toBe(false);
+  await expect(page.locator("[data-live-status]")).toHaveText("Paused");
+  await page.keyboard.press("Space");
+  await expect(page.locator("[data-live-status]")).toHaveText("Live");
+
+  // Space on the System menu summary opens the menu and leaves Live alone.
+  const systemMenu = page.locator("[data-system-menu]");
+  await systemMenu.locator("summary").focus();
+  await page.keyboard.press("Space");
+  expect(await lastSpacePrevented(page)).toBe(false);
+  await expect(systemMenu).toHaveAttribute("open", "");
+  await expect(page.locator("[data-live-status]")).toHaveText("Live");
+  await page.keyboard.press("Escape");
+  await expect(systemMenu).not.toHaveAttribute("open", "");
+  await expect(systemMenu.locator("summary")).toBeFocused();
+
+  // Away from controls, Space is the Live pause shortcut.
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  await page.keyboard.press("Space");
+  expect(await lastSpacePrevented(page)).toBe(true);
+  await expect(page.locator("[data-live-status]")).toHaveText("Paused");
+});
+
+test("the shortcuts preference makes single-key shortcuts inert", async ({ page }) => {
+  await login(page);
+  await expect(page.locator("html")).not.toHaveAttribute("data-shortcuts", /.*/);
+  await setShortcuts(page, "off");
+  await expect(page.locator("html")).toHaveAttribute("data-shortcuts", "off");
+
+  // Server-rendered: the preference survives a reload before any script.
+  await page.reload();
+  await expect(page.locator("html")).toHaveAttribute("data-shortcuts", "off");
+  await expect(page.locator("[data-shortcuts-select]")).toHaveValue("off");
+
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  for (const key of ["j", "k", "f", "g", "h"]) await page.keyboard.press(key);
+  await expect(page.locator(".log-row:focus")).toHaveCount(0);
+  await expect(page.locator('input[name="contains"]')).not.toBeFocused();
+  await page.keyboard.press("?");
+  const help = page.getByRole("dialog", { name: "Keyboard shortcuts" });
+  await expect(help).toBeHidden();
+  await page.keyboard.press("l");
+  await expect(page).toHaveURL(/mode=history/);
+
+  // Escape and Ctrl/Cmd+K are unaffected.
+  await page.keyboard.press("Control+k");
+  const palette = page.getByRole("dialog", { name: "Command palette" });
+  await expect(palette).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(palette).toBeHidden();
+
+  // Live: Space from the page no longer pauses.
+  await page.locator(".mode-switch a", { hasText: "Live" }).click();
+  await expect(page).toHaveURL(/mode=live/);
+  await expect(page.locator("[data-live-status]")).toHaveText("Live");
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  await page.keyboard.press("Space");
+  await page.keyboard.press("g");
+  await expect(page.locator("[data-live-status]")).toHaveText("Live");
+
+  // The help stays reachable from the System menu, says shortcuts are off,
+  // and leads to the preference.
+  await openSystemMenu(page);
+  await page.getByRole("button", { name: "Keyboard shortcuts" }).click();
+  await expect(help).toBeVisible();
+  await expect(help.getByText("Keyboard shortcuts are off")).toBeVisible();
+  let results = await new AxeBuilder({ page })
+    .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"])
+    .analyze();
+  expect(results.violations.map((violation) => violation.id)).toEqual([]);
+  await help.getByRole("button", { name: "Change the Shortcuts preference" }).click();
+  await expect(help).toBeHidden();
+  await expect(page.locator("[data-shortcuts-select]")).toBeFocused();
+
+  // Back on: the same keys work again without a reload.
+  await setShortcuts(page, "on");
+  await expect(page.locator("html")).not.toHaveAttribute("data-shortcuts", /.*/);
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  await page.keyboard.press("Space");
+  await expect(page.locator("[data-live-status]")).toHaveText("Paused");
+  await page.keyboard.press("?");
+  await expect(help).toBeVisible();
+  await expect(help.getByText("Keyboard shortcuts are off")).toBeHidden();
+  results = await new AxeBuilder({ page })
+    .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"])
+    .analyze();
+  expect(results.violations.map((violation) => violation.id)).toEqual([]);
+  await page.keyboard.press("Escape");
+});
+
+test("keyboard help and palette hint use the platform modifier", async ({ page }) => {
+  await login(page);
+  const button = page.locator("[data-palette-open]");
+  await expect(button).toContainText("Ctrl K");
+  await page.keyboard.press("?");
+  const help = page.getByRole("dialog", { name: "Keyboard shortcuts" });
+  await expect(help).toBeVisible();
+  for (const text of [
+    "Open the command palette", "Open this help", "Focus message search",
+    "Switch to History", "Switch to Live", "Next / previous log row",
+    "Expand or collapse the selected row", "Pause or resume Live",
+    "Jump to the newest live event",
+  ]) {
+    await expect(help.getByText(text)).toBeVisible();
+  }
+  const global = help.getByRole("region", { name: "Global shortcuts" });
+  await expect(global.locator("kbd", { hasText: "Ctrl K" })).toBeVisible();
+  await page.keyboard.press("Escape");
+
+  // On Apple platforms both read ⌘K.
+  await page.addInitScript(() => {
+    Object.defineProperty(Navigator.prototype, "platform", { get: () => "MacIntel" });
+    Object.defineProperty(Navigator.prototype, "userAgentData", { get: () => undefined });
+  });
+  await page.reload();
+  await expect(button).toContainText("⌘K");
+  await page.keyboard.press("?");
+  await expect(global.locator("kbd", { hasText: "⌘K" })).toBeVisible();
+  await expect(help.getByText("Ctrl K")).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("Meta+k");
+  await expect(page.getByRole("dialog", { name: "Command palette" })).toBeVisible();
+  await page.keyboard.press("Escape");
+});
+
+test("sticky header leaves room for focused rows and the health target is 24 px", async ({
+  page,
+}) => {
+  await login(page);
+  for (const width of [1280, 390]) {
+    await page.setViewportSize({ width, height: 844 });
+    const { padding, header } = await page.evaluate(() => ({
+      padding: parseFloat(getComputedStyle(document.documentElement).scrollPaddingTop),
+      header: document.querySelector(".app-header")!.getBoundingClientRect().height,
+    }));
+    expect(padding).toBeGreaterThan(0);
+    expect(Math.abs(padding - header)).toBeLessThan(0.5);
+    const health = await page.locator(".health-indicator").boundingBox();
+    expect(health!.width).toBeGreaterThanOrEqual(24);
+    expect(health!.height).toBeGreaterThanOrEqual(24);
+  }
+
+  // A J-selected row far down the list is never left under the header.
+  await page.setViewportSize({ width: 1280, height: 844 });
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  for (let index = 0; index < 30; index += 1) await page.keyboard.press("j");
+  await page.keyboard.press("k");
+  const rowTop = await page.locator(".log-row:focus").evaluate(
+    (row) => row.getBoundingClientRect().top,
+  );
+  const headerBottom = await page.locator(".app-header").evaluate(
+    (header) => header.getBoundingClientRect().bottom,
+  );
+  expect(rowTop).toBeGreaterThanOrEqual(headerBottom - 0.5);
+});
+
 test("command palette navigates, filters sources, and restores focus", async ({ page }) => {
   await login(page);
 
@@ -505,7 +719,16 @@ test("command palette navigates, filters sources, and restores focus", async ({ 
   await page.keyboard.press("Control+k");
   const palette = page.getByRole("dialog", { name: "Command palette" });
   await expect(palette).toBeVisible();
-  await expect(page.locator("[data-palette-input]")).toBeFocused();
+  const paletteInput = page.locator("[data-palette-input]");
+  await expect(paletteInput).toBeFocused();
+  // The combobox reports its listbox state, and points at an option only
+  // while one exists.
+  await expect(paletteInput).toHaveAttribute("aria-expanded", "true");
+  await expect(paletteInput).toHaveAttribute("aria-activedescendant", "palette-option-0");
+  await paletteInput.fill("zzqqxxnomatch");
+  await expect(page.locator("[data-palette-empty]")).toBeVisible();
+  await expect(paletteInput).toHaveAttribute("aria-expanded", "false");
+  await expect(paletteInput).not.toHaveAttribute("aria-activedescendant", /.*/);
   await page.locator("[data-palette-input]").fill("status");
   await page.keyboard.press("Enter");
   await expect(page).toHaveURL(/\/status$/);

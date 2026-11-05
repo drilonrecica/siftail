@@ -14,7 +14,7 @@
         <span class="visually-hidden">Status: {{.Health}}</span>
       </a>{{end}}
       <button class="button button-quiet palette-button" type="button" data-palette-open hidden>
-        <span aria-hidden="true">⌘K</span>
+        <span aria-hidden="true" data-chord-key="K">Ctrl K</span>
         <span class="visually-hidden">Open command palette</span>
       </button>
       <details class="system-menu" data-system-menu>
@@ -44,8 +44,16 @@
                 <option value="comfortable"{{if eq .Prefs.Density "comfortable"}} selected{{end}}>Comfortable</option>
               </select>
             </div>
+            <div class="prefs-field">
+              <label for="shortcuts">Shortcuts</label>
+              <select id="shortcuts" name="shortcuts" data-shortcuts-select>
+                <option value="on"{{if ne .Prefs.Shortcuts "off"}} selected{{end}}>On</option>
+                <option value="off"{{if eq .Prefs.Shortcuts "off"}} selected{{end}}>Off</option>
+              </select>
+            </div>
             <noscript><button class="button button-quiet" type="submit">Apply</button></noscript>
           </form>
+          <button class="button button-quiet system-menu-help" type="button" data-open-keyboard-help hidden>Keyboard shortcuts</button>
           <form class="system-menu-signout" method="post" action="/session/logout">
             <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
             <button class="button button-quiet" type="submit">Sign out</button>

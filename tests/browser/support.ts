@@ -75,3 +75,14 @@ export async function setDensity(
   await page.locator("[data-density-select]").selectOption(density);
   await closeSystemMenu(page);
 }
+
+// Changing a preference persists it with a background POST; wait for that
+// response so a following navigation already carries the new cookie.
+export async function setShortcuts(page: Page, value: "on" | "off"): Promise<void> {
+  await openSystemMenu(page);
+  await Promise.all([
+    page.waitForResponse((response) => response.url().endsWith("/preferences")),
+    page.locator("[data-shortcuts-select]").selectOption(value),
+  ]);
+  await closeSystemMenu(page);
+}

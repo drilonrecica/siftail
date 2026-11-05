@@ -20,10 +20,11 @@ type Renderer struct {
 }
 
 // PrefsView carries the non-secret interface preferences rendered as
-// data-theme and data-density attributes before first paint.
+// data-theme, data-density, and data-shortcuts attributes before first paint.
 type PrefsView struct {
-	Theme   string
-	Density string
+	Theme     string
+	Density   string
+	Shortcuts string
 }
 
 type LoginView struct {

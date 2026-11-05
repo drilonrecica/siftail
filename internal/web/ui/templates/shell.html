@@ -1,5 +1,5 @@
 {{define "shell.html"}}{{$p := .PageMeta}}<!doctype html>
-<html lang="en"{{if or (eq .Prefs.Theme "dark") (eq .Prefs.Theme "light")}} data-theme="{{.Prefs.Theme}}"{{end}}{{if eq .Prefs.Density "comfortable"}} data-density="comfortable"{{end}}>
+<html lang="en"{{if or (eq .Prefs.Theme "dark") (eq .Prefs.Theme "light")}} data-theme="{{.Prefs.Theme}}"{{end}}{{if eq .Prefs.Density "comfortable"}} data-density="comfortable"{{end}}{{if eq .Prefs.Shortcuts "off"}} data-shortcuts="off"{{end}}>
 <head>
   {{template "head.html" $p.Title}}
 </head>
