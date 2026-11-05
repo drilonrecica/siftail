@@ -2,7 +2,8 @@
 
 **Reviewed:** 2026-11-05  
 **Scope:** SFT-041 active-server storage failure and deterministic recovery;
-SFT-089 failure scoping and readiness guidance
+SFT-089 failure scoping and readiness guidance; SFT-107 browser sessions and
+sign-in while degraded
 
 ## Observable behavior
 
@@ -27,6 +28,31 @@ them before decoding or queueing their bodies:
 Siftail does not keep an in-memory overflow, create an internal disk spool,
 delete or recreate the database, run automatic full `VACUUM`, or acknowledge
 an uncommitted request.
+
+## Signing in and staying signed in while degraded
+
+A degraded database does not sign the administrator out (SFT-107):
+
+- An existing browser session keeps working as long as SQLite can still read
+  it. Siftail normally records a session's "last used" time at most every five
+  minutes; when that write fails, Siftail skips it and still serves the page.
+  The next request after five minutes tries again. A session that cannot be
+  touched still ends at its normal 12-hour idle or 7-day absolute limit.
+- When the session read itself fails, the page answers `503` with "Siftail
+  cannot check your session" and a **Try again** link. The response never
+  redirects to sign-in and never clears the session cookie, so retrying
+  after recovery continues the same session. htmx requests receive the same
+  notice as an inline fragment.
+- Sign-in still works during storage-full when SQLite can write the session
+  row and its `sign_in` audit row, which are small. When it cannot, sign-in
+  answers `503` on the sign-in page. The message says the credentials were
+  correct and that the session could not be saved, either because storage is
+  full (free space on the data volume, then sign in again) or because the
+  database is temporarily unavailable. No cookie is set and no session row
+  remains.
+
+To keep Status reachable during an incident, avoid signing out while
+degraded: signing out revokes the session with a write that may itself fail.
 
 Only storage-wide failures degrade ingestion this way: busy, I/O, corruption,
 and full storage. A batch that fails a SQLite constraint (`400`) or hits an

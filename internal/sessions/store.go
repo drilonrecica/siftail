@@ -34,6 +34,9 @@ const (
 var (
 	ErrInvalidSession  = errors.New("invalid session")
 	ErrSessionNotFound = errors.New("session not found")
+	// ErrSessionUnavailable reports that the database could not answer a
+	// session lookup. It says nothing about the session itself.
+	ErrSessionUnavailable = errors.New("session lookup unavailable")
 )
 
 type Store struct {
@@ -177,8 +180,53 @@ func (s *Store) Issue(
 	return Issued{Session: session, Token: token}, nil
 }
 
+// Lookup authenticates a session token. It returns ErrInvalidSession only
+// when the session is unknown, revoked, expired, or idle, and an error
+// wrapping ErrSessionUnavailable when the database could not answer, so
+// callers never mistake a degraded database for a signed-out administrator
+// (audit SEC-09). A successful read authenticates on its own: the "last used"
+// touch is best effort and is skipped, not fatal, when the write fails.
 func (s *Store) Lookup(ctx context.Context, token string) (Session, error) {
 	hash := sha256.Sum256([]byte(token))
+	session, err := s.read(ctx, hash[:])
+	if err != nil {
+		return Session{}, err
+	}
+	now := s.now().UTC()
+	if !session.activeAt(now) {
+		return Session{}, ErrInvalidSession
+	}
+	if now.Sub(session.LastUsedAt) < TouchInterval {
+		return session, nil
+	}
+	err = s.touch(ctx, session.ID, now)
+	switch {
+	case err == nil:
+		session.LastUsedAt = now
+		return session, nil
+	case errors.Is(err, ErrInvalidSession):
+		// The guarded update matched no row: a concurrent request already
+		// touched the session, or it was revoked or expired since the read.
+		// Only a fresh read can tell those apart.
+		current, err := s.read(ctx, hash[:])
+		if err != nil {
+			return Session{}, err
+		}
+		if !current.activeAt(now) {
+			return Session{}, ErrInvalidSession
+		}
+		return current, nil
+	default:
+		// The write failed (storage full, read-only, busy, coordinator
+		// closing). The read already proved the session valid; the next
+		// lookup after TouchInterval tries the touch again.
+		return session, nil
+	}
+}
+
+// read loads the session for a token hash with the stored expiry clamped to
+// AbsoluteLifetime. It does not judge validity; activeAt does.
+func (s *Store) read(ctx context.Context, hash []byte) (Session, error) {
 	var session Session
 	var created, lastUsed, expires int64
 	var revoked sql.NullInt64
@@ -189,7 +237,7 @@ func (s *Store) Lookup(ctx context.Context, token string) (Session, error) {
 		FROM sessions se
 		JOIN administrators a ON a.id=se.administrator_id
 		WHERE se.token_hash=? AND a.disabled_at_us IS NULL`,
-		hash[:]).Scan(
+		hash).Scan(
 		&session.ID, &session.AdministratorID, &created, &lastUsed, &expires,
 		&revoked, &session.UserAgentSummary, &session.ClientIdentity,
 	)
@@ -197,7 +245,8 @@ func (s *Store) Lookup(ctx context.Context, token string) (Session, error) {
 		return Session{}, ErrInvalidSession
 	}
 	if err != nil {
-		return Session{}, fmt.Errorf("lookup session")
+		return Session{}, fmt.Errorf("%w: %w", ErrSessionUnavailable,
+			database.Classify("lookup session", err))
 	}
 	session.CreatedAt = time.UnixMicro(created).UTC()
 	session.LastUsedAt = time.UnixMicro(lastUsed).UTC()
@@ -209,20 +258,24 @@ func (s *Store) Lookup(ctx context.Context, token string) (Session, error) {
 		value := time.UnixMicro(revoked.Int64).UTC()
 		session.RevokedAt = &value
 	}
-	now := s.now().UTC()
-	if session.RevokedAt != nil || !now.Before(session.ExpiresAt) ||
-		!session.LastUsedAt.After(now.Add(-IdleLifetime)) {
-		return Session{}, ErrInvalidSession
-	}
-	if now.Sub(session.LastUsedAt) < TouchInterval {
-		return session, nil
-	}
-	err = s.mutator.Do(ctx, func(tx *sql.Tx) error {
+	return session, nil
+}
+
+func (session Session) activeAt(now time.Time) bool {
+	return session.RevokedAt == nil && now.Before(session.ExpiresAt) &&
+		session.LastUsedAt.After(now.Add(-IdleLifetime))
+}
+
+// touch records now as the session's last use. It returns ErrInvalidSession
+// when the guarded update matches no row and the classified write error
+// otherwise.
+func (s *Store) touch(ctx context.Context, id int64, now time.Time) error {
+	return s.mutator.Do(ctx, func(tx *sql.Tx) error {
 		result, err := tx.ExecContext(context.WithoutCancel(ctx), `UPDATE sessions
 			SET last_used_at_us=?
 			WHERE id=? AND revoked_at_us IS NULL AND expires_at_us>?
 			AND created_at_us>? AND last_used_at_us>? AND last_used_at_us<=?`,
-			now.UnixMicro(), session.ID, now.UnixMicro(),
+			now.UnixMicro(), id, now.UnixMicro(),
 			now.Add(-AbsoluteLifetime).UnixMicro(),
 			now.Add(-IdleLifetime).UnixMicro(), now.Add(-TouchInterval).UnixMicro())
 		if err != nil {
@@ -237,11 +290,6 @@ func (s *Store) Lookup(ctx context.Context, token string) (Session, error) {
 		}
 		return nil
 	})
-	if err != nil {
-		return Session{}, err
-	}
-	session.LastUsedAt = now
-	return session, nil
 }
 
 func (s *Store) Revoke(ctx context.Context, token string) error {

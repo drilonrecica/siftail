@@ -270,7 +270,8 @@ func (b *Browser) login(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		b.throttle.Release(reservation)
-		http.Error(w, "Sign-in is temporarily unavailable.", http.StatusServiceUnavailable)
+		b.writeLoginFailure(w, r, http.StatusServiceUnavailable,
+			"Sign-in is temporarily unavailable because the database could not be read. Try again shortly.")
 		return
 	}
 	if !matched {
@@ -295,7 +296,7 @@ func (b *Browser) login(w http.ResponseWriter, r *http.Request) {
 	)
 	if err != nil {
 		b.throttle.Release(reservation)
-		http.Error(w, "Sign-in is temporarily unavailable.", http.StatusServiceUnavailable)
+		b.writeLoginFailure(w, r, http.StatusServiceUnavailable, sessionIssueFailureMessage(err))
 		return
 	}
 	b.throttle.Success(reservation)
@@ -324,8 +325,15 @@ func (b *Browser) Protect(next http.Handler) http.Handler {
 			return
 		}
 		session, err := b.sessions.Lookup(r.Context(), cookie.Value)
-		if err != nil {
+		if errors.Is(err, sessions.ErrInvalidSession) {
 			b.requireLogin(w, r, true)
+			return
+		}
+		if err != nil {
+			// A database failure says nothing about the session: answer 503
+			// and keep the cookie instead of signing the administrator out
+			// exactly when Status matters (audit SEC-09).
+			b.writeSessionUnavailable(w, r)
 			return
 		}
 		browserSession := BrowserSession{
@@ -388,6 +396,49 @@ func (b *Browser) requireLogin(w http.ResponseWriter, r *http.Request, expired b
 		return
 	}
 	http.Redirect(w, r, target, http.StatusSeeOther)
+}
+
+// sessionUnavailableMessage is the honest 503 text when a session lookup
+// could not reach the database.
+const sessionUnavailableMessage = "The database is temporarily unavailable, so " +
+	"Siftail could not check your session. Your session was not ended. " +
+	"Try again shortly; if this continues, follow the storage-full recovery runbook."
+
+func (b *Browser) writeSessionUnavailable(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Retry-After", "5")
+	// A retry link is a GET; a failed form submission retries from Status
+	// rather than linking a GET at a POST-only route.
+	retry := "/status"
+	if r.Method == http.MethodGet || r.Method == http.MethodHead {
+		retry = safeRequestPath(r)
+	}
+	view := webui.SessionUnavailableView{
+		Message:   sessionUnavailableMessage,
+		RequestID: web.RequestIDFromContext(r.Context()),
+		RetryPath: retry,
+		Prefs:     preferences(r),
+	}
+	render := b.ui.SessionUnavailable
+	if r.Header.Get("HX-Request") == "true" {
+		render = b.ui.SessionUnavailableNotice
+	}
+	if err := render(w, http.StatusServiceUnavailable, view); err != nil {
+		http.Error(w, sessionUnavailableMessage, http.StatusServiceUnavailable)
+	}
+}
+
+// sessionIssueFailureMessage names why a verified sign-in could not be
+// recorded. Credentials were correct; only the session row write failed.
+func sessionIssueFailureMessage(err error) string {
+	var categoryErr *database.CategoryError
+	if errors.As(err, &categoryErr) && categoryErr.Category == database.CategoryFull {
+		return "Your credentials are correct, but the session could not be saved " +
+			"because Siftail's database storage is full. Free space on the data " +
+			"volume, then sign in again."
+	}
+	return "Your credentials are correct, but the session could not be saved " +
+		"because the database is temporarily unavailable. Try again shortly."
 }
 
 func (b *Browser) validRequestOrigin(r *http.Request) bool {

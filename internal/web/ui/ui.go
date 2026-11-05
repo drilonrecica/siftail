@@ -34,6 +34,16 @@ type LoginView struct {
 	Prefs                PrefsView
 }
 
+// SessionUnavailableView is the 503 page Protect renders when the database
+// cannot answer a session lookup. The session itself is untouched, so the
+// page offers a retry rather than sign-in (audit SEC-09).
+type SessionUnavailableView struct {
+	Message   string
+	RequestID string
+	RetryPath string
+	Prefs     PrefsView
+}
+
 // FlashView is the one-time post-action notice the shell renders below the
 // header (DESIGN.md §26).
 type FlashView struct {
@@ -566,6 +576,16 @@ func New() *Renderer {
 
 func (r *Renderer) Login(w http.ResponseWriter, status int, view LoginView) error {
 	return r.render(w, status, "login.html", view)
+}
+
+func (r *Renderer) SessionUnavailable(w http.ResponseWriter, status int, view SessionUnavailableView) error {
+	return r.render(w, status, "session-unavailable.html", view)
+}
+
+// SessionUnavailableNotice is the same notice as a fragment for htmx
+// requests, which swap error responses into their target.
+func (r *Renderer) SessionUnavailableNotice(w http.ResponseWriter, status int, view SessionUnavailableView) error {
+	return r.render(w, status, "session-unavailable-notice.html", view)
 }
 
 func (r *Renderer) Shell(w http.ResponseWriter, status int, view ShellView) error {

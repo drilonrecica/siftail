@@ -1,0 +1,28 @@
+{{define "session-unavailable.html"}}<!doctype html>
+<html lang="en"{{if or (eq .Prefs.Theme "dark") (eq .Prefs.Theme "light")}} data-theme="{{.Prefs.Theme}}"{{end}}{{if eq .Prefs.Density "comfortable"}} data-density="comfortable"{{end}}>
+<head>
+  {{template "head.html" "Temporarily unavailable"}}
+</head>
+<body class="login-page" hx-history="false">
+  <a class="skip-link" href="#main-content">Skip to main content</a>
+  <header class="login-brand" aria-label="Siftail">
+    <span class="brand-mark" aria-hidden="true">S</span>
+    <span>Siftail</span>
+  </header>
+  <main id="main-content" class="login-main">
+    <section class="login-panel" aria-labelledby="unavailable-title">
+      <div class="login-heading">
+        <p class="eyebrow">Database unavailable</p>
+        <h1 id="unavailable-title">Siftail cannot check your session</h1>
+        <p>You are still signed in. The database did not answer, so this page could not be loaded.</p>
+      </div>
+      {{template "session-unavailable-notice.html" .}}
+      <a class="button button-primary" href="{{.RetryPath}}">Try again</a>
+    </section>
+  </main>
+</body>
+</html>{{end}}
+{{define "session-unavailable-notice.html"}}<div class="notice notice-warning" role="alert" data-session-unavailable>
+        <p>{{.Message}}</p>
+        {{if .RequestID}}<p>Request ID <code>{{.RequestID}}</code></p>{{end}}
+      </div>{{end}}

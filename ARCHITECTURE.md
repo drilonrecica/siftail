@@ -1934,6 +1934,9 @@ When storage becomes unavailable:
 - authenticate each ingestion request, then reject known degradation before
   decoding or queueing its payload;
 - preserve UI read access where possible;
+- keep browser sessions: a session lookup the database cannot answer returns
+  `503` without redirecting to sign-in or clearing the cookie, and a failed
+  "last used" touch is skipped rather than failing an otherwise valid lookup;
 - show a critical warning;
 - record sanitized diagnostic;
 - attempt only safe bounded cleanup;
