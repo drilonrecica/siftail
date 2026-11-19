@@ -231,6 +231,52 @@ test("login, canonical History default, security headers, and logout", async ({ 
   await expect(page).toHaveURL(/\/login\?return=/);
 });
 
+test("assets are hashed, immutable and gzipped, HTML is no-store, and every page has a clean console", async ({
+  page,
+}) => {
+  const problems: string[] = [];
+  page.on("console", (message) => {
+    if (message.type() === "error" || message.type() === "warning") {
+      problems.push(`${message.type()}: ${message.text()}`);
+    }
+  });
+  page.on("pageerror", (error) => problems.push(`pageerror: ${error.message}`));
+
+  const assets = new Map<string, { cache: string; encoding: string; etag: string }>();
+  page.on("response", (response) => {
+    const url = new URL(response.url());
+    if (url.pathname.startsWith("/assets/")) {
+      const headers = response.headers();
+      assets.set(url.pathname, {
+        cache: headers["cache-control"] ?? "",
+        encoding: headers["content-encoding"] ?? "",
+        etag: headers["etag"] ?? "",
+      });
+    }
+  });
+
+  const loginResponse = await page.goto("/login");
+  expect(loginResponse?.headers()["cache-control"]).toBe("no-store");
+  await login(page);
+  for (const route of ["/logs?mode=live", "/servers", "/sources", "/status", "/settings", "/backup", "/audit"]) {
+    const response = await page.goto(route);
+    expect(response?.status(), route).toBe(200);
+    expect(response?.headers()["cache-control"], route).toBe("no-store");
+    await page.waitForLoadState("networkidle");
+  }
+
+  expect(assets.size).toBeGreaterThan(8);
+  for (const [pathname, delivery] of assets) {
+    expect(pathname, "asset URLs are content-hashed").toMatch(/\.[0-9a-f]{12}\.(css|js|svg|woff2)$/);
+    expect(delivery.cache, pathname).toBe("public, max-age=31536000, immutable");
+    expect(delivery.etag, pathname).toMatch(/^"[0-9a-f]{32}(-gzip)?"$/);
+    if (/\.(css|js)$/.test(pathname)) {
+      expect(delivery.encoding, pathname).toBe("gzip");
+    }
+  }
+  expect(problems).toEqual([]);
+});
+
 test("primary filters update and restore URL-owned History state", async ({ page }) => {
   await login(page);
   await page.locator("#server-filter").selectOption("1");

@@ -2856,6 +2856,17 @@ Use Go `embed` for:
 - HTMX;
 - migrations where desired.
 
+Asset delivery (`internal/web/ui/assets.go`): at startup the renderer hashes
+every embedded asset, rewrites the font URLs inside stylesheets to their
+hashed names, and precomputes a gzip variant for CSS, JavaScript, and SVG.
+Templates reference assets through the `asset` function, which yields
+content-hashed URLs such as `/assets/app.<12 hex>.css`; those are served
+`public, max-age=31536000, immutable` with a strong `ETag` and
+`Vary: Accept-Encoding`. The plain names still resolve with `no-cache`, a
+strong `ETag`, and `304` on `If-None-Match`. HTML responses stay `no-store`.
+htmx runs with `includeIndicatorStyles: false` so it injects no inline
+`<style>` that the `style-src 'self'` policy would block.
+
 ### 34.3 Container behavior
 
 - default command starts server;

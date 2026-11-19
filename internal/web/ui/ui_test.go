@@ -2,11 +2,14 @@ package ui
 
 import (
 	"bytes"
+	"compress/gzip"
 	"crypto/sha512"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -77,12 +80,19 @@ func TestShellTemplateUsesLocalCSPCompatibleAssets(t *testing.T) {
 		t.Fatal(err)
 	}
 	body := response.Body.String()
+	for _, pattern := range []string{
+		`href="/assets/app\.[0-9a-f]{12}\.css"`,
+		`src="/assets/htmx-2\.0\.11\.min\.[0-9a-f]{12}\.js"`,
+		`src="/assets/app\.[0-9a-f]{12}\.js"`,
+		`src="/assets/live\.[0-9a-f]{12}\.js"`,
+		`src="/assets/tokens\.[0-9a-f]{12}\.js"`,
+	} {
+		if !regexp.MustCompile(pattern).MatchString(body) {
+			t.Errorf("shell missing hashed asset %s", pattern)
+		}
+	}
 	for _, want := range []string{
-		`href="/assets/app.css"`,
-		`src="/assets/htmx-2.0.11.min.js"`,
-		`src="/assets/app.js"`,
-		`src="/assets/live.js"`,
-		`src="/assets/tokens.js"`,
+		`"includeIndicatorStyles":false`,
 		`hx-history="false"`,
 		`name="htmx-config"`,
 		`"[45].."`,
@@ -543,14 +553,19 @@ func TestEmbeddedAssetsTypesIntegrityAndSafety(t *testing.T) {
 				response.Header().Get("Content-Type") != contentType {
 				t.Fatalf("asset response = %d %#v", response.Code, response.Header())
 			}
-			immutable := name == "htmx-2.0.11.min.js" ||
-				strings.HasSuffix(name, ".woff2")
-			cache := response.Header().Get("Cache-Control")
-			if immutable && !strings.Contains(cache, "immutable") {
-				t.Fatalf("versioned asset cache = %q", cache)
+			if cache := response.Header().Get("Cache-Control"); cache != "no-cache" {
+				t.Fatalf("plain asset cache = %q", cache)
 			}
-			if !immutable && cache != "no-cache" {
-				t.Fatalf("mutable asset cache = %q", cache)
+			etag := response.Header().Get("ETag")
+			if !strings.HasPrefix(etag, `"`) || strings.HasPrefix(etag, "W/") {
+				t.Fatalf("plain asset ETag = %q, want strong", etag)
+			}
+			revalidate := httptest.NewRequest(http.MethodGet, "/assets/"+name, nil)
+			revalidate.Header.Set("If-None-Match", etag)
+			notModified := httptest.NewRecorder()
+			renderer.Asset(notModified, revalidate)
+			if notModified.Code != http.StatusNotModified || notModified.Body.Len() != 0 {
+				t.Fatalf("revalidation = %d with %d bytes", notModified.Code, notModified.Body.Len())
 			}
 			if response.Body.Len() == 0 {
 				t.Fatal("asset body is empty")
@@ -656,6 +671,63 @@ func TestEmbeddedAssetsTypesIntegrityAndSafety(t *testing.T) {
 		if !strings.Contains(string(css), want) {
 			t.Errorf("CSS missing %q", want)
 		}
+	}
+}
+
+func TestHashedAssetsAreImmutableAndGzipped(t *testing.T) {
+	renderer := New()
+	hashedName := regexp.MustCompile(`^[a-z0-9.-]+\.[0-9a-f]{12}\.(css|js|svg|woff2)$`)
+	for plain, a := range renderer.assets.byName {
+		if !hashedName.MatchString(a.hashedName) {
+			t.Fatalf("%s hashed name = %q", plain, a.hashedName)
+		}
+		request := httptest.NewRequest(http.MethodGet, "/assets/"+a.hashedName, nil)
+		request.Header.Set("Accept-Encoding", "gzip, br")
+		response := httptest.NewRecorder()
+		renderer.Asset(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("%s status = %d", a.hashedName, response.Code)
+		}
+		if cache := response.Header().Get("Cache-Control"); cache != "public, max-age=31536000, immutable" {
+			t.Fatalf("%s cache = %q", a.hashedName, cache)
+		}
+		wantGzip := !strings.HasSuffix(plain, ".woff2")
+		gotGzip := response.Header().Get("Content-Encoding") == "gzip"
+		if plain == "favicon.svg" {
+			wantGzip = gotGzip // 411 bytes may not shrink; either is valid
+		}
+		if gotGzip != wantGzip {
+			t.Fatalf("%s gzip = %v, want %v", plain, gotGzip, wantGzip)
+		}
+		if gotGzip {
+			zr, err := gzip.NewReader(response.Body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			decoded, err := io.ReadAll(zr)
+			if err != nil || !bytes.Equal(decoded, a.body) {
+				t.Fatalf("%s gzip body mismatch: %v", plain, err)
+			}
+			if !strings.HasSuffix(response.Header().Get("ETag"), `-gzip"`) {
+				t.Fatalf("gzip ETag = %q", response.Header().Get("ETag"))
+			}
+		}
+		if plain != "favicon.svg" && !strings.HasSuffix(plain, ".woff2") &&
+			response.Header().Get("Vary") != "Accept-Encoding" {
+			t.Fatalf("%s Vary = %q", plain, response.Header().Get("Vary"))
+		}
+	}
+	// Stylesheets must reference the fonts by their hashed, immutable names.
+	tokens := renderer.assets.byName["tokens.css"].body
+	if bytes.Contains(tokens, []byte(`"/assets/jetbrains-mono-400-latin.woff2"`)) ||
+		!regexp.MustCompile(`/assets/jetbrains-mono-400-latin\.[0-9a-f]{12}\.woff2`).Match(tokens) {
+		t.Fatal("tokens.css does not reference hashed font names")
+	}
+	// No identity request gets a gzip body.
+	identity := httptest.NewRecorder()
+	renderer.Asset(identity, httptest.NewRequest(http.MethodGet, "/assets/"+renderer.assets.byName["app.css"].hashedName, nil))
+	if identity.Header().Get("Content-Encoding") != "" {
+		t.Fatal("identity request received gzip")
 	}
 }
 
