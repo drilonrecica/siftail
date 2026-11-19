@@ -3713,6 +3713,293 @@ test("every page, menu, and overlay reflows at 320 px without sideways scrolling
   await page.screenshot({ path: ".playwright-artifacts/reflow-320-live.png" });
 });
 
+// H3 gate (SFT-126, DESIGN.md §33.6): axe over every page and overlay in
+// both themes, both densities, at 1280 and 390 px. The preference cookie is
+// set directly so the login page is covered in each combination too; the
+// System menu path that writes it is exercised by the tests above. Every
+// combination writes its violations and viewport screenshots under
+// .playwright-artifacts/h3-gate for docs/release/h3-gate.md.
+const gateDirectory = ".playwright-artifacts/h3-gate";
+const wcagTags = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"];
+
+for (const density of ["compact", "comfortable"] as const) {
+  for (const theme of ["dark", "light"] as const) {
+    test(`H3 gate: axe on every page and overlay, ${theme}, ${density}, 1280 and 390 px`, async ({
+      page,
+    }) => {
+      test.setTimeout(240_000);
+      fs.mkdirSync(gateDirectory, { recursive: true });
+      const state = readState();
+      await page.context().addCookies([{
+        name: "siftail_prefs",
+        value: `${theme}.${density}.on.UTC`,
+        url: `http://${state.uiAddress}`,
+      }]);
+      await page.emulateMedia({ colorScheme: theme });
+      const checked: string[] = [];
+      // ADR 0011 D1's target (first row within 280 px of the top at 1280x800,
+      // Compact, bar open) is recorded for the gate, not asserted: no H3 task
+      // owns D1's layout (docs/unattended-decisions.md, SFT-121).
+      const firstRowTop: Record<string, number> = {};
+      const rowTop = () => page.locator(".log-row").first().evaluate(
+        (row) => Math.round(row.getBoundingClientRect().top + window.scrollY),
+      );
+      const violations: Array<{ surface: string; id: string; nodes: number }> = [];
+      const check = async (surface: string, width: number) => {
+        await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
+        if (density === "comfortable") {
+          await expect(page.locator("html")).toHaveAttribute("data-density", "comfortable");
+        } else {
+          await expect(page.locator("html")).not.toHaveAttribute("data-density", /.+/);
+        }
+        const overflow = await page.evaluate(
+          () => document.documentElement.scrollWidth - window.innerWidth,
+        );
+        expect(overflow, `${surface} at ${width} px scrolls sideways`).toBeLessThanOrEqual(0);
+        const results = await new AxeBuilder({ page }).withTags(wcagTags).analyze();
+        for (const violation of results.violations) {
+          violations.push({
+            surface: `${surface} @ ${width}`, id: violation.id, nodes: violation.nodes.length,
+          });
+        }
+        checked.push(`${surface} @ ${width}`);
+        const name = `${surface.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}-${width}-${theme}-${density}`;
+        await page.screenshot({ path: `${gateDirectory}/${name}.png` });
+      };
+
+      for (const [width, height] of [[1280, 800], [390, 844]] as const) {
+        await page.setViewportSize({ width, height });
+        await page.context().clearCookies({ name: /^(?!siftail_prefs$)/ });
+        await page.goto("/login");
+        await check("login", width);
+        await login(page);
+        firstRowTop[`history @ ${width}`] = await rowTop();
+        await check("history", width);
+
+        const firstRow = page.locator(".log-row").first();
+        await firstRow.locator(".event-toggle").click();
+        await expect(firstRow.locator(".event-detail")).toBeVisible();
+        await check("history row expanded", width);
+        await firstRow.locator(".event-toggle").click();
+
+        await openSystemMenu(page);
+        await check("system menu", width);
+        await closeSystemMenu(page);
+
+        await page.getByRole("link", { name: "Export results" }).click();
+        const exportDialog = page.getByRole("dialog", { name: "Export results" });
+        await expect(exportDialog).toBeVisible();
+        await check("export dialog", width);
+        await exportDialog.getByRole("link", { name: "Cancel" }).click();
+
+        await page.locator("[data-palette-open]").click();
+        await expect(page.getByRole("dialog", { name: "Command palette" })).toBeVisible();
+        await check("palette", width);
+        await page.keyboard.press("Escape");
+
+        await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+        await page.keyboard.press("?");
+        await expect(page.getByRole("dialog", { name: "Keyboard shortcuts" })).toBeVisible();
+        await check("help", width);
+        await page.keyboard.press("Escape");
+
+        // Event detail is an htmx fragment, covered by the expanded row.
+        const pages: Array<[string, string]> = [
+          ["sources", "/sources"],
+          ["source detail", "/sources/1"],
+          ["servers", "/servers"],
+          ["server detail", "/servers/1"],
+          ["settings", "/settings"],
+          ["status", "/status"],
+          ["audit", "/audit"],
+          ["backup", "/backup"],
+        ];
+        for (const [surface, route] of pages) {
+          const response = await page.goto(route);
+          expect(response?.status(), route).toBe(200);
+          await check(surface, width);
+        }
+
+        await page.goto("/logs?mode=live");
+        await expect(page.locator("[data-live-status]")).toHaveText("Live");
+        await check("live empty", width);
+        await ingestLive([`h3-gate ${theme} ${density} ${width} one`, "h3-gate two\nsecond line"]);
+        await expect(page.locator("#live-rows > .log-row")).toHaveCount(2);
+        firstRowTop[`live @ ${width}`] = await rowTop();
+        await check("live with rows", width);
+        await page.locator("[data-live-pause]").click();
+        await expect(page.locator("[data-live-status]")).toHaveText("Paused");
+        await check("live paused", width);
+      }
+
+      fs.writeFileSync(
+        `${gateDirectory}/axe-${theme}-${density}.json`,
+        JSON.stringify({ theme, density, tags: wcagTags, firstRowTop, checked, violations }, null, 2),
+      );
+      expect(checked).toHaveLength(2 * 18);
+      expect(violations).toEqual([]);
+    });
+  }
+}
+
+// H3 gate (SFT-126): one keyboard-only investigation, from sign-in through
+// filtering, row inspection, both modes, the palette, the System menu, and
+// keyboard help. No pointer input; each step's focus is written to
+// .playwright-artifacts/h3-gate/keyboard-pass.json for the gate report.
+test("H3 gate: a keyboard-only investigation reaches every workspace action", async ({ page }) => {
+  test.setTimeout(90_000);
+  fs.mkdirSync(gateDirectory, { recursive: true });
+  const steps: Array<{ step: string; keys: string; focus: string }> = [];
+  const focus = () => page.evaluate(() => {
+    const element = document.activeElement as HTMLElement | null;
+    if (!element || element === document.body) return "body";
+    const name = element.getAttribute("aria-label") ??
+      (element as HTMLInputElement).labels?.[0]?.textContent ??
+      element.textContent ?? "";
+    const tag = element.getAttribute("role") ?? element.tagName.toLowerCase();
+    return `${tag}${element.id ? `#${element.id}` : ""}: ${name.replace(/\s+/g, " ").trim().slice(0, 90)}`;
+  });
+  const record = async (step: string, keys: string) => {
+    steps.push({ step, keys, focus: await focus() });
+  };
+  const press = async (key: string, times = 1) => {
+    for (let index = 0; index < times; index += 1) await page.keyboard.press(key);
+  };
+  const tabUntil = async (predicate: string, limit = 80): Promise<number> => {
+    for (let index = 0; index < limit; index += 1) {
+      await page.keyboard.press("Tab");
+      if (await page.evaluate((selector) => document.activeElement?.matches(selector) ?? false,
+        predicate)) return index + 1;
+    }
+    throw new Error(`Tab never reached ${predicate}`);
+  };
+
+  await page.goto("/login");
+  await expect(page.locator("#username")).toBeFocused();
+  await record("Sign-in page opens with the username focused", "—");
+  await page.keyboard.type(administratorUsername);
+  await press("Tab");
+  await expect(page.locator("#password")).toBeFocused();
+  await page.keyboard.type(administratorPassword);
+  await press("Enter");
+  await expect(page).toHaveURL(/\/logs\?.*mode=history/);
+  await expect(page.locator(".log-row")).toHaveCount(200);
+  await record("Signed in; History shows 200 rows", "type, Tab, type, Enter");
+
+  await press("Tab");
+  await expect(page.getByRole("link", { name: "Skip to main content" })).toBeFocused();
+  await press("Enter");
+  await press("Tab");
+  await expect(page.locator(".mode-switch").getByRole("link", { name: "History" })).toBeFocused();
+  await record("Skip link moves into main", "Tab, Enter, Tab");
+
+  await press("f");
+  await expect(page.locator("#contains-filter")).toBeFocused();
+  await page.keyboard.type("needle-hostile");
+  await press("Enter");
+  await expect(page).toHaveURL(/contains=needle-hostile/);
+  await expect(page.locator(".log-row")).toHaveCount(1);
+  await record("F focuses message search; Enter applies it (1 row)", "F, type, Enter");
+
+  // Focus stays in the search field, where J types; Tab leads to the list.
+  await expect(page.locator("#contains-filter")).toBeFocused();
+  const tabsToList = await tabUntil("[role='listitem']");
+  const match = page.locator(".log-row").first();
+  await expect(match).toBeFocused();
+  await expect(match).toHaveAccessibleName(/^Row 1 of 1: ERR/);
+  await press("Enter");
+  await expect(match.locator(".event-toggle")).toHaveAttribute("aria-expanded", "true");
+  await expect(match.locator(".event-detail")).toContainText("browser-request-1");
+  expect(await page.evaluate(() => (window as unknown as { siftailXSS?: boolean }).siftailXSS))
+    .toBeUndefined();
+  await record(`Tab reaches the only row (${tabsToList} stops); Enter expands its details`,
+    "Tab…, Enter");
+  await expect(match.locator(".event-detail")).toBeFocused();
+  await page.screenshot({ path: `${gateDirectory}/keyboard-expanded.png` });
+  // Expanding moves focus into the detail; Shift+Tab returns to the row.
+  await press("Shift+Tab");
+  await expect(match).toBeFocused();
+  await press("Enter");
+  await expect(match.locator(".event-toggle")).toHaveAttribute("aria-expanded", "false");
+  await expect(match).toBeFocused();
+  await record("Shift+Tab back to the row; Enter collapses and keeps focus there", "Shift+Tab, Enter");
+
+  await press("f");
+  await press("Control+a");
+  await press("Backspace");
+  await press("Enter");
+  await expect(page.locator(".log-row")).toHaveCount(200);
+  await tabUntil("[role='listitem']");
+  await expect(page.locator(".log-row").first()).toBeFocused();
+  await press("j", 2);
+  await expect(page.locator(".log-row").nth(2)).toBeFocused();
+  await expect(page.locator(".log-row").nth(2)).toHaveAccessibleName(/^Row 3 of 200: /);
+  await press("k");
+  await expect(page.locator(".log-row").nth(1)).toBeFocused();
+  await record("Filter cleared; J/K move the roving selection", "F, Ctrl+A, Backspace, Enter, Tab…, J×2, K");
+  await press("ArrowDown");
+  await expect(page.locator(".log-row").nth(2)).toBeFocused();
+  await press("Escape");
+  await expect(page.locator(".log-row").nth(2)).not.toBeFocused();
+  await expect(page.locator(".log-row").first()).toHaveAttribute("tabindex", "0");
+  await record("Arrow keys move too; Esc clears the selection", "ArrowDown, Esc");
+
+  await press("l");
+  await expect(page).toHaveURL(/mode=live/);
+  await expect(page.locator("[data-live-status]")).toHaveText("Live");
+  await ingestLive(["keyboard-pass one", "keyboard-pass two"]);
+  await expect(page.locator("#live-rows > .log-row")).toHaveCount(2);
+  await record("L switches to Live", "L");
+  await press(" ");
+  await expect(page.locator("[data-live-status]")).toHaveText("Paused");
+  await record("Space pauses Live away from controls", "Space");
+  await press(" ");
+  await expect(page.locator("[data-live-status]")).toHaveText("Live");
+  await press("j");
+  await expect(page.locator("#live-rows > .log-row").last()).toBeFocused();
+  await press("k");
+  await expect(page.locator("#live-rows > .log-row").first()).toBeFocused();
+  await press("Enter");
+  await expect(page.locator("#live-rows > .log-row").first().locator(".event-toggle"))
+    .toHaveAttribute("aria-expanded", "true");
+  await record("Space resumes; J/K and Enter work on Live rows", "Space, J, K, Enter");
+  await page.screenshot({ path: `${gateDirectory}/keyboard-live.png` });
+  await press("Escape");
+  await press("h");
+  await expect(page).toHaveURL(/mode=history/);
+  await record("H returns to History", "Esc, H");
+
+  await press("Control+k");
+  const palette = page.getByRole("dialog", { name: "Command palette" });
+  await expect(palette).toBeVisible();
+  await page.keyboard.type("Status");
+  await record("Ctrl K opens the palette with its input focused", "Ctrl+K, type");
+  await press("Enter");
+  await expect(page).toHaveURL(/\/status$/);
+  await record("Enter on the palette result navigates", "Enter");
+
+  await press("Tab");
+  await tabUntil("[data-system-menu] summary");
+  await press("Enter");
+  await expect(page.locator("[data-system-menu]")).toHaveAttribute("open", "");
+  await record("Tab reaches the System menu; Enter opens it", "Tab…, Enter");
+  await tabUntil(".system-menu-nav a[href='/settings']", 20);
+  await press("Enter");
+  await expect(page).toHaveURL(/\/settings$/);
+  await record("Tab to Settings in the menu; Enter navigates", "Tab…, Enter");
+
+  await press("?");
+  const help = page.getByRole("dialog", { name: "Keyboard shortcuts" });
+  await expect(help).toBeVisible();
+  await record("? opens keyboard help", "?");
+  await page.screenshot({ path: `${gateDirectory}/keyboard-help.png` });
+  await press("Escape");
+  await expect(help).toBeHidden();
+  await record("Esc closes help", "Esc");
+
+  fs.writeFileSync(`${gateDirectory}/keyboard-pass.json`, JSON.stringify(steps, null, 2));
+});
+
 test("login failures are uniform and throttle the fifth attempt", async ({ page }) => {
   const fail = async (username: string) => {
     await page.goto("/login");

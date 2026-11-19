@@ -115,3 +115,17 @@ approval. Entries are in the order they were taken, newest last.
 - **Options:** drive drops through the real server (no way to sever one stream from outside without a test-only endpoint); assert reconnect count in the browser and rely on the Go test for the server's `possible_gap` reply to `Last-Event-ID`.
 - **Chosen:** the second: the browser test proves three native reconnects, each control event's effect, no retry after `shutdown` or a 401, and recovery against the real server; `internal/auth/live_test.go` already proves the server sends `possible_gap` for a valid `Last-Event-ID`.
 - **Reversal cost:** low — add a test-only stream-sever hook later if end-to-end header proof is wanted.
+
+## SFT-126 — The gate records the interface defects it found instead of fixing them (2026-11-19)
+
+- **Question:** The gate found six interface deviations (`docs/release/h3-gate.md` findings 1–6): the unbuilt ADR 0011 D1 layout (first History row at 690 px against the 280 px target), Live controls in their own toolbar with Reconnect always shown (§11.2), row names without the zone (§32.3), 12-hour native date-time fields, mixed time formats in event detail, and the hidden skip link's shadow at the top-left corner. The H1 and H2 gates fixed small defects in-task; this task's acceptance says "defects become follow-up tasks" after the owner's review.
+- **Options:** (a) fix the small ones here (skip-link shadow, Reconnect visibility, row-name zone) and record the rest; (b) fix none, measure and record all of them, and propose follow-up tasks.
+- **Chosen:** (b). The acceptance names the owner's review as where defects turn into tasks; each fix changes behaviour that the screenshots and axe matrix in this gate are meant to certify, so fixing here would certify a tree the owner never saw reviewed; and D1, the largest, needs a task of its own anyway. The 280 px target is measured and written to the axe JSON on every run, not asserted, so the suite stays green until D1 is owned.
+- **Reversal cost:** none; each finding is a small follow-up (the skip-link, Reconnect, and row-name fixes are one rule or a few lines each), D1 is a new task touching `history.html`, `live.html`, the filter CSS and the filter Playwright tests.
+
+## SFT-126 — Before/after screenshots committed as JPEG with their capture script (2026-11-19)
+
+- **Question:** The acceptance asks for before/after screenshots in `docs/release/h3-gate.md` but not for which screens, format, or how "before" is produced. The full gate matrix (4 theme/density combinations × 2 widths × 18 surfaces = 144 PNGs) is about 11 MB.
+- **Options:** commit the whole PNG matrix; commit a curated set; leave all screenshots in the git-ignored `.playwright-artifacts`.
+- **Chosen:** a curated set of 11 screens per build (22 JPEG files, quality 82, 1.4 MB) under `docs/release/h3-gate/`, captured by one script (`docs/release/h3-gate/capture.mjs`) against a build of `3e4f499` (the H2 gate, before SFT-112) and the current tree with identical fixtures, so the pairs differ only by the build. The full matrix stays reproducible with `make playwright` under `.playwright-artifacts/h3-gate/`.
+- **Reversal cost:** low — delete the directory, or rerun the script with other screens.
