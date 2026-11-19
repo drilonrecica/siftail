@@ -4,6 +4,44 @@
 **Scope:** SFT-028 development and release-gate evidence; not a
 hardware-independent guarantee
 
+## Browser rendering at 500 events/s (SFT-119, 2026-11-19)
+
+Live rendering was reworked for audit UX-17. Events that arrive while the view
+follows the newest row are buffered and rendered once per
+`requestAnimationFrame`: one `DocumentFragment` append, trimming of the oldest
+rows by a running count (no per-event `querySelectorAll`), and one scroll write
+per frame. Detail toggles carry a `data-detail-url` and one delegated click
+listener on `#live-rows` fetches the detail through `htmx.ajax`, so no row is
+passed to `htmx.process`. A hidden tab, which runs no frames, keeps at most
+1,000 buffered events, the most that could be shown.
+
+- Test: Playwright `Live renders 500 events per second in animation-frame
+  batches` (`tests/browser/siftail.spec.ts`). It dispatches synthetic `log`
+  messages on the page's own `EventSource` on a catch-up schedule of exactly
+  500 per second for 4 s (2,000 events, 120-character messages) while a frame
+  loop records every frame interval. Network and server are not in the loop;
+  this measures browser rendering only.
+- Host: the SFT-100 host below (Intel Core i5-7500, Fedora, kernel 7.2.15);
+  Playwright 1.64.1 headless Chromium, 1280 × 720.
+- Command: `npx playwright test -g "500 events"` (and within `make playwright`).
+
+Four runs:
+
+| Run | Sent | Achieved rate | Frames | Median frame | p95 frame | Max frame | Frames > 50 ms | Rendered rows |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 2,000 | 494/s | 242 | 16.7 ms | 16.7 ms | 16.8 ms | 0 | 1,000 |
+| 2 | 2,000 | 494/s | 241 | 16.7 ms | 16.7 ms | 33.4 ms | 0 | 1,000 |
+| 3 | 2,000 | 497/s | 239 | 16.7 ms | 16.7 ms | 33.4 ms | 0 | 1,000 |
+| 4 (full suite) | 2,000 | 496/s | 240 | 16.7 ms | 16.7 ms | 33.4 ms | 0 | 1,000 |
+
+The achieved rate counts the final settling frames, hence slightly under 500.
+Frames hold the 60 Hz cadence; the worst case is one dropped frame. The test
+asserts all 2,000 events were sent, exactly 1,000 rows remain, far fewer list
+mutations than events, p95 frame time under 50 ms, no frame over 250 ms, and
+that the list still follows the newest row. No pre-change baseline was
+recorded: the old `live.js` depends on the per-workspace live region this task
+removed and does not run against the new template.
+
 ## Real-disk rerun (SFT-100, 2026-11-05)
 
 These benchmarks are in-memory (broker fan-out and SSE encoding) and touch no

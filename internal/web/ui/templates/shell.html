@@ -10,7 +10,7 @@
     <p><strong>{{.Degraded.Title}}:</strong> {{.Degraded.Detail}} <a href="/status">Open Status</a></p>
   </div>{{end}}
   {{if .Flash.Text}}<div class="flash-region">
-    <p class="notice notice-{{.Flash.Kind}}" role="status" data-flash{{if eq .Flash.Kind "success"}} data-flash-dismiss{{end}}>{{.Flash.Text}}</p>
+    <p class="notice notice-{{.Flash.Kind}}" data-flash{{if eq .Flash.Kind "success"}} data-flash-dismiss{{end}}>{{.Flash.Text}}</p>
   </div>{{end}}
   <main id="main-content" class="workspace" data-timezone="{{.Prefs.Timezone}}"{{if $p.KbScope}} data-kb-scope="{{$p.KbScope}}"{{end}}>
     <header class="workspace-heading">
@@ -32,6 +32,10 @@
     {{else if eq .Mode "backup"}}{{template "backup.html" .Backup}}
     {{else}}{{template "sources.html" .Sources}}{{end}}
   </main>
+  {{/* The one polite announcer for every page (DESIGN.md §26, §33.3). It
+       is empty at load; app.js speaks the flash and every later status
+       change into it, throttled and de-duplicated. */}}
+  <p class="visually-hidden" role="status" aria-live="polite" aria-atomic="true" data-announcer></p>
   {{template "help-overlay.html" $p}}
   {{template "palette.html" .}}
 </body>

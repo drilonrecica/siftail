@@ -148,7 +148,7 @@ func TestLivePageStatesItsJavaScriptRequirement(t *testing.T) {
 	for _, want := range []string{
 		`class="live-toolbar" data-live-script-only hidden`,
 		`data-live-empty data-live-script-only hidden`,
-		`class="live-status" role="status" aria-live="polite" data-live-script-only hidden`,
+		`class="live-status" data-live-script-only hidden`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("Live missing %q", want)

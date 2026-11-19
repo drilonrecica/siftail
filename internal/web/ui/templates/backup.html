@@ -1,5 +1,9 @@
 {{define "backup.html"}}
+{{/* Polling replaces this whole region, so it holds no live region of its
+     own; app.js announces a change of state through the shell announcer
+     (audit UX-31). */}}
 <section id="backup-region" class="workspace-panel settings-workspace" aria-label="Backup"
+  data-backup-state="{{.State}}" data-backup-label="{{.StateLabel}}"
   {{if eq .State "running"}}hx-get="/backup/region" hx-trigger="every 1s" hx-swap="outerHTML"{{end}}>
   {{if .Error}}<div class="form-error" role="alert"><p>{{.Error}}</p></div>{{end}}
   <section aria-labelledby="full-backup-heading">
@@ -32,7 +36,7 @@
     </form>
   </section>
 
-  <section aria-labelledby="backup-result-heading" aria-live="polite">
+  <section aria-labelledby="backup-result-heading">
     <h2 id="backup-result-heading">Latest process result</h2>
     <p><strong>{{.StateLabel}}</strong></p>
     {{if .StartedAt}}<p>Started: <time datetime="{{.StartedAtUTC}}">{{.StartedAt}}</time></p>{{end}}

@@ -50,3 +50,52 @@ func TestFlashMessagesAreConsumedOnFirstRender(t *testing.T) {
 		t.Fatalf("tampered flash = %d", tamperedResponse.Code)
 	}
 }
+
+// The flash is visible text, not a live region present at load; the shell's
+// one announcer starts empty and app.js speaks the flash into it after load
+// (DESIGN.md §26, audit UX-16).
+func TestFlashIsAnnouncedThroughTheSharedAnnouncer(t *testing.T) {
+	fixture := newBrowserFixture(t, "https://logs.example.test", true)
+	cookie := loginBrowserCookie(t, fixture)
+	request := httptest.NewRequest(http.MethodGet, "/settings", nil)
+	request.AddCookie(cookie)
+	request.AddCookie(&http.Cookie{Name: flashCookieName, Value: "retention-saved"})
+	response := httptest.NewRecorder()
+	fixture.handler().ServeHTTP(response, request)
+	body := response.Body.String()
+	if !strings.Contains(body, `<p class="notice notice-success" data-flash data-flash-dismiss>Retention settings saved.</p>`) {
+		t.Fatalf("flash markup changed: %q", body)
+	}
+	announcer := `<p class="visually-hidden" role="status" aria-live="polite" aria-atomic="true" data-announcer></p>`
+	if strings.Count(body, "data-announcer") != 1 || !strings.Contains(body, announcer) {
+		t.Fatalf("shell announcer missing or not empty at load: %q", body)
+	}
+}
+
+// Backup polling swaps #backup-region every second; the region holds no live
+// region, and exposes its state for app.js to announce once (audit UX-31).
+func TestBackupRegionHoldsNoLiveRegion(t *testing.T) {
+	fixture := newBrowserFixture(t, "https://logs.example.test", true)
+	cookie := loginBrowserCookie(t, fixture)
+	for _, target := range []string{"/backup", "/backup/region"} {
+		code, body := getPage(t, fixture, cookie, target)
+		if code != http.StatusOK {
+			t.Fatalf("%s = %d", target, code)
+		}
+		start := strings.Index(body, `<section id="backup-region"`)
+		if start < 0 {
+			t.Fatalf("%s has no backup region: %q", target, body)
+		}
+		region := body[start:]
+		if end := strings.Index(region, "</main>"); end >= 0 {
+			region = region[:end]
+		}
+		if strings.Contains(region, "aria-live") || strings.Contains(region, `role="status"`) {
+			t.Errorf("%s backup region contains a live region", target)
+		}
+		if !strings.Contains(region, `data-backup-state="idle"`) ||
+			!strings.Contains(region, `data-backup-label="No backup has run during this process."`) {
+			t.Errorf("%s backup region does not expose its state", target)
+		}
+	}
+}

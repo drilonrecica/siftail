@@ -72,6 +72,48 @@
     };
   })();
 
+  // The one announcer every page shares (DESIGN.md §26, §33.3; audit
+  // UX-16). Callers hand it a message; it speaks at most one message per
+  // announceGap into the shell's polite region, drops a message identical
+  // to the one spoken within repeatWindow, and lets the newest queued
+  // message replace an older one of equal or lower weight, so a burst of
+  // state changes is heard once, as its outcome. A "notice" (pause,
+  // truncation, caps, flashes) outranks a "status" (connection state), so a
+  // reconnect that follows a truncation cannot silence it.
+  window.siftailAnnounce = (() => {
+    const region = document.querySelector("[data-announcer]");
+    const announceGap = 1000;
+    const repeatWindow = 10000;
+    const weights = { status: 0, notice: 1 };
+    let spokenText = "";
+    let spokenAt = -Infinity;
+    let queued = null;
+    let timer = 0;
+    const speak = () => {
+      timer = 0;
+      if (!region || !queued) return;
+      region.textContent = queued.text;
+      spokenText = queued.text;
+      spokenAt = performance.now();
+      queued = null;
+    };
+    return (message, kind = "notice") => {
+      const text = String(message ?? "").trim();
+      if (!region || !text) return;
+      const weight = weights[kind] ?? weights.notice;
+      if (queued && (queued.text === text || weight < queued.weight)) return;
+      if (text === spokenText && performance.now() - spokenAt < repeatWindow) return;
+      queued = { text, weight };
+      if (timer) return;
+      // The region is emptied first so repeated text after the window is
+      // still a change, and text is never written in the load task itself,
+      // so a message present at load (a flash) is announced.
+      region.textContent = "";
+      const wait = Math.max(announceGap - (performance.now() - spokenAt), 100);
+      timer = window.setTimeout(speak, wait);
+    };
+  })();
+
   // Theme and density are server-rendered on <html> from the preference
   // cookie. This enhancement applies changes instantly and persists them in
   // the background; without it the form's noscript submit does the same.
@@ -149,12 +191,32 @@
     });
   }
 
-  // Success flashes auto-dismiss (DESIGN.md §26); warnings and errors stay
+  // The flash is rendered visibly at load but spoken through the shared
+  // announcer after load, so screen readers hear it (DESIGN.md §26). Success
+  // flashes auto-dismiss after being announced; warnings and errors stay
   // until the operator moves on.
-  document.querySelectorAll("[data-flash-dismiss]").forEach((flash) => {
-    window.setTimeout(() => {
-      flash.closest(".flash-region")?.remove();
-    }, 6000);
+  const flash = document.querySelector("[data-flash]");
+  if (flash) {
+    window.siftailAnnounce(flash.textContent);
+    if (flash.hasAttribute("data-flash-dismiss")) {
+      window.setTimeout(() => {
+        flash.closest(".flash-region")?.remove();
+      }, 6000);
+    }
+  }
+
+  // Backup polling replaces #backup-region, which holds no live region; a
+  // change of state is announced once, never the per-second progress
+  // (audit UX-31).
+  const backupState = () =>
+    document.querySelector("#backup-region[data-backup-state]")?.dataset.backupState;
+  let lastBackupState = backupState();
+  document.addEventListener("htmx:afterSettle", () => {
+    const region = document.querySelector("#backup-region[data-backup-state]");
+    const state = region?.dataset.backupState;
+    if (!region || state === lastBackupState) return;
+    lastBackupState = state;
+    window.siftailAnnounce(region.dataset.backupLabel);
   });
 
   // The System menu is a native <details>; close it when focus or pointer

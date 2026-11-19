@@ -12,7 +12,6 @@
   const scrollArea = workspace.querySelector("[data-live-scroll]");
   const status = workspace.querySelector("[data-live-status]");
   const notices = workspace.querySelector("[data-live-notices]");
-  const announcement = workspace.querySelector("[data-live-announcement]");
   const pauseButton = workspace.querySelector("[data-live-pause]");
   const newestButton = workspace.querySelector("[data-live-newest]");
   const clearButton = workspace.querySelector("[data-live-clear]");
@@ -26,7 +25,6 @@
     !scrollArea ||
     !status ||
     !notices ||
-    !announcement ||
     !pauseButton ||
     !newestButton ||
     !clearButton ||
@@ -52,13 +50,25 @@
   let reconnectTimer = 0;
   let renderedNoticeShown = false;
   let destroyed = false;
+  // Events received while following the newest row wait here for the next
+  // animation frame, which renders them as one batch (audit UX-17).
+  let incoming = [];
+  let frame = 0;
+  // Rows currently in #live-rows, counted so trimming never queries the DOM.
+  let renderedCount = 0;
 
-  const setStatus = (value) => {
+  // Every Live announcement goes through the shell's one announcer, which
+  // throttles and de-duplicates (DESIGN.md §26, §33.3; audit UX-16).
+  const announce = (message, kind) => window.siftailAnnounce?.(message, kind);
+
+  // A connection state is announced only when it changes, so an outage
+  // that retries every few seconds is heard once as "Reconnecting".
+  // Pause and resume speak their own notice instead (quiet).
+  const setStatus = (value, quiet = false) => {
+    const changed = status.textContent !== value;
     status.textContent = value;
     workspace.dataset.liveState = value.toLowerCase();
-    announcement.textContent = value === "Paused"
-      ? "Live view paused. Logs are still being stored."
-      : `Live connection: ${value}.`;
+    if (changed && !quiet) announce(`Live connection: ${value}.`, "status");
   };
 
   const addNotice = (message, kind = "info") => {
@@ -70,7 +80,7 @@
     notice.dataset.noticeKind = kind;
     notice.textContent = message;
     if (!existing) notices.append(notice);
-    announcement.textContent = message;
+    announce(message);
   };
 
   const clearNotice = (kind) => {
@@ -162,10 +172,9 @@
     // The detail carries the current scope for its "Show events around this
     // time" link (DESIGN.md §13.1).
     const scope = scopeQuery();
-    toggle.setAttribute("hx-get", scope ? `/logs/events/${id}?${scope}` : `/logs/events/${id}`);
-    toggle.setAttribute("hx-target", `#event-detail-${id}`);
-    toggle.setAttribute("hx-swap", "innerHTML");
-    toggle.setAttribute("hx-disabled-elt", "this");
+    // One delegated listener on #live-rows fetches it, so no row is handed
+    // to htmx.process (audit UX-17).
+    toggle.dataset.detailUrl = scope ? `/logs/events/${id}?${scope}` : `/logs/events/${id}`;
     toggle.textContent = "›";
 
     const timestamp = document.createElement("time");
@@ -199,38 +208,84 @@
     detail.className = "event-detail-slot";
 
     row.append(toggle, timestamp, severity, source, message, stream, detail);
-    window.htmx?.process(row);
     return row;
   };
 
-  const trimRendered = () => {
-    const rendered = rows.querySelectorAll(".log-row");
-    const excess = rendered.length - renderedLimit;
-    if (excess <= 0) return;
-    for (let index = 0; index < excess; index += 1) rendered[index].remove();
-    if (!renderedNoticeShown) {
-      renderedNoticeShown = true;
-      addNotice(
-        "Older rows were removed from this browser view. Persisted History is unchanged.",
-        "rendered-limit",
-      );
-    }
+  const noteRenderedLimit = () => {
+    if (renderedNoticeShown) return;
+    renderedNoticeShown = true;
+    addNotice(
+      "Older rows were removed from this browser view. Persisted History is unchanged.",
+      "rendered-limit",
+    );
   };
 
-  const appendEvent = (event) => {
-    const row = makeLiveRow(event);
-    if (!row) return;
+  // Renders events as one batch: at most renderedLimit rows are built (older
+  // ones would be trimmed at once), appended in one fragment, and the
+  // oldest rows are removed by count from the front of the list. The
+  // caller owns the single scroll write that follows.
+  const renderEvents = (events) => {
+    if (events.length === 0) return;
+    let batch = events;
+    if (batch.length > renderedLimit) {
+      batch = batch.slice(batch.length - renderedLimit);
+      noteRenderedLimit();
+    }
+    const fragment = document.createDocumentFragment();
+    let added = 0;
+    for (const event of batch) {
+      const row = makeLiveRow(event);
+      if (!row) continue;
+      fragment.append(row);
+      added += 1;
+    }
+    if (added === 0) return;
     removeEmptyState();
-    rows.append(row);
-    trimRendered();
+    rows.append(fragment);
+    renderedCount += added;
+    if (renderedCount > renderedLimit) {
+      for (let excess = renderedCount - renderedLimit; excess > 0; excess -= 1) {
+        rows.firstElementChild?.remove();
+      }
+      renderedCount = renderedLimit;
+      noteRenderedLimit();
+    }
     syncRows();
+  };
+
+  const cancelFrame = () => {
+    if (frame) window.cancelAnimationFrame(frame);
+    frame = 0;
+  };
+
+  // The frame callback: one append, one trim, one scroll write per frame,
+  // however many events arrived since the last one.
+  const flushIncoming = () => {
+    frame = 0;
+    const batch = incoming;
+    incoming = [];
+    renderEvents(batch);
+    if (trackingNewest) scrollArea.scrollTop = scrollArea.scrollHeight;
+  };
+
+  const scheduleIncoming = (event) => {
+    incoming.push(event);
+    // A hidden tab runs no frames; keep only what could still be shown.
+    if (incoming.length > renderedLimit) {
+      incoming.splice(0, incoming.length - renderedLimit);
+      noteRenderedLimit();
+    }
+    if (!frame) frame = window.requestAnimationFrame(flushIncoming);
   };
 
   const jumpToNewest = () => {
     if (!paused) {
-      const queued = pending;
+      // Events awaiting a frame arrived before anything queued while away.
+      cancelFrame();
+      const queued = incoming.concat(pending);
+      incoming = [];
       pending = [];
-      queued.forEach(appendEvent);
+      renderEvents(queued);
       updatePendingControl();
     }
     trackingNewest = true;
@@ -285,8 +340,7 @@
       queueEvent(payload);
       return;
     }
-    appendEvent(payload);
-    scrollArea.scrollTop = scrollArea.scrollHeight;
+    scheduleIncoming(payload);
   };
 
   const receiveControl = (event) => {
@@ -315,7 +369,10 @@
         break;
       case "source_purged":
       case "source_removed":
+        cancelFrame();
         rows.replaceChildren();
+        renderedCount = 0;
+        incoming = [];
         pending = [];
         updatePendingControl();
         ensureEmptyState();
@@ -372,26 +429,30 @@
   };
 
   const clearView = () => {
+    cancelFrame();
     rows.replaceChildren();
+    renderedCount = 0;
+    incoming = [];
     pending = [];
     renderedNoticeShown = false;
     updatePendingControl();
     clearNotice("rendered-limit");
     ensureEmptyState();
     syncRows();
-    announcement.textContent = "Live browser view cleared. Persisted logs were not deleted.";
+    announce("Live browser view cleared. Persisted logs were not deleted.");
   };
 
   const togglePause = () => {
     paused = !paused;
     pauseButton.textContent = paused ? "Resume" : "Pause";
     if (paused) {
-      setStatus("Paused");
+      setStatus("Paused", true);
       addNotice("Live view paused. Logs are still being stored.", "paused");
       return;
     }
     clearNotice("paused");
-    setStatus(eventSource?.readyState === EventSource.OPEN ? "Live" : "Reconnecting");
+    setStatus(eventSource?.readyState === EventSource.OPEN ? "Live" : "Reconnecting", true);
+    announce("Live view resumed.");
     if (trackingNewest) jumpToNewest();
   };
 
@@ -484,6 +545,25 @@
       trackingNewest = false;
     }
   }, { passive: true });
+  // Detail toggles are delegated: one listener fetches any row's detail
+  // into its slot. A click on an expanded toggle never arrives here; the
+  // capture-phase collapse in app.js consumes it.
+  rows.addEventListener("click", (event) => {
+    const toggle = event.target instanceof Element
+      ? event.target.closest(".event-toggle[data-detail-url]")
+      : null;
+    if (!toggle || toggle.disabled || !window.htmx) return;
+    const slot = document.getElementById(toggle.getAttribute("aria-controls") || "");
+    if (!slot) return;
+    toggle.disabled = true;
+    Promise.resolve(window.htmx.ajax("GET", toggle.dataset.detailUrl, {
+      source: toggle,
+      target: slot,
+      swap: "innerHTML",
+    })).finally(() => {
+      toggle.disabled = false;
+    });
+  });
   pauseButton.addEventListener("click", togglePause);
   newestButton.addEventListener("click", jumpToNewest);
   pendingButton.addEventListener("click", jumpToNewest);
@@ -497,6 +577,7 @@
   // controls (pause, jump to newest, row focus) through their elements.
   window.addEventListener("pagehide", () => {
     destroyed = true;
+    cancelFrame();
     window.clearTimeout(textFilterTimer);
     closeSource();
   }, { once: true });

@@ -1295,6 +1295,210 @@ test("Live enforces rendered and pending caps and does not steal scroll", async 
   await expect(page.locator("#live-rows .log-row")).toHaveCount(1000);
 });
 
+// Records every non-empty text the shell's one announcer speaks, and keeps
+// the page's current EventSource reachable so a test can drive it.
+async function recordAnnouncements(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const spoken: string[] = [];
+    Object.defineProperty(window, "__siftailAnnouncements", { value: spoken });
+    const NativeEventSource = window.EventSource;
+    class CapturedEventSource extends NativeEventSource {
+      constructor(url: string | URL, init?: EventSourceInit) {
+        super(url, init);
+        (window as Window & { __siftailLiveSource?: EventSource }).__siftailLiveSource = this;
+      }
+    }
+    Object.defineProperty(window, "EventSource", {
+      configurable: true,
+      value: CapturedEventSource,
+    });
+    document.addEventListener("DOMContentLoaded", () => {
+      const announcer = document.querySelector("[data-announcer]");
+      if (!announcer) return;
+      new MutationObserver(() => {
+        const text = announcer.textContent?.trim() || "";
+        if (text) spoken.push(text);
+      }).observe(announcer, { childList: true, characterData: true, subtree: true });
+    });
+  });
+}
+
+async function announcements(page: Page): Promise<string[]> {
+  return page.evaluate(() =>
+    [...(window as Window & { __siftailAnnouncements: string[] }).__siftailAnnouncements]);
+}
+
+test("one throttled announcer speaks each Live state change and the flash once", async ({
+  page,
+}) => {
+  await recordAnnouncements(page);
+  await login(page);
+  // One polite region for the whole page; Live's notices and status are
+  // visible text only.
+  await page.locator(".mode-switch").getByRole("link", { name: "Live" }).click();
+  await expect(page.locator("[data-live-status]")).toHaveText("Live");
+  await expect(page.locator("[aria-live]")).toHaveCount(1);
+  await expect(page.locator("[data-announcer]")).toHaveAttribute("aria-live", "polite");
+  await expect.poll(() => announcements(page)).toEqual(["Live connection: Live."]);
+
+  const count = async (text: string) =>
+    (await announcements(page)).filter((spoken) => spoken === text).length;
+  await page.getByRole("button", { name: "Pause" }).click();
+  await expect.poll(() => count("Live view paused. Logs are still being stored.")).toBe(1);
+  await page.getByRole("button", { name: "Resume" }).click();
+  await expect.poll(() => count("Live view resumed.")).toBe(1);
+  // Pause and resume never also speak the connection state.
+  expect(await count("Live connection: Paused.")).toBe(0);
+  expect(await count("Live connection: Live.")).toBe(1);
+
+  // An outage retrying every few seconds is heard once as Reconnecting.
+  await page.evaluate(() => {
+    const source = (window as Window & { __siftailLiveSource: EventSource }).__siftailLiveSource;
+    for (let attempt = 0; attempt < 5; attempt += 1) source.dispatchEvent(new Event("error"));
+  });
+  await expect(page.locator("[data-live-status]")).toHaveText(/Reconnecting|Disconnected/);
+  await page.waitForTimeout(1500);
+  const outage = (await announcements(page)).filter((spoken) =>
+    /Reconnecting|Disconnected/.test(spoken));
+  expect(outage).toHaveLength(1);
+
+  // The rendered cap is announced once however many rows pass it.
+  await page.getByRole("button", { name: "Reconnect" }).click();
+  await expect(page.locator("[data-live-status]")).toHaveText("Live");
+  await page.evaluate(() => {
+    const source = (window as Window & { __siftailLiveSource: EventSource }).__siftailLiveSource;
+    for (let index = 1; index <= 1500; index += 1) {
+      source.dispatchEvent(new MessageEvent("log", {
+        data: JSON.stringify({
+          id: 900000 + index,
+          level: "info",
+          message: `announce-cap-${index}`,
+          stream: "stdout",
+          event_at_us: Date.now() * 1000,
+          source: { application: "api", service: "web" },
+        }),
+      }));
+    }
+  });
+  await expect(page.locator("#live-rows .log-row")).toHaveCount(1000);
+  await expect.poll(() => count(
+    "Older rows were removed from this browser view. Persisted History is unchanged.",
+  )).toBe(1);
+  // Individual log events are never announced (DESIGN.md §33.3).
+  expect((await announcements(page)).some((spoken) => spoken.includes("announce-cap-"))).toBe(false);
+
+  // Delegated detail clicks still fetch, expand, and collapse a Live row.
+  await ingestLive(["delegated-detail"]);
+  const lastRow = page.locator("#live-rows .log-row").filter({ hasText: "delegated-detail" });
+  await expect(lastRow).toHaveCount(1);
+  await lastRow.locator(".event-toggle").click();
+  await expect(lastRow.locator(".event-toggle")).toHaveAttribute("aria-expanded", "true");
+  await lastRow.getByRole("button", { name: "Collapse details" }).click();
+  await expect(lastRow.locator(".event-toggle")).toHaveAttribute("aria-expanded", "false");
+  await expect(lastRow.locator(".event-detail")).toHaveCount(0);
+
+  // A flash is present at load as visible text and spoken after load.
+  await navigateSystem(page, "Settings");
+  await page.getByRole("button", { name: "Save retention settings" }).click();
+  await expect(page.getByText("Retention settings saved.")).toBeVisible();
+  expect(await page.locator("[data-flash]").evaluate((flash) => flash.hasAttribute("role")))
+    .toBe(false);
+  await expect(page.locator("[data-announcer]")).toHaveText("Retention settings saved.");
+  await expect.poll(async () => (await announcements(page))
+    .filter((spoken) => spoken === "Retention settings saved.").length).toBe(1);
+});
+
+test("Live renders 500 events per second in animation-frame batches", async ({ page }, testInfo) => {
+  test.setTimeout(60_000);
+  await recordAnnouncements(page);
+  await login(page);
+  await page.locator(".mode-switch").getByRole("link", { name: "Live" }).click();
+  await expect(page.locator("[data-live-status]")).toHaveText("Live");
+
+  // Synthetic events are dispatched on the page's own EventSource at 500
+  // per second for four seconds while a frame loop records every frame
+  // interval; the stream is the one Live renders, without network jitter.
+  const result = await page.evaluate(async () => {
+    const source = (window as Window & { __siftailLiveSource: EventSource }).__siftailLiveSource;
+    const rows = document.querySelector("#live-rows") as HTMLElement;
+    const durationMs = 4000;
+    const perSecond = 500;
+    const tickMs = 10;
+    const frames: number[] = [];
+    let mutations = 0;
+    new MutationObserver(() => {
+      mutations += 1;
+    }).observe(rows, { childList: true });
+    let id = 1_000_000;
+    let last = performance.now();
+    let running = true;
+    const frame = (now: number) => {
+      frames.push(now - last);
+      last = now;
+      if (running) requestAnimationFrame(frame);
+    };
+    requestAnimationFrame(frame);
+    const started = performance.now();
+    let sent = 0;
+    await new Promise<void>((resolve) => {
+      const timer = setInterval(() => {
+        // Each tick catches up to the schedule, so timer drift never lowers
+        // the rate below 500 per second.
+        const elapsedMs = Math.min(performance.now() - started, durationMs);
+        const due = Math.floor((elapsedMs * perSecond) / 1000) - sent;
+        for (let index = 0; index < due; index += 1) {
+          id += 1;
+          sent += 1;
+          source.dispatchEvent(new MessageEvent("log", {
+            data: JSON.stringify({
+              id,
+              level: index % 2 ? "info" : "error",
+              message: `rate-${id} ${"x".repeat(120)}`,
+              stream: "stdout",
+              event_at_us: Date.now() * 1000,
+              source: { application: "api", service: "web" },
+            }),
+          }));
+        }
+        if (elapsedMs >= durationMs) {
+          clearInterval(timer);
+          resolve();
+        }
+      }, tickMs);
+    });
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    running = false;
+    const elapsed = Math.max(performance.now() - started, durationMs);
+    const sorted = frames.slice(1).sort((a, b) => a - b);
+    const percentile = (p: number) => sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * p))];
+    return {
+      sent,
+      rate: Math.round(sent / (elapsed / 1000)),
+      frames: sorted.length,
+      median: percentile(0.5),
+      p95: percentile(0.95),
+      max: sorted[sorted.length - 1],
+      over50: sorted.filter((value) => value > 50).length,
+      mutations,
+      rendered: rows.querySelectorAll(".log-row").length,
+    };
+  });
+  testInfo.annotations.push({ type: "live-500-per-second", description: JSON.stringify(result) });
+  console.log(`live-500-per-second ${JSON.stringify(result)}`);
+
+  expect(result.sent).toBe(2000);
+  expect(result.rendered).toBe(1000);
+  // Rows arrive in batches: far fewer list mutations than events.
+  expect(result.mutations).toBeLessThan(result.sent / 2);
+  // Frame time stays bounded: the 95th percentile is under 50 ms (20 fps)
+  // and no frame exceeds 250 ms.
+  expect(result.p95).toBeLessThan(50);
+  expect(result.max).toBeLessThan(250);
+  // The list still follows the newest row after the burst.
+  expect(await page.locator("[data-live-scroll]").evaluate((element) =>
+    element.scrollHeight - element.scrollTop - element.clientHeight)).toBeLessThanOrEqual(48);
+});
+
 test("Live keyboard, themes, reduced motion, mobile, axe, and online invalidation", async ({
   page,
 }) => {
@@ -2030,7 +2234,7 @@ test("full and configuration backups are typed, verified, and accessible", async
   await page.locator("#backup-file-name").fill("browser-full.sqlite");
   await page.getByRole("button", { name: "Create verified full backup" }).click();
   await expect(page).toHaveURL(/\/backup$/);
-  await expect(page.getByText("Backup verified.", { exact: true })).toBeVisible({
+  await expect(page.locator("#backup-region").getByText("Backup verified.", { exact: true })).toBeVisible({
     timeout: 15_000,
   });
   await expect(page.getByText("browser-full.sqlite", { exact: true })).toBeVisible();
@@ -2045,7 +2249,7 @@ test("full and configuration backups are typed, verified, and accessible", async
   await page.getByRole("button", {
     name: "Create verified configuration-only backup",
   }).click();
-  await expect(page.getByText("Backup verified.", { exact: true })).toBeVisible({
+  await expect(page.locator("#backup-region").getByText("Backup verified.", { exact: true })).toBeVisible({
     timeout: 15_000,
   });
   await expect(page.getByText("configuration", { exact: true })).toBeVisible();
@@ -2060,7 +2264,7 @@ test("full and configuration backups are typed, verified, and accessible", async
 
   await page.getByLabel("Artifact file name").fill(configurationName);
   await page.getByRole("button", { name: "Verify backup" }).click();
-  await expect(page.getByText("Backup verified.", { exact: true })).toBeVisible({
+  await expect(page.locator("#backup-region").getByText("Backup verified.", { exact: true })).toBeVisible({
     timeout: 15_000,
   });
   await expect(page.getByText("configuration", { exact: true })).toBeVisible();
