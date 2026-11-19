@@ -150,11 +150,13 @@
   <button class="event-toggle" type="button" tabindex="-1" aria-label="{{.ToggleLabel}}"
           aria-expanded="false" aria-controls="{{.DetailID}}"
           hx-get="{{.DetailURL}}" hx-target="#{{.DetailID}}" hx-swap="innerHTML"
-          hx-disabled-elt="this">›</button>
+          hx-disabled-elt="this">{{template "icon.html" "chevron"}}</button>
   <time datetime="{{.TimestampUTC}}">{{.Timestamp}}</time>
   {{template "severity.html" .Level}}
   <span class="row-source">{{.Source}}</span>
-  <span class="row-message">{{.Message}}</span>
+  {{/* The preview, its Contains matches as <mark> segments (each escaped
+       by the template), and the +N lines hint (DESIGN.md §12.4). */}}
+  <span class="row-message"><span class="row-text">{{range .MessageSegments}}{{if .Match}}<mark>{{.Text}}</mark>{{else}}{{.Text}}{{end}}{{end}}</span>{{if .ExtraLines}}<span class="row-lines">+{{.ExtraLines}} {{if eq .ExtraLines 1}}line{{else}}lines{{end}}</span>{{end}}</span>
   <span class="row-stream">{{.Stream}}</span>
   <div id="{{.DetailID}}" class="event-detail-slot"></div>
 </div>
@@ -234,6 +236,7 @@
 
 {{define "history-results"}}
 <div id="history-results">
+  <div class="result-bar">
   <div class="result-summary" role="status" aria-live="polite" tabindex="-1">
     <span><strong data-loaded-count>{{.LoadedCount}}</strong> <span data-loaded-label>{{.LoadedLabel}}</span> loaded</span>
     <span>{{.RangeSummary}}</span>
@@ -241,6 +244,8 @@
     {{if .Contains}}<span>Contains “{{.Contains}}”</span>{{end}}
     {{if .Excludes}}<span>Excludes “{{.Excludes}}”</span>{{end}}
     {{if .HasMore}}<span data-more-summary>More older events available</span>{{end}}
+  </div>
+  {{template "wrap-toggle.html"}}
   </div>
   {{if .ExportError}}
   <div class="history-error history-inline-error" role="alert">

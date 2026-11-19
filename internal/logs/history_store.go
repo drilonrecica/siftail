@@ -47,15 +47,18 @@ type HistoryEvent struct {
 	MessageRaw          []byte
 	MessageText         string
 	MessageBytes        int64
-	AttributesJSON      []byte
-	SourceEventID       *string
-	Logger              *string
-	RequestID           *string
-	ErrorType           *string
-	HTTPMethod          *string
-	HTTPPath            *string
-	HTTPStatus          *int64
-	DurationMS          *float64
+	// MessageExtraLines counts the stored message's lines after the first,
+	// ignoring trailing line breaks (History pages only; DESIGN.md §12.4).
+	MessageExtraLines int64
+	AttributesJSON    []byte
+	SourceEventID     *string
+	Logger            *string
+	RequestID         *string
+	ErrorType         *string
+	HTTPMethod        *string
+	HTTPPath          *string
+	HTTPStatus        *int64
+	DurationMS        *float64
 }
 
 type HistoryPage struct {
@@ -126,7 +129,9 @@ const historyPageColumns = `SELECT
 	s.project_label, s.environment_label, s.application_label, s.service_label, s.alias,
 	e.container_instance_id, container.container_id, container.container_name,
 	e.stream, e.level_normalized,
-	substr(e.message_text, 1, 2048), length(cast(e.message_text AS BLOB))
+	substr(e.message_text, 1, 2048), length(cast(e.message_text AS BLOB)),
+	length(rtrim(e.message_text, char(13, 10))) -
+		length(replace(rtrim(e.message_text, char(13, 10)), char(10), ''))
 	FROM log_events AS e
 	JOIN sources AS s ON s.id = e.source_id
 	JOIN servers AS server ON server.id = s.server_id
@@ -397,6 +402,7 @@ func scanHistoryPageEvent(row rowScanner) (HistoryEvent, error) {
 		&event.ProjectLabel, &event.EnvironmentLabel, &event.ApplicationLabel, &event.ServiceLabel, &alias,
 		&containerInstanceID, &containerID, &containerName,
 		&event.Stream, &event.Level, &event.MessageText, &event.MessageBytes,
+		&event.MessageExtraLines,
 	); err != nil {
 		return HistoryEvent{}, err
 	}

@@ -674,6 +674,11 @@ panel.
 A message with more than one stored line ends its preview with a muted
 `+N lines` suffix in the same face (`NullPointerException …  +18 lines`); the
 server supplies the count (an additive `lines` field in the Live payload).
+N counts the lines after the first in the complete stored message, not the
+bounded preview, with trailing line breaks ignored; one extra line reads
+`+1 line`. The suffix never truncates: the preview clamps before it. The
+clamp applies at every width, including the 390 px layout; Wrap shows the
+excerpt in full with its line breaks and indentation kept (`pre-wrap`).
 
 When a Contains filter is active, matching substrings in the preview are
 wrapped in `<mark>` using `--mark-bg` with the inherited text colour and no
@@ -1237,7 +1242,8 @@ base and raised surfaces in both themes: 3.43/3.19 dark, 3.42/3.66 light),
 `--status-fatal` dark (deeper and more saturated than error: 6.73:1 on base,
 4.69:1 on selected), and the new `--mark-bg` (match highlight; the row's text
 colour inherits at 8.4:1 dark and 13.1:1 light). `--status-fatal` dark and
-`--mark-bg` land with the severity signature and match highlight (SFT-121).
+`--mark-bg` landed with the severity signature and match highlight
+(SFT-121); `internal/web/ui/signature_test.go` checks the mark pairing.
 
 Values verified by SFT-120, whose test (`internal/web/ui/contrast_test.go`)
 computes every ratio from `tokens.css` in both themes:
@@ -1383,7 +1389,8 @@ The set: `chevron` (expansion; rotated by CSS when expanded), `copy`,
 (new events), `menu` (narrow-width header). All on a 16 px grid, 1.5 px
 stroke, `currentColor`. Icon-only buttons carry a visible-text or
 `aria-label` name. The Live module builds icons with `createElementNS`,
-never `innerHTML`. No Unicode glyphs as icons (text inside `<kbd>` such as
+never `innerHTML`. Back links ("All sources") use `chevron` rotated to point
+back. No Unicode glyphs as icons (text inside `<kbd>` such as
 `⌘` and `Ctrl` is text, not an icon). No icon fonts, no external icons, no
 icon library dependency. Severity is never icon-only.
 

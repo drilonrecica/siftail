@@ -645,3 +645,60 @@ func TestHistoryPrevCursorTraversesNewer(t *testing.T) {
 		t.Fatal("older-direction query accepted a newer-direction cursor")
 	}
 }
+
+// TestHistoryCountsStoredLinesAfterTheFirst covers the "+N lines" hint
+// (DESIGN.md §12.4): the count is over the complete stored message, beyond
+// the bounded preview, and ignores trailing line breaks.
+func TestHistoryCountsStoredLinesAfterTheFirst(t *testing.T) {
+	db, coordinator := cursorTestDatabase(t)
+	codec, err := LoadCursorCodec(context.Background(), db.Reader(), coordinator)
+	if err != nil {
+		t.Fatal(err)
+	}
+	messages := map[int64]struct {
+		text string
+		want int64
+	}{
+		1: {"single line", 0},
+		2: {"first\nsecond\r\nthird\n\n", 2},
+		3: {strings.Repeat("x", 4000) + "\nbeyond the preview", 1},
+		4: {"trailing only\r\n", 0},
+	}
+	if err := coordinator.Do(context.Background(), func(tx *sql.Tx) error {
+		if _, err := tx.Exec(`INSERT INTO servers(id,name,created_at_us)
+			VALUES (1,'Lines',1)`); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`INSERT INTO sources(
+			id,server_id,project_key,environment_key,application_key,service_key,
+			project_label,environment_label,application_label,service_label,
+			first_seen_at_us,last_seen_at_us
+		) VALUES (1,1,'p','e','a','s','p','e','a','s',1,1)`); err != nil {
+			return err
+		}
+		for at, message := range messages {
+			if _, err := tx.Exec(`INSERT INTO log_events(
+				event_at_us,received_at_us,source_id,stream,level_normalized,message_raw,message_text
+			) VALUES (?,1,1,'stdout','info',?,?)`, at, []byte(message.text), message.text); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	page, err := NewHistoryStore(db.Reader(), codec).History(context.Background(), HistoryQuery{
+		FromUS: 0, ToUS: 10, Direction: DirectionOlder, Limit: 200,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Events) != len(messages) {
+		t.Fatalf("events = %d, want %d", len(page.Events), len(messages))
+	}
+	for _, event := range page.Events {
+		if want := messages[event.EventAtUS].want; event.MessageExtraLines != want {
+			t.Errorf("event at %d: extra lines = %d, want %d", event.EventAtUS, event.MessageExtraLines, want)
+		}
+	}
+}

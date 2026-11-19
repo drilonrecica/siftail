@@ -1,0 +1,19 @@
+{{/* The one inline icon sprite (DESIGN.md §31, ADR 0011 D4): rendered hidden
+     once per page, every symbol on a 16 px grid. Stroke width, caps, and
+     colour come from the .icon rule, so each icon takes the text colour of
+     the control it sits in. Icons are never the only name of a control and
+     never carry severity. */}}
+{{define "icon-sprite.html"}}<svg class="icon-sprite" aria-hidden="true" focusable="false">
+  <symbol id="icon-chevron" viewBox="0 0 16 16"><path d="M6 3.5 10.5 8 6 12.5"/></symbol>
+  <symbol id="icon-copy" viewBox="0 0 16 16"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M10.5 3.5a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2"/></symbol>
+  <symbol id="icon-check" viewBox="0 0 16 16"><path d="M3 8.5 6.5 12 13 4.5"/></symbol>
+  <symbol id="icon-close" viewBox="0 0 16 16"><path d="m4 4 8 8M12 4l-8 8"/></symbol>
+  <symbol id="icon-search" viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3 3"/></symbol>
+  <symbol id="icon-external" viewBox="0 0 16 16"><path d="M9.5 2.5h4v4M13.5 2.5l-6 6M12 9.5v3a1 1 0 0 1-1 1H3.5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h3"/></symbol>
+  <symbol id="icon-arrow-down" viewBox="0 0 16 16"><path d="M8 2.5v11M3.5 9 8 13.5 12.5 9"/></symbol>
+  <symbol id="icon-menu" viewBox="0 0 16 16"><path d="M2.5 4h11M2.5 8h11M2.5 12h11"/></symbol>
+</svg>{{end}}
+
+{{/* One icon: {{template "icon.html" "copy"}}. Decorative by contract; the
+     control around it carries the name. */}}
+{{define "icon.html"}}<svg class="icon" aria-hidden="true" focusable="false"><use href="#icon-{{.}}"/></svg>{{end}}

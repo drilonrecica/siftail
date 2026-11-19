@@ -17,6 +17,7 @@
   const clearButton = workspace.querySelector("[data-live-clear]");
   const reconnectButton = workspace.querySelector("[data-live-reconnect]");
   const pendingButton = workspace.querySelector("[data-live-pending]");
+  const pendingLabel = workspace.querySelector("[data-live-pending-label]");
   const emptyState = workspace.querySelector("[data-live-empty]");
 
   if (
@@ -30,6 +31,7 @@
     !clearButton ||
     !reconnectButton ||
     !pendingButton ||
+    !pendingLabel ||
     !emptyState
   ) {
     return;
@@ -92,7 +94,7 @@
 
   const updatePendingControl = () => {
     pendingButton.hidden = pending.length === 0;
-    pendingButton.textContent = `↓ ${pending.length} new ${pending.length === 1 ? "event" : "events"}`;
+    pendingLabel.textContent = `${pending.length} new ${pending.length === 1 ? "event" : "events"}`;
   };
 
   // The empty state sits beside the role=list, which owns only rows.
@@ -149,6 +151,54 @@
     return `Details: ${code} ${source}, ${prefix}`;
   };
 
+  // An icon from the page's inline sprite (DESIGN.md §31), built without
+  // innerHTML. Decorative: the control around it carries the name.
+  const svgNS = "http://www.w3.org/2000/svg";
+  const makeIcon = (name) => {
+    const svg = document.createElementNS(svgNS, "svg");
+    svg.setAttribute("class", "icon");
+    svg.setAttribute("aria-hidden", "true");
+    svg.setAttribute("focusable", "false");
+    const use = document.createElementNS(svgNS, "use");
+    use.setAttribute("href", `#icon-${name}`);
+    svg.append(use);
+    return svg;
+  };
+
+  // The Contains filter the stream was opened with; rows highlight its
+  // matches (DESIGN.md §12.4).
+  let appliedContains = "";
+  const readContains = () => {
+    const field = form.elements.namedItem("contains");
+    return field instanceof HTMLInputElement ? field.value : "";
+  };
+  appliedContains = readContains();
+
+  // Mirrors MessageSegments in internal/web/ui/ui.go: every
+  // non-overlapping literal match after ASCII case folding, left to right,
+  // built from text nodes and <mark> elements only. Folding A–Z keeps
+  // string offsets.
+  const asciiLower = (value) => value.replace(/[A-Z]+/g, (run) => run.toLowerCase());
+  const appendMessage = (cell, text, contains) => {
+    if (!contains) {
+      cell.append(document.createTextNode(text));
+      return;
+    }
+    const haystack = asciiLower(text);
+    const needle = asciiLower(contains);
+    let start = 0;
+    for (;;) {
+      const index = haystack.indexOf(needle, start);
+      if (index < 0) break;
+      if (index > start) cell.append(document.createTextNode(text.slice(start, index)));
+      const mark = document.createElement("mark");
+      mark.textContent = text.slice(index, index + needle.length);
+      cell.append(mark);
+      start = index + needle.length;
+    }
+    if (start < text.length) cell.append(document.createTextNode(text.slice(start)));
+  };
+
   const makeLiveRow = (event) => {
     const id = Number(event.id);
     if (!Number.isSafeInteger(id) || id <= 0) return null;
@@ -175,7 +225,7 @@
     // One delegated listener on #live-rows fetches it, so no row is handed
     // to htmx.process (audit UX-17).
     toggle.dataset.detailUrl = scope ? `/logs/events/${id}?${scope}` : `/logs/events/${id}`;
-    toggle.textContent = "›";
+    toggle.append(makeIcon("chevron"));
 
     const timestamp = document.createElement("time");
     const date = new Date(Number(event.event_at_us) / 1000);
@@ -198,7 +248,17 @@
     source.textContent = sourceText;
     const message = document.createElement("span");
     message.className = "row-message";
-    message.textContent = messageText;
+    const messageBody = document.createElement("span");
+    messageBody.className = "row-text";
+    appendMessage(messageBody, messageText, appliedContains);
+    message.append(messageBody);
+    const extraLines = Number(event.lines);
+    if (Number.isSafeInteger(extraLines) && extraLines > 0) {
+      const lines = document.createElement("span");
+      lines.className = "row-lines";
+      lines.textContent = `+${extraLines} ${extraLines === 1 ? "line" : "lines"}`;
+      message.append(lines);
+    }
     if (event.message_truncated) message.title = "Preview truncated; open details for complete content.";
     const stream = document.createElement("span");
     stream.className = "row-stream";
@@ -505,6 +565,7 @@
   };
 
   const applyFilters = () => {
+    appliedContains = readContains();
     workspace.dataset.streamUrl = streamURLFromForm();
     window.history.replaceState(null, "", pageURLFromForm());
     syncHistoryLink();

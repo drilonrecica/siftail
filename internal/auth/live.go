@@ -15,6 +15,7 @@ import (
 
 	"github.com/drilonrecica/siftail/internal/logs"
 	"github.com/drilonrecica/siftail/internal/sessions"
+	webui "github.com/drilonrecica/siftail/internal/web/ui"
 )
 
 const livePreviewBytes = 8 << 10
@@ -44,9 +45,12 @@ type liveLogPayload struct {
 	OriginalLevel       string                `json:"level_original,omitempty"`
 	Message             string                `json:"message"`
 	MessageTruncated    bool                  `json:"message_truncated"`
-	AttributesPreview   string                `json:"attributes_preview,omitempty"`
-	AttributesTruncated bool                  `json:"attributes_truncated"`
-	Common              liveCommonPayload     `json:"common"`
+	// Lines counts the complete message's lines after the first, for the
+	// row's "+N lines" hint (DESIGN.md §12.4); additive.
+	Lines               int64             `json:"lines"`
+	AttributesPreview   string            `json:"attributes_preview,omitempty"`
+	AttributesTruncated bool              `json:"attributes_truncated"`
+	Common              liveCommonPayload `json:"common"`
 }
 
 type liveSourcePayload struct {
@@ -302,6 +306,7 @@ func (b *Browser) writeLiveMessage(w http.ResponseWriter, message logs.LiveMessa
 		Stream: event.Event.Stream, Level: event.Event.Level,
 		OriginalLevel: event.Event.OriginalLevel,
 		Message:       messagePreview, MessageTruncated: messageTruncated,
+		Lines:             webui.MessageExtraLines(event.Event.MessageText),
 		AttributesPreview: attributesPreview, AttributesTruncated: attributesTruncated,
 		Common: liveCommonPayload{
 			Logger:     event.Event.Common.Logger,

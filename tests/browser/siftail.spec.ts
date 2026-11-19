@@ -2717,6 +2717,210 @@ test("a storage-full state shows the degraded banner and a visible health label"
   }
 });
 
+// Ingests one event per entry for the browser-project/test/<application>/web
+// source at increasing timestamps from baseMs, with the given levels.
+async function ingestLevels(
+  application: string,
+  entries: Array<{ level: string; log: string }>,
+  baseMs: number,
+): Promise<void> {
+  const state = readState();
+  const response = await fetch(`http://${state.ingestAddress}/api/v1/ingest`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${getLiveToken()}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(entries.map((entry, index) => ({
+      timestamp: new Date(baseMs + index).toISOString(),
+      project: "browser-project",
+      environment: "test",
+      application,
+      service: "web",
+      stream: "stderr",
+      level: entry.level,
+      log: entry.log,
+    }))),
+  });
+  if (response.status !== 204) {
+    throw new Error(`fixture ingestion returned HTTP ${response.status}`);
+  }
+}
+
+// DESIGN.md §12.3–§12.5 and §31 (ADR 0011 D3, D4, D8–D11): severity edge
+// and fatal chip, sprite icons, the +N lines hint, keyboard selection
+// distinct from hover, the Wrap toggle, and Contains match highlighting
+// with hostile content, in History and Live.
+test("signature items: severity edge, icons, +N lines, selection, wrap, and match highlight", async ({
+  page,
+}) => {
+  await trackEventSources(page);
+  await login(page);
+  const hostile = "<img src=x onerror=window.siftailMarkXSS=true> Needle panic <mark>fake</mark> NEEDLE\n  at one()\n  at two()\n  at three()";
+  const long = `needle long ${"wrapped-segment ".repeat(40)}end`;
+  const base = Date.now() - 30_000;
+  await ingestLevels("signature", [
+    { level: "TRACE", log: "trace needle" },
+    { level: "DEBUG", log: "debug needle" },
+    { level: "INFO", log: long },
+    { level: "WARN", log: "warn needle" },
+    { level: "ERROR", log: "error needle\nsecond line" },
+    { level: "FATAL", log: hostile },
+  ], base);
+  await page.goto(`${historyScopeURL("signature", base - 1_000, Date.now() + 60_000)}&contains=needle`);
+  const rows = page.locator("#history-rows > .log-row");
+  await expect(rows).toHaveCount(6);
+
+  // Hostile content stays text; only the two matches are marked.
+  const fatal = rows.filter({ has: page.locator(".severity-fatal") });
+  await expect(fatal.locator(".row-text mark")).toHaveText(["Needle", "NEEDLE"]);
+  await expect(page.locator("#history-rows img")).toHaveCount(0);
+  await expect(fatal.locator(".row-text")).toContainText("<mark>fake</mark>");
+  await expect(fatal.locator(".row-lines")).toHaveText("+3 lines");
+  await expect(rows.filter({ hasText: "error needle" }).locator(".row-lines")).toHaveText("+1 line");
+  await expect(rows.filter({ hasText: "warn needle" }).locator(".row-lines")).toHaveCount(0);
+  expect(await page.evaluate(
+    () => (window as Window & { siftailMarkXSS?: boolean }).siftailMarkXSS,
+  )).toBeUndefined();
+
+  // Severity: edges on warn (2 px), error (2 px), fatal (3 px) only; FTL is
+  // the filled 700 code; INF reads as secondary text.
+  const edge = async (level: string) => rows
+    .filter({ has: page.locator(`.severity-${level}`) })
+    .evaluate((row) => getComputedStyle(row).boxShadow);
+  expect(await edge("fatal")).toContain("3px 0px 0px 0px inset");
+  expect(await edge("error")).toContain("2px 0px 0px 0px inset");
+  expect(await edge("warn")).toContain("2px 0px 0px 0px inset");
+  for (const level of ["info", "debug", "trace"]) {
+    expect(await edge(level)).not.toContain("inset");
+  }
+  const chip = await fatal.locator(".severity").evaluate((element) => {
+    const style = getComputedStyle(element);
+    return { weight: style.fontWeight, background: style.backgroundColor };
+  });
+  expect(chip.weight).toBe("700");
+  expect(chip.background).not.toBe("rgba(0, 0, 0, 0)");
+  const info = rows.filter({ has: page.locator(".severity-info") });
+  expect(await info.locator(".severity").evaluate((element) => getComputedStyle(element).color))
+    .toBe(await info.locator(".row-source").evaluate((element) => getComputedStyle(element).color));
+  expect(await info.locator(".severity").evaluate((element) => getComputedStyle(element).fontWeight))
+    .toBe("400");
+
+  // Icons come from the sprite; the chevron rotates when expanded.
+  const toggle = fatal.locator(".event-toggle");
+  await expect(toggle.locator("svg.icon use")).toHaveAttribute("href", "#icon-chevron");
+  await expect(toggle).toHaveText("");
+  await toggle.click();
+  await expect(fatal.locator(".event-detail")).toBeVisible();
+  expect(await toggle.locator(".icon").evaluate((icon) => getComputedStyle(icon).transform))
+    .toBe("matrix(0, 1, -1, 0, 0, 0)");
+  await fatal.getByRole("button", { name: "Collapse details" }).click();
+  await expect(fatal.locator(".event-detail")).toHaveCount(0);
+
+  // Hover is a background only; the keyboard-selected row adds the inset
+  // focus outline on the selected surface.
+  const warn = rows.filter({ has: page.locator(".severity-warn") });
+  await warn.hover();
+  const hovered = await warn.evaluate((row) => {
+    const style = getComputedStyle(row);
+    return { outline: style.outlineStyle, background: style.backgroundColor };
+  });
+  expect(hovered.outline).toBe("none");
+  await info.focus();
+  await page.mouse.move(0, 0);
+  const selected = await info.evaluate((row) => {
+    const style = getComputedStyle(row);
+    return {
+      outline: `${style.outlineStyle} ${style.outlineWidth} ${style.outlineOffset}`,
+      background: style.backgroundColor,
+    };
+  });
+  expect(selected.outline).toBe("solid 2px -5px");
+  expect(selected.background).not.toBe(hovered.background);
+  expect(selected.background).not.toBe("rgba(0, 0, 0, 0)");
+  // The inset outline sits inside the widest (fatal) edge.
+  await fatal.focus();
+  await page.mouse.move(0, 0);
+  await page.locator("#history-rows").screenshot({
+    path: ".playwright-artifacts/signature-selected-fatal.png",
+  });
+
+  // Wrap: off by default (clamped), on wraps in full, and the browser-local
+  // state survives a filter swap and a reload.
+  const wrap = page.locator(".result-bar [data-wrap-toggle]");
+  await expect(wrap).toBeVisible();
+  await expect(wrap).toHaveAttribute("aria-pressed", "false");
+  const longText = rows.filter({ hasText: "needle long" }).locator(".row-text");
+  expect(await longText.evaluate((element) => getComputedStyle(element).whiteSpace)).toBe("nowrap");
+  const clampedHeight = await longText.evaluate((element) => element.getBoundingClientRect().height);
+  await wrap.click();
+  await expect(wrap).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator("#history-rows")).toHaveClass(/wrap-messages/);
+  expect(await longText.evaluate((element) => element.getBoundingClientRect().height))
+    .toBeGreaterThan(clampedHeight * 2);
+  await page.screenshot({ path: ".playwright-artifacts/signature-history-wrap-desktop.png" });
+  await page.locator("#contains-filter").fill("panic");
+  await expect(rows).toHaveCount(1);
+  await expect(rows.first().locator(".row-text mark")).toHaveText(["panic"]);
+  await expect(page.locator(".result-bar [data-wrap-toggle]")).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator("#history-rows")).toHaveClass(/wrap-messages/);
+  await page.locator("#contains-filter").fill("needle");
+  await expect(rows).toHaveCount(6);
+  await page.reload();
+  await expect(page.locator(".result-bar [data-wrap-toggle]")).toHaveAttribute("aria-pressed", "true");
+  await page.locator(".result-bar [data-wrap-toggle]").click();
+  await expect(page.locator("#history-rows")).not.toHaveClass(/wrap-messages/);
+
+  for (const scheme of ["dark", "light"] as const) {
+    await page.emulateMedia({ colorScheme: scheme });
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.screenshot({ path: `.playwright-artifacts/signature-history-desktop-${scheme}.png` });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.locator("#history-rows").scrollIntoViewIfNeeded();
+    await page.screenshot({ path: `.playwright-artifacts/signature-history-mobile-${scheme}.png`, fullPage: true });
+  }
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.emulateMedia({ colorScheme: "dark" });
+
+  // Live: the same marks, hint, icon, and Wrap toggle on the tail line.
+  await page.locator(".mode-switch").getByRole("link", { name: "Live" }).click();
+  await expect(page).toHaveURL(/mode=live.*contains=needle|contains=needle.*mode=live/);
+  await expect(page.locator("[data-live-status]")).toHaveText("Live");
+  const liveWrap = page.locator(".live-tail [data-wrap-toggle]");
+  await expect(liveWrap).toBeVisible();
+  await expect(liveWrap).toHaveAttribute("aria-pressed", "false");
+  await ingestLevels("signature", [
+    { level: "FATAL", log: hostile.replace("window.siftailMarkXSS", "window.siftailLiveMarkXSS") },
+    { level: "WARN", log: "live warn needle" },
+  ], Date.now());
+  const liveRows = page.locator("#live-rows > .log-row");
+  await expect(liveRows).toHaveCount(2);
+  const liveFatal = liveRows.filter({ has: page.locator(".severity-fatal") });
+  await expect(liveFatal.locator(".row-text mark")).toHaveText(["Needle", "NEEDLE"]);
+  await expect(liveFatal.locator(".row-lines")).toHaveText("+3 lines");
+  await expect(liveFatal.locator(".row-text")).toContainText("<mark>fake</mark>");
+  await expect(page.locator("#live-rows img")).toHaveCount(0);
+  await expect(liveFatal.locator(".event-toggle svg.icon use")).toHaveAttribute("href", "#icon-chevron");
+  expect(await liveFatal.evaluate((row) => getComputedStyle(row).boxShadow)).toContain("3px 0px 0px 0px inset");
+  expect(await page.evaluate(
+    () => (window as Window & { siftailLiveMarkXSS?: boolean }).siftailLiveMarkXSS,
+  )).toBeUndefined();
+  await liveWrap.click();
+  await expect(page.locator("#live-rows")).toHaveClass(/wrap-messages/);
+  await ingestLevels("signature", [{ level: "INFO", log: long }], Date.now());
+  await expect(liveRows).toHaveCount(3);
+  expect(await liveRows.last().locator(".row-text").evaluate((element) => getComputedStyle(element).whiteSpace))
+    .toBe("pre-wrap");
+  for (const scheme of ["dark", "light"] as const) {
+    await page.emulateMedia({ colorScheme: scheme });
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.screenshot({ path: `.playwright-artifacts/signature-live-desktop-${scheme}.png` });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.screenshot({ path: `.playwright-artifacts/signature-live-mobile-${scheme}.png`, fullPage: true });
+  }
+});
+
+
 test("login failures are uniform and throttle the fifth attempt", async ({ page }) => {
   const fail = async (username: string) => {
     await page.goto("/login");

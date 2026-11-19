@@ -1,6 +1,11 @@
 {{/* Shared component partials (DESIGN.md §30). Pages must render these
      primitives instead of re-inventing their markup. */}}
 
+{{/* The Wrap toggle for a log list's message previews (DESIGN.md §12.4).
+     Its state is browser-local, so it stays hidden until app.js applies
+     it; without JavaScript previews keep the density's clamp. */}}
+{{define "wrap-toggle.html"}}<button class="button button-quiet wrap-toggle" type="button" aria-pressed="false" data-wrap-toggle hidden>Wrap</button>{{end}}
+
 {{define "severity.html"}}<span class="severity severity-{{.}}">{{severityCode .}}</span>{{end}}
 
 {{define "mode-switch.html"}}<div class="mode-switch" role="group" aria-label="Log mode">

@@ -52,3 +52,24 @@ approval. Entries are in the order they were taken, newest last.
 - **Options:** apply both values now; leave them to SFT-121.
 - **Chosen:** leave them to SFT-121, which owns the components that use them; §27.3 says so. The contrast test already covers `--status-fatal` and will check the new value when it lands (`#FF6B63` is 6.73:1 on base, 4.69:1 on selected, and `--text-inverse` on it is 6.83:1).
 - **Reversal cost:** none — two token lines whenever wanted.
+
+## SFT-121 — Implement the listed signature items, not the D1 filter-bar layout (2026-11-19)
+
+- **Question:** ADR 0011's Consequences say SFT-121 implements "D3, D4, D8–D10, D12, D13, and the layout of D1", but the task's row in `tasks/h3.md` and its acceptance in `docs/tasks/0.5.0-hardening.md` list only the signature items (severity edge, sprite, `+N lines`, selection, fatal weight, type scale, font subset, Wrap, match highlight) and say nothing about the single-row filter bar or moving the Live controls onto the tail line.
+- **Options:** (a) also rebuild both filter forms into D1's single-row bar and move Pause/Jump/Clear/Reconnect onto the Live tail line; (b) implement the acceptance list only and place the Wrap toggle where §12.4 says (end of the History result summary, on the Live tail line), leaving the bar and the Live toolbar as they are.
+- **Chosen:** (b). The acceptance list is the task's contract, D1 is flagged in the ADR as the most expensive decision to reverse, and the rebuild would rewrite both filter templates and many Playwright selectors inside a task already carrying nine items. **No remaining H3 task owns D1's layout**, so SFT-126's 280 px first-row target cannot be met as things stand (at 390 px the Live viewport is still all filters); the owner should add a task for it or assign it to an existing one.
+- **Reversal cost:** none to undo; doing D1 later is a new task touching `history.html`, `live.html`, the filter CSS, and the filter Playwright tests.
+
+## SFT-121 — Count `+N lines` over the full stored message in SQL (2026-11-19)
+
+- **Question:** §12.4 says the server supplies the count of stored lines, but History rows only load a 2,048-character preview, and the specification does not say whether N counts all lines or those after the first, nor how trailing breaks count.
+- **Options:** count in Go over the preview (cheap, undercounts long messages); count in SQL over the complete `message_text` (exact, one more pass over each row's text).
+- **Chosen:** SQL over the complete message, N = line breaks after trimming trailing `\r`/`\n` (lines after the first); Live computes the same in Go over the full message. `BenchmarkHistoryStore100K` (TMPDIR on btrfs, SATA SSD): a 200-row page went from about 1.0–1.4 ms to about 1.4 ms warm; the literal search case is unchanged (~116 ms). Messages are capped at 1 MiB, so the extra pass is bounded.
+- **Reversal cost:** low — one select expression in `history_store.go` and its test.
+
+## SFT-121 — Ship four static font files although they are larger than the variable pair (2026-11-19)
+
+- **Question:** ADR 0011 D13 chose static 400/700 instances, reasoning they are smaller than the variable file. Instancing the vendored variable subsets (fontTools `instancer`, no new download) gives four files of 57,932 bytes against 43,056 bytes for the two variable files (+14,876 bytes), so that premise does not hold.
+- **Options:** keep the variable files; ship the four static files as specified.
+- **Chosen:** the four static files: §28.1 and D13 require them, they remove the weights the specification forbids (the variable axis allowed 400–800), and FTL's 700 is a real instance, not a synthesised weight. Only the 400 latin file is preloaded, so a page that shows no FTL code never fetches the 700 files. Binary: 20,998,528 → 21,028,216 bytes (+29,688, including the CSS, templates, and code of this task).
+- **Reversal cost:** low — restore the two variable files and their `@font-face` rules and the asset map entries.

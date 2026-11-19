@@ -131,7 +131,7 @@ func TestLiveStreamFiltersFramesPreviewsReconnectAndControls(t *testing.T) {
 	if !broker.TryPublish([]logs.CommittedEvent{
 		authLiveEvent(1, 1, logs.LevelInfo, logs.StreamStdout, "ignored"),
 		authLiveEvent(2, 2, logs.LevelError, logs.StreamStderr,
-			"<script>NEEDLE</script>"+strings.Repeat("x", 10<<10)),
+			"<script>NEEDLE</script>"+strings.Repeat("x", 10<<10)+"\nat one\nat two\n"),
 	}) {
 		t.Fatal("events were not accepted")
 	}
@@ -143,7 +143,10 @@ func TestLiveStreamFiltersFramesPreviewsReconnectAndControls(t *testing.T) {
 	decodeLiveData(t, frame, &payload)
 	if payload.ID != 2 || payload.SourceID != 2 ||
 		payload.MessageTruncated != true || len(payload.Message) > 6<<10 ||
-		len(payload.Message)+len(payload.AttributesPreview) > livePreviewBytes {
+		len(payload.Message)+len(payload.AttributesPreview) > livePreviewBytes ||
+		// The +N lines count covers the complete message, past the
+		// truncated preview, and ignores the trailing line break.
+		payload.Lines != 2 {
 		t.Fatalf("payload = %#v", payload)
 	}
 	if !strings.Contains(payload.Message, "<script>NEEDLE</script>") {

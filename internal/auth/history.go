@@ -296,17 +296,19 @@ func buildHistoryView(
 			source = *event.SourceAlias
 		}
 		view.Rows[index] = webui.HistoryRowView{
-			ID:           event.ID,
-			DetailID:     fmt.Sprintf("event-detail-%d", event.ID),
-			DetailURL:    fmt.Sprintf("/logs/events/%d", event.ID) + detailSuffix,
-			TimestampUTC: datetime(eventTime),
-			Timestamp:    zone.row(eventTime, showDate),
-			Level:        string(event.Level),
-			Stream:       string(event.Stream),
-			Source:       source,
-			Message:      message,
-			ToggleLabel:  webui.RowToggleLabel(string(event.Level), source, message),
-			Highlighted:  highlight > 0 && event.ID == highlight,
+			ID:              event.ID,
+			DetailID:        fmt.Sprintf("event-detail-%d", event.ID),
+			DetailURL:       fmt.Sprintf("/logs/events/%d", event.ID) + detailSuffix,
+			TimestampUTC:    datetime(eventTime),
+			Timestamp:       zone.row(eventTime, showDate),
+			Level:           string(event.Level),
+			Stream:          string(event.Stream),
+			Source:          source,
+			Message:         message,
+			MessageSegments: webui.MessageSegments(message, query.Contains),
+			ExtraLines:      event.MessageExtraLines,
+			ToggleLabel:     webui.RowToggleLabel(string(event.Level), source, message),
+			Highlighted:     highlight > 0 && event.ID == highlight,
 		}
 		highlightFound = highlightFound || view.Rows[index].Highlighted
 	}

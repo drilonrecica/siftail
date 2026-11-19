@@ -34,7 +34,7 @@
 {{define "server-detail.html"}}
 <section class="workspace-panel server-management" aria-labelledby="server-title">
   <header class="catalog-heading">
-    <div><a href="/servers">← All Servers</a><h2 id="server-title">{{.Name}}</h2>{{if .Hostname}}<p>{{.Hostname}}</p>{{end}}</div>
+    <div><a class="back-link" href="/servers">{{template "icon.html" "chevron"}}All Servers</a><h2 id="server-title">{{.Name}}</h2>{{if .Hostname}}<p>{{.Hostname}}</p>{{end}}</div>
   </header>
   <div class="server-management-grid">
     <section>

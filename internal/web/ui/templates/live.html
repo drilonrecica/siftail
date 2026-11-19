@@ -115,8 +115,9 @@
       <span data-live-status>Connecting</span>
     </span>
     <span class="tail-line-rule" aria-hidden="true"></span>
+    {{template "wrap-toggle.html"}}
   </div>
-  <button class="button live-new-events" type="button" data-live-pending hidden>↓ 0 new events</button>
+  <button class="button live-new-events" type="button" data-live-pending hidden>{{template "icon.html" "arrow-down"}}<span data-live-pending-label>0 new events</span></button>
 </section>
 {{end}}
 {{end}}

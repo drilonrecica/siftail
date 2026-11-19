@@ -18,7 +18,7 @@
       <h3 id="event-message-title-{{.ID}}">Message</h3>
       <span>{{.MessageBytes}} bytes{{if .MessageTruncated}}, preview truncated{{end}}</span>
       <button class="button button-quiet copy-button" type="button"
-              data-copy-target="event-message-{{.ID}}">Copy message</button>
+              data-copy-target="event-message-{{.ID}}">{{template "icon.html" "copy"}}<span data-copy-label>Copy message</span></button>
     </div>
     <pre id="event-message-{{.ID}}">{{.Message}}</pre>
   </section>
@@ -50,7 +50,7 @@
       <h3>Attributes</h3>
       <span>{{.AttributesBytes}} bytes{{if .AttributesTruncated}}, preview truncated{{end}}</span>
       <button class="button button-quiet copy-button" type="button"
-              data-copy-target="event-attributes-{{.ID}}">Copy attributes</button>
+              data-copy-target="event-attributes-{{.ID}}">{{template "icon.html" "copy"}}<span data-copy-label>Copy attributes</span></button>
     </div>
     <pre id="event-attributes-{{.ID}}">{{.Attributes}}</pre>
   </section>
@@ -61,7 +61,7 @@
       <h3>Raw payload</h3>
       <span>{{.RawBytes}} bytes{{if .RawTruncated}}, preview truncated{{end}}</span>
       <button class="button button-quiet copy-button" type="button"
-              data-copy-target="event-raw-{{.ID}}">Copy raw payload</button>
+              data-copy-target="event-raw-{{.ID}}">{{template "icon.html" "copy"}}<span data-copy-label>Copy raw payload</span></button>
     </div>
     <pre id="event-raw-{{.ID}}">{{.Raw}}</pre>
   </section>
@@ -81,6 +81,6 @@
   <strong>Event details could not be loaded.</strong>
   <span>{{.Message}}</span>
   {{if .RequestID}}<span>Request ID: <code>{{.RequestID}}</code></span>{{end}}
-  <button class="button button-quiet" type="button" data-collapse-detail>Close</button>
+  <button class="button button-quiet" type="button" data-collapse-detail>{{template "icon.html" "close"}}Close</button>
 </div>
 {{end}}

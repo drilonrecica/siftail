@@ -234,7 +234,9 @@ func TestStatusShellRendersSanitizedTextualOperationalState(t *testing.T) {
 		}
 	}
 	if strings.Contains(body, `<script>private-payload`) ||
-		strings.Contains(body, "canvas") || strings.Contains(body, "<svg") {
+		strings.Contains(body, "canvas") ||
+		// The only SVG is the icon sprite and its icons (DESIGN.md §31).
+		strings.Contains(strings.NewReplacer(`<svg class="icon-sprite"`, "", `<svg class="icon"`, "").Replace(body), "<svg") {
 		t.Fatal("Status shell emitted unsafe content or dashboard chart")
 	}
 }
@@ -520,15 +522,17 @@ func TestEventDetailTemplateEscapesPayloadAndExposesSafeControls(t *testing.T) {
 func TestEmbeddedAssetsTypesIntegrityAndSafety(t *testing.T) {
 	renderer := New()
 	cases := map[string]string{
-		"app.css":                        "text/css; charset=utf-8",
-		"tokens.css":                     "text/css; charset=utf-8",
-		"app.js":                         "text/javascript; charset=utf-8",
-		"live.js":                        "text/javascript; charset=utf-8",
-		"tokens.js":                      "text/javascript; charset=utf-8",
-		"favicon.svg":                    "image/svg+xml",
-		"htmx-2.0.11.min.js":             "text/javascript; charset=utf-8",
-		"jetbrains-mono-latin.woff2":     "font/woff2",
-		"jetbrains-mono-latin-ext.woff2": "font/woff2",
+		"app.css":                            "text/css; charset=utf-8",
+		"tokens.css":                         "text/css; charset=utf-8",
+		"app.js":                             "text/javascript; charset=utf-8",
+		"live.js":                            "text/javascript; charset=utf-8",
+		"tokens.js":                          "text/javascript; charset=utf-8",
+		"favicon.svg":                        "image/svg+xml",
+		"htmx-2.0.11.min.js":                 "text/javascript; charset=utf-8",
+		"jetbrains-mono-400-latin.woff2":     "font/woff2",
+		"jetbrains-mono-400-latin-ext.woff2": "font/woff2",
+		"jetbrains-mono-700-latin.woff2":     "font/woff2",
+		"jetbrains-mono-700-latin-ext.woff2": "font/woff2",
 	}
 	for name, contentType := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -590,7 +594,9 @@ func TestEmbeddedAssetsTypesIntegrityAndSafety(t *testing.T) {
 	for _, required := range []string{
 		"const renderedLimit = 1000",
 		"const pendingLimit = 2000",
-		"message.textContent",
+		// Message previews and their matches are text nodes (DESIGN.md §12.4).
+		"document.createTextNode(text",
+		"mark.textContent",
 		"eventSource.close()",
 		`window.addEventListener("pagehide"`,
 	} {

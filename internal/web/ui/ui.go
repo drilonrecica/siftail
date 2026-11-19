@@ -189,7 +189,13 @@ type HistoryRowView struct {
 	Stream       string
 	Source       string
 	Message      string
-	ToggleLabel  string
+	// MessageSegments is Message split around the Contains filter's
+	// matches; the template escapes each and wraps matches in <mark>.
+	MessageSegments []MessageSegment
+	// ExtraLines counts the stored message's lines after the first, shown
+	// as the "+N lines" hint (DESIGN.md §12.4).
+	ExtraLines  int64
+	ToggleLabel string
 	// Highlighted marks the event "Show events around this time" opened
 	// History for (DESIGN.md §13.1).
 	Highlighted bool
@@ -608,6 +614,64 @@ func SeverityCode(level string) string {
 	return "UNK"
 }
 
+// MessageSegment is one run of a message preview: matched text of the
+// Contains filter, or the text between matches.
+type MessageSegment struct {
+	Text  string
+	Match bool
+}
+
+// MessageSegments splits a preview around every non-overlapping occurrence
+// of contains, left to right, using the History query's comparison: a
+// literal match after ASCII case folding (SQLite lower()). Folding ASCII
+// keeps byte offsets, and a valid UTF-8 needle can only match on rune
+// boundaries, so every segment is valid UTF-8. live.js does the same with
+// text nodes (DESIGN.md §12.4).
+func MessageSegments(message, contains string) []MessageSegment {
+	if contains == "" {
+		return []MessageSegment{{Text: message}}
+	}
+	haystack, needle := asciiLower(message), asciiLower(contains)
+	var segments []MessageSegment
+	start := 0
+	for {
+		index := strings.Index(haystack[start:], needle)
+		if index < 0 {
+			break
+		}
+		index += start
+		if index > start {
+			segments = append(segments, MessageSegment{Text: message[start:index]})
+		}
+		end := index + len(needle)
+		segments = append(segments, MessageSegment{Text: message[index:end], Match: true})
+		start = end
+	}
+	if start < len(message) || len(segments) == 0 {
+		segments = append(segments, MessageSegment{Text: message[start:]})
+	}
+	return segments
+}
+
+// asciiLower folds A–Z byte by byte, so the result has the input's length
+// and offsets even when the input is not valid UTF-8.
+func asciiLower(value string) string {
+	folded := []byte(value)
+	for index, b := range folded {
+		if 'A' <= b && b <= 'Z' {
+			folded[index] = b + ('a' - 'A')
+		}
+	}
+	return string(folded)
+}
+
+// MessageExtraLines counts a message's lines after the first, ignoring
+// trailing line breaks; History counts the same in SQL over the stored
+// message, and the Live payload carries it as "lines".
+func MessageExtraLines(message string) int64 {
+	return int64(strings.Count(strings.TrimRight(message, "\r\n"), "\n"))
+}
+
 // rowToggleMessageRunes bounds the message prefix in a row's detail-toggle
 // name; live.js uses the same bound.
 const rowToggleMessageRunes = 60
@@ -737,17 +801,19 @@ func (r *Renderer) Asset(w http.ResponseWriter, request *http.Request) {
 	}
 	name := path.Base(request.URL.Path)
 	contentTypes := map[string]string{
-		"app.css":                        "text/css; charset=utf-8",
-		"tokens.css":                     "text/css; charset=utf-8",
-		"app.js":                         "text/javascript; charset=utf-8",
-		"keyboard.js":                    "text/javascript; charset=utf-8",
-		"palette.js":                     "text/javascript; charset=utf-8",
-		"live.js":                        "text/javascript; charset=utf-8",
-		"tokens.js":                      "text/javascript; charset=utf-8",
-		"favicon.svg":                    "image/svg+xml",
-		"htmx-2.0.11.min.js":             "text/javascript; charset=utf-8",
-		"jetbrains-mono-latin.woff2":     "font/woff2",
-		"jetbrains-mono-latin-ext.woff2": "font/woff2",
+		"app.css":                            "text/css; charset=utf-8",
+		"tokens.css":                         "text/css; charset=utf-8",
+		"app.js":                             "text/javascript; charset=utf-8",
+		"keyboard.js":                        "text/javascript; charset=utf-8",
+		"palette.js":                         "text/javascript; charset=utf-8",
+		"live.js":                            "text/javascript; charset=utf-8",
+		"tokens.js":                          "text/javascript; charset=utf-8",
+		"favicon.svg":                        "image/svg+xml",
+		"htmx-2.0.11.min.js":                 "text/javascript; charset=utf-8",
+		"jetbrains-mono-400-latin.woff2":     "font/woff2",
+		"jetbrains-mono-400-latin-ext.woff2": "font/woff2",
+		"jetbrains-mono-700-latin.woff2":     "font/woff2",
+		"jetbrains-mono-700-latin-ext.woff2": "font/woff2",
 	}
 	contentType, ok := contentTypes[name]
 	if !ok {

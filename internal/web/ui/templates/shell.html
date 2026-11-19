@@ -4,6 +4,7 @@
   {{template "head.html" $p.Title}}
 </head>
 <body hx-history="false">
+  {{template "icon-sprite.html"}}
   <a class="skip-link" href="#main-content">Skip to main content</a>
   {{template "topbar.html" .}}
   {{if .Degraded.Title}}<div class="degraded-banner" role="alert" data-degraded-banner>

@@ -53,7 +53,7 @@
 <section class="workspace-panel source-detail" aria-labelledby="source-detail-title">
   <header class="catalog-heading">
     <div>
-      <a href="/sources">← All sources</a>
+      <a class="back-link" href="/sources">{{template "icon.html" "chevron"}}All sources</a>
       <h2 id="source-detail-title">{{.DisplayName}}</h2>
       <p>{{.Application}} / {{.Service}}{{if .Alias}} · administrator alias{{end}}</p>
     </div>

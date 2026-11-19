@@ -305,7 +305,6 @@
     const slot = document.getElementById(toggle.getAttribute("aria-controls") || "");
     slot?.replaceChildren();
     toggle.setAttribute("aria-expanded", "false");
-    toggle.textContent = "›";
     const row = toggle.closest(".log-row");
     if (document.activeElement !== row) toggle.focus({ preventScroll: true });
   };
@@ -374,21 +373,26 @@
     if (copy) {
       const source = document.getElementById(copy.dataset.copyTarget);
       if (!source) return;
-      const original = copy.textContent;
+      // Only the label changes, so the icon stays; a copy confirms with
+      // the check icon (DESIGN.md §31).
+      const label = copy.querySelector("[data-copy-label]") || copy;
+      const icon = copy.querySelector(".icon use");
+      const original = label.textContent;
+      const show = (text, iconName) => {
+        label.textContent = text;
+        icon?.setAttribute("href", `#icon-${iconName}`);
+      };
+      const restore = () => window.setTimeout(() => show(original, "copy"), 1500);
       if (!navigator.clipboard) {
-        copy.textContent = "Copy unavailable";
-        window.setTimeout(() => {
-          copy.textContent = original;
-        }, 1500);
+        show("Copy unavailable", "copy");
+        restore();
         return;
       }
       navigator.clipboard.writeText(source.textContent).then(() => {
-        copy.textContent = "Copied";
-        window.setTimeout(() => {
-          copy.textContent = original;
-        }, 1500);
+        show("Copied", "check");
+        restore();
       }).catch(() => {
-        copy.textContent = "Copy failed";
+        show("Copy failed", "copy");
       });
       return;
     }
@@ -610,6 +614,43 @@
     document.querySelector("#history-region")?.setAttribute("aria-busy", "false");
   });
 
+  // The Wrap toggle (DESIGN.md §12.4): browser-local, applied as a class on
+  // every log list, so it survives History swaps and new Live rows. Storage
+  // may be unavailable (private modes); the toggle then lasts for the page.
+  const wrapKey = "siftail.wrap";
+  let wrapped = false;
+  try {
+    wrapped = window.localStorage.getItem(wrapKey) === "on";
+  } catch {
+    wrapped = false;
+  }
+  const applyWrap = (root) => {
+    root.querySelectorAll(".log-list").forEach((list) => {
+      list.classList.toggle("wrap-messages", wrapped);
+    });
+    root.querySelectorAll("[data-wrap-toggle]").forEach((button) => {
+      button.setAttribute("aria-pressed", String(wrapped));
+      button.hidden = false;
+    });
+  };
+  document.addEventListener("click", (event) => {
+    const button = event.target instanceof Element
+      ? event.target.closest("[data-wrap-toggle]")
+      : null;
+    if (!button) return;
+    wrapped = !wrapped;
+    try {
+      window.localStorage.setItem(wrapKey, wrapped ? "on" : "off");
+    } catch {
+      // Not persisted; the page still reflects the choice.
+    }
+    applyWrap(document);
+  });
+  applyWrap(document);
+  // After settle, not swap: htmx's settle step restores the server's class
+  // attribute on elements that keep their id, such as #history-rows.
+  document.addEventListener("htmx:afterSettle", () => applyWrap(document));
+
   prepareResponsiveHistory(document);
   enhanceRangeInputs(document);
   document.addEventListener("htmx:afterSwap", (event) => {
@@ -622,10 +663,8 @@
       event.target.firstElementChild) {
       const row = event.target.closest(".log-row");
       const toggle = row?.querySelector(".event-toggle");
-      if (toggle) {
-        toggle.setAttribute("aria-expanded", "true");
-        toggle.textContent = "⌄";
-      }
+      // The chevron rotates by CSS from aria-expanded (DESIGN.md §12.5).
+      toggle?.setAttribute("aria-expanded", "true");
       event.target.querySelector(".event-detail")?.focus({ preventScroll: true });
     }
     if (requester === "load-older" && !document.querySelector("#load-older")) {

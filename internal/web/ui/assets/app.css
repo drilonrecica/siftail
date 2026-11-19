@@ -114,7 +114,7 @@ button,
   align-items: center;
   gap: var(--space-2);
   color: var(--text-primary);
-  font-size: 1rem;
+  font-size: var(--text-md);
   font-weight: 700;
   text-decoration: none;
 }
@@ -159,7 +159,7 @@ button,
 .login-heading h1,
 .workspace-heading h1 {
   margin: 0;
-  font-size: clamp(1.55rem, 4vw, 2rem);
+  font-size: var(--text-2xl);
   line-height: 1.2;
 }
 
@@ -173,7 +173,7 @@ button,
 .eyebrow {
   margin: 0 0 var(--space-1);
   color: var(--text-muted);
-  font-size: var(--text-2xs);
+  font-size: var(--text-xs);
   font-weight: 600;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -235,13 +235,13 @@ button,
 .field-error {
   margin: 0;
   color: var(--status-error);
-  font-size: 0.85rem;
+  font-size: var(--text-sm);
   font-weight: 600;
 }
 
 .notice h2 {
   margin: 0 0 var(--space-2);
-  font-size: 1rem;
+  font-size: var(--text-md);
 }
 
 .notice p,
@@ -274,7 +274,7 @@ button,
 
 .recovery-copy {
   margin: var(--space-6) 0 0;
-  font-size: 0.9rem;
+  font-size: var(--text-sm);
 }
 
 code {
@@ -375,7 +375,7 @@ code {
 
 .health-label {
   color: var(--status-error);
-  font-size: 0.85rem;
+  font-size: var(--text-sm);
   font-weight: 700;
   white-space: nowrap;
 }
@@ -440,9 +440,12 @@ code {
   display: none;
 }
 
-.system-menu > summary::after {
-  content: "▾";
-  font-size: var(--text-2xs);
+.system-menu > summary .icon {
+  transform: rotate(90deg);
+}
+
+.system-menu[open] > summary .icon {
+  transform: rotate(-90deg);
 }
 
 .system-menu > summary:hover,
@@ -612,7 +615,7 @@ code {
 .settings-form header h2,
 .settings-explanation h2 {
   margin: 0;
-  font-size: 1.1rem;
+  font-size: var(--text-lg);
 }
 
 .settings-form header > p:last-child,
@@ -694,7 +697,7 @@ code {
 .audit-category {
   display: block;
   color: var(--text-muted);
-  font-size: 0.85rem;
+  font-size: var(--text-sm);
 }
 
 .audit-outcome {
@@ -760,7 +763,7 @@ code {
 
 .status-sections h2 {
   margin-top: 0;
-  font-size: 1.1rem;
+  font-size: var(--text-lg);
 }
 
 .status-facts {
@@ -864,7 +867,7 @@ code {
 .filter-group legend {
   padding: 0 var(--space-1);
   color: var(--text-secondary);
-  font-size: 0.8rem;
+  font-size: var(--text-xs);
   font-weight: 700;
 }
 
@@ -874,7 +877,7 @@ code {
   align-content: start;
   gap: var(--space-1);
   color: var(--text-secondary);
-  font-size: 0.8rem;
+  font-size: var(--text-xs);
   font-weight: 600;
 }
 
@@ -923,7 +926,7 @@ code {
   grid-column: 1 / -1;
   margin: 0;
   color: var(--text-muted);
-  font-size: 0.75rem;
+  font-size: var(--text-xs);
 }
 
 .choice-filters {
@@ -947,7 +950,7 @@ code {
   padding: var(--space-1) var(--space-2);
   background: transparent;
   color: var(--text-secondary);
-  font-size: 0.75rem;
+  font-size: var(--text-xs);
 }
 
 .choice-list label {
@@ -1056,14 +1059,41 @@ code {
   margin-left: 0;
 }
 
+/* The result summary with the Wrap toggle at its end (DESIGN.md §12.4). */
+.result-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding-right: var(--space-3);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
 .result-summary {
   display: flex;
+  flex: 1;
   flex-wrap: wrap;
   gap: var(--space-2) var(--space-4);
   padding: var(--space-3);
-  border-bottom: 1px solid var(--border-subtle);
   color: var(--text-secondary);
-  font-size: 0.85rem;
+  font-size: var(--text-sm);
+}
+
+.wrap-toggle {
+  min-height: 1.9rem;
+  padding: var(--space-1) var(--space-3);
+  border-color: var(--border-subtle);
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+}
+
+.wrap-toggle[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--surface-selected);
+  color: var(--text-primary);
+}
+
+.wrap-toggle[hidden] {
+  display: none;
 }
 
 .history-actions {
@@ -1210,7 +1240,7 @@ code {
 .live-notice {
   margin: 0;
   color: var(--text-secondary);
-  font-size: 0.85rem;
+  font-size: var(--text-sm);
 }
 
 .live-list-wrap {
@@ -1253,6 +1283,7 @@ code {
 }
 
 .log-row {
+  box-shadow: var(--row-edge, 0 0 transparent), var(--row-rules, 0 0 transparent);
   display: grid;
   grid-template-columns: 2rem var(--row-time-column, 8.5rem) 3.5rem minmax(8rem, 0.8fr) minmax(12rem, 3fr) 4.5rem;
   align-items: baseline;
@@ -1273,9 +1304,14 @@ code {
   background: transparent;
   color: var(--text-secondary);
   font: inherit;
-  font-size: 1.2rem;
+  font-size: var(--text-md);
   line-height: 1;
   cursor: pointer;
+  padding: 0;
+}
+
+.event-toggle[aria-expanded="true"] .icon {
+  transform: rotate(90deg);
 }
 
 .event-toggle:hover,
@@ -1344,7 +1380,7 @@ code {
 .detail-section-heading > span {
   margin-left: auto;
   color: var(--text-muted);
-  font-size: 0.8rem;
+  font-size: var(--text-xs);
 }
 
 .detail-section pre {
@@ -1406,14 +1442,40 @@ code {
    §13.1): accent rules above and below, a shape cue independent of the
    severity edge, hover, and keyboard selection. */
 .log-row[data-highlighted] {
-  box-shadow: inset 0 2px 0 var(--accent), inset 0 -2px 0 var(--accent);
+  --row-rules: inset 0 2px 0 var(--accent), inset 0 -2px 0 var(--accent);
+}
+
+/* Severity edge (DESIGN.md §12.3): an inset shadow at full row height, so
+   it never changes layout. Fatal is wider than error, and the row is never
+   tinted. */
+.log-row.level-warn {
+  --row-edge: inset 2px 0 0 var(--status-warning);
+}
+
+.log-row.level-error {
+  --row-edge: inset 2px 0 0 var(--status-error);
+}
+
+.log-row.level-fatal {
+  --row-edge: inset 3px 0 0 var(--status-fatal);
+}
+
+/* The keyboard-selected row (the list's roving tab stop, DESIGN.md §12.5):
+   the selected surface and a 2 px focus outline drawn inside the row, past
+   the widest severity edge, so the two never collide and selection never
+   looks like hover. */
+.log-row[data-row-selected],
+.log-row:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -5px;
+  background: var(--surface-selected);
 }
 
 .highlight-notice {
   margin: 0;
   padding: var(--space-2) var(--space-3);
   color: var(--text-secondary);
-  font-size: 0.85rem;
+  font-size: var(--text-sm);
 }
 
 .log-row > * {
@@ -1432,9 +1494,27 @@ code {
 }
 
 .row-source,
-.row-message {
+.row-text {
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The message cell: the preview clamps, and the "+N lines" hint stays
+   whole at its end, so the hint never shifts a column (DESIGN.md §12.4). */
+.row-message {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+
+.row-text {
+  min-width: 0;
+}
+
+.row-lines {
+  flex: none;
+  color: var(--text-secondary);
   white-space: nowrap;
 }
 
@@ -1442,23 +1522,44 @@ code {
   padding-block: var(--space-3);
 }
 
-:root[data-density="comfortable"] .row-message {
+:root[data-density="comfortable"] .row-text {
   display: -webkit-box;
   white-space: normal;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
 }
 
+/* Wrap on: the bounded preview in full, its line breaks and indentation
+   kept. */
+.log-list.wrap-messages .row-text {
+  display: block;
+  overflow: visible;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+/* Contains matches: no padding, so widths never change; the row's text
+   colour carries over the highlight. */
+.row-text mark {
+  padding: 0;
+  background: var(--mark-bg);
+  color: inherit;
+}
+
+/* Severity codes (DESIGN.md §12.3): monospace 400, except FTL, the one
+   filled code, at 700. The chip's padding is given back by a negative
+   margin, so the column still aligns. */
 .severity {
   font-family: var(--font-mono);
   font-size: var(--text-xs);
-  font-weight: 600;
+  font-weight: 400;
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
 
-.severity-fatal {
-  font-weight: 700;
+.severity-info,
+.severity-unknown {
+  color: var(--text-secondary);
 }
 
 .severity-warn {
@@ -1469,8 +1570,18 @@ code {
   color: var(--status-error);
 }
 
+/* In a row the code keeps its own width, so the chip hugs FTL. */
+.log-row .severity {
+  justify-self: start;
+}
+
 .severity-fatal {
-  color: var(--status-fatal);
+  margin-inline: -0.3ch;
+  padding: 0 0.3ch;
+  border-radius: var(--radius-sm);
+  background: var(--status-fatal);
+  color: var(--text-inverse);
+  font-weight: 700;
 }
 
 .severity-trace,
@@ -1734,7 +1845,7 @@ kbd {
 .palette-kind {
   overflow: hidden;
   color: var(--text-muted);
-  font-size: var(--text-2xs);
+  font-size: var(--text-xs);
   letter-spacing: 0.06em;
   text-overflow: ellipsis;
   text-transform: uppercase;
@@ -1820,7 +1931,7 @@ kbd {
 
 .source-table thead th {
   color: var(--text-secondary);
-  font-size: 0.8rem;
+  font-size: var(--text-xs);
 }
 
 .source-table tbody th {
@@ -1831,7 +1942,7 @@ kbd {
   display: block;
   margin-top: var(--space-1);
   color: var(--text-muted);
-  font-size: 0.8rem;
+  font-size: var(--text-xs);
   font-weight: 400;
 }
 
@@ -1844,7 +1955,7 @@ kbd {
   border: 1px solid var(--border-strong);
   border-radius: 999px;
   color: var(--text-secondary);
-  font-size: 0.75rem;
+  font-size: var(--text-xs);
   font-weight: 700;
 }
 
@@ -2268,4 +2379,48 @@ kbd {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
   }
+}
+
+/* Icons (DESIGN.md §31): one inline sprite, each icon stroked in the text
+   colour of its control. */
+.icon-sprite {
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+}
+
+.icon {
+  flex: none;
+  width: 1em;
+  height: 1em;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.5;
+  vertical-align: -0.125em;
+}
+
+.button .icon,
+summary .icon {
+  margin-inline-end: var(--space-2);
+}
+
+.system-menu > summary .icon {
+  margin-inline: var(--space-1) 0;
+}
+
+.event-toggle .icon {
+  margin: 0;
+}
+
+.back-link {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.back-link .icon {
+  transform: rotate(180deg);
 }
