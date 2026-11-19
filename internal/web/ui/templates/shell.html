@@ -15,10 +15,7 @@
   </div>{{end}}
   <main id="main-content" class="workspace" data-timezone="{{.Prefs.Timezone}}"{{if $p.KbScope}} data-kb-scope="{{$p.KbScope}}"{{end}}>
     <header class="workspace-heading">
-      <div>
-        <p class="eyebrow">{{$p.Eyebrow}}</p>
-        <h1>{{$p.Heading}}</h1>
-      </div>
+      <h1>{{$p.Heading}}</h1>
       {{if $p.Context}}<p class="workspace-context">{{$p.Context}}</p>{{end}}
     </header>
     {{if eq .Mode "live"}}{{template "live-region.html" .Live}}

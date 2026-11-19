@@ -248,7 +248,7 @@ func (t *GuideTester) WithClient(client *http.Client) *GuideTester {
 func (t *GuideTester) Test(ctx context.Context, serverID int64, token string) TestResult {
 	if t == nil || t.tokens == nil || t.client == nil || t.endpoint == "" {
 		return TestResult{
-			Outcome: TestUnavailable, Title: "Guided test unavailable",
+			Outcome: TestUnavailable, Title: "Connection test unavailable",
 			Detail: "Configure SIFTAIL_INGEST_PUBLIC_URL and restart Siftail.",
 		}
 	}
@@ -256,13 +256,13 @@ func (t *GuideTester) Test(ctx context.Context, serverID int64, token string) Te
 	if err != nil && !errors.Is(err, sources.ErrInvalidToken) {
 		return TestResult{
 			Outcome: TestRetryable, Title: "Token verification is temporarily unavailable",
-			Detail: "The event was not sent and no commit was attempted. Check Siftail status and try again.",
+			Detail: "The test event was not sent. Check Status and try again.",
 		}
 	}
 	if err != nil || authenticated.ID != serverID {
 		return TestResult{
 			Outcome: TestAuthRejected, Title: "Token authentication failed",
-			Detail: "Use the token created for this Server. Revoked or unrelated tokens are rejected.",
+			Detail: "Use the token created for this server. Revoked tokens and tokens for other servers are rejected.",
 		}
 	}
 	eventID, err := NewGuideEventID()
@@ -306,14 +306,14 @@ func (t *GuideTester) Test(ctx context.Context, serverID int64, token string) Te
 	case http.StatusNoContent:
 		if response.Header.Get("X-Siftail-Ingest-Outcome") != "committed" {
 			return TestResult{
-				Outcome: TestRejected, Title: "Commit confirmation was missing",
-				Detail:     "The endpoint returned 204 without Siftail's commit marker. Check proxy routing and response-header preservation.",
+				Outcome: TestRejected, Title: "Storage was not confirmed",
+				Detail:     "The endpoint returned 204 without Siftail's confirmation header. Check that the proxy routes to Siftail and keeps response headers.",
 				HTTPStatus: response.StatusCode,
 			}
 		}
 		return TestResult{
-			Outcome: TestCommitted, Title: "Test event committed",
-			Detail:        "The configured endpoint received, authenticated, normalized, and durably committed the event.",
+			Outcome: TestCommitted, Title: "Test event stored",
+			Detail:        "The endpoint received it, accepted the token, and Siftail stored it.",
 			SourcePreview: GuideSourcePreview, HTTPStatus: response.StatusCode,
 		}
 	case http.StatusUnauthorized, http.StatusForbidden:
@@ -326,13 +326,13 @@ func (t *GuideTester) Test(ctx context.Context, serverID int64, token string) Te
 		http.StatusInsufficientStorage:
 		return TestResult{
 			Outcome: TestRetryable, Title: "Ingestion is temporarily unavailable",
-			Detail:     "The event was not confirmed committed. Retry after resolving capacity, database, or storage pressure.",
+			Detail:     "The event was not confirmed as stored. Check Status for capacity, database, or storage problems, then try again.",
 			HTTPStatus: response.StatusCode,
 		}
 	default:
 		return TestResult{
 			Outcome: TestRejected, Title: "Test event was rejected",
-			Detail:     "The endpoint responded, but no durable commit was confirmed. Check the URL, proxy, request limits, and Siftail status.",
+			Detail:     "The endpoint responded, but the event was not confirmed as stored. Check the URL, proxy, request limits, and Status.",
 			HTTPStatus: response.StatusCode,
 		}
 	}
@@ -390,7 +390,7 @@ func safeEventID(value string) bool {
 
 func unavailableTestResult() TestResult {
 	return TestResult{
-		Outcome: TestUnavailable, Title: "Guided test unavailable",
-		Detail: "Siftail could not prepare the bounded test event. Try again.",
+		Outcome: TestUnavailable, Title: "Connection test unavailable",
+		Detail: "Siftail could not prepare the test event. Try again.",
 	}
 }

@@ -9,9 +9,8 @@
     <form class="settings-form" method="post" action="/settings/retention" novalidate>
       <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
       <header>
-        <p class="eyebrow">Application logs</p>
         <h2 id="retention-settings-heading">Retention limits</h2>
-        <p>Whichever limit is reached first starts oldest-first cleanup.</p>
+        <p>Siftail deletes the oldest logs first when either limit is reached.</p>
       </header>
 
       <div class="field">
@@ -37,18 +36,17 @@
       </div>
 
       <div>
-        <button class="button button-primary" type="submit">Save retention settings</button>
+        <button class="button button-primary" type="submit">Save changes</button>
       </div>
     </form>
 
     <aside class="settings-explanation" aria-labelledby="retention-scope-heading">
       <h2 id="retention-scope-heading">Scope and deletion order</h2>
-      <p>These limits apply globally to retained application events. They do not delete Servers, ingestion-token metadata, aliases, administrator sessions, settings, or security audit history.</p>
-      <p>Cleanup removes the earliest-received eligible events first, ordered by receive time, then internal event ID. An event's own timestamp does not shorten its retention, so a host with a wrong clock or a delayed backlog keeps its events for the full age. Work is performed in bounded transactions.</p>
+      <p>These limits apply to stored logs from every source. They never delete servers, ingestion tokens, aliases, sessions, settings, or the audit history.</p>
+      <p>Cleanup deletes the events Siftail received first. An event's own timestamp does not shorten its retention, so a host with a wrong clock or a delayed backlog keeps its events for the full age. Cleanup runs in small steps so logs stay readable while it works.</p>
       <p>Size cleanup starts near 95% of the configured target and works toward 90%. One admitted batch and transient WAL activity can temporarily exceed the target.</p>
       <div class="notice notice-warning">
-        <h2>Deletion limitation</h2>
-        <p>Retention reduces Siftail's application-log history. It is not forensic erasure and does not control backups, snapshots, or unrelated host files.</p>
+        <p><strong>Deletion limitation:</strong> deleted records may remain in backups, filesystem snapshots, or storage free space. Siftail does not claim forensic erasure.</p>
       </div>
     </aside>
   </div>
@@ -57,7 +55,6 @@
     <form class="settings-form" method="post" action="/settings/sessions/revoke-others">
       <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
       <header>
-        <p class="eyebrow">Administrator</p>
         <h2 id="sessions-heading">Sessions</h2>
         <p>Sign out every other browser that is signed in to this administrator account. This browser stays signed in.</p>
       </header>
@@ -73,7 +70,7 @@
 
     <aside class="settings-explanation" aria-labelledby="session-lifetime-heading">
       <h2 id="session-lifetime-heading">Session lifetime</h2>
-      <p>A session ends after 12 hours without use and 7 days after sign-in, whichever comes first. Signing out other sessions is recorded in the security audit history with the number of sessions ended.</p>
+      <p>A session ends after 12 hours without use and 7 days after sign-in, whichever comes first. Signing out other sessions is recorded in Audit with the number of sessions ended.</p>
       <p>Signed-out browsers return to the sign-in page on their next request, and an open Live view stops within a few seconds. To end every session, including this one, run <code>siftail sessions revoke-all</code> on the server or reset the password.</p>
     </aside>
   </section>

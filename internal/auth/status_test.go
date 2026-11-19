@@ -49,8 +49,8 @@ func TestBrowserStatusIsProtectedSanitizedAndShowsTransitions(t *testing.T) {
 	if response.Code != http.StatusOK ||
 		response.Header().Get("Cache-Control") != "no-store" ||
 		!strings.Contains(body, "Healthy") ||
-		!strings.Contains(body, "Active SQLite footprint") ||
-		!strings.Contains(body, "No recent operational diagnostics.") ||
+		!strings.Contains(body, "Database size used") ||
+		!strings.Contains(body, "No recent problems.") ||
 		strings.Contains(body, "private-status-payload") ||
 		strings.Contains(body, "private-status-secret") {
 		t.Fatalf("healthy Status = %d %#v %q", response.Code, response.Header(), body)
@@ -83,9 +83,9 @@ func TestBrowserStatusIsProtectedSanitizedAndShowsTransitions(t *testing.T) {
 	conflictBody := conflicts.Body.String()
 	if conflicts.Code != http.StatusOK ||
 		!strings.Contains(conflictBody, "<dt>Conflicting duplicates dropped</dt><dd>4</dd>") ||
-		!strings.Contains(conflictBody, "Conflicting duplicates by Server") ||
+		!strings.Contains(conflictBody, "Conflicting duplicates by server") ||
 		!strings.Contains(conflictBody, "<dt>status-server</dt><dd>3 dropped · last ") ||
-		!strings.Contains(conflictBody, "<dt>Removed Server #99</dt><dd>1 dropped · last ") ||
+		!strings.Contains(conflictBody, "<dt>Removed server #99</dt><dd>1 dropped · last ") ||
 		!strings.Contains(conflictBody, "conflicting_duplicate") ||
 		!strings.Contains(conflictBody, "Healthy") {
 		t.Fatalf("conflict Status = %d %q", conflicts.Code, conflictBody)
@@ -98,9 +98,9 @@ func TestBrowserStatusIsProtectedSanitizedAndShowsTransitions(t *testing.T) {
 	lateBody := late.Body.String()
 	if late.Code != http.StatusOK ||
 		!strings.Contains(lateBody, "<dt>Late events kept</dt><dd>7</dd>") ||
-		!strings.Contains(lateBody, "Late events by Server") ||
+		!strings.Contains(lateBody, "Late events by server") ||
 		!strings.Contains(lateBody, "<dt>status-server</dt><dd>5 late · last ") ||
-		!strings.Contains(lateBody, "<dt>Removed Server #98</dt><dd>2 late · last ") ||
+		!strings.Contains(lateBody, "<dt>Removed server #98</dt><dd>2 late · last ") ||
 		!strings.Contains(lateBody, "late_event") ||
 		!strings.Contains(lateBody, "Healthy") {
 		t.Fatalf("late-event Status = %d %q", late.Code, lateBody)
@@ -155,7 +155,7 @@ func TestBrowserRunsAuthenticatedCorrelatedSafeDatabaseCheck(t *testing.T) {
 			database.MaxSchemaVersion, database.MaxSchemaVersion)) ||
 		!strings.Contains(body, "· ok · checkpoint completed") ||
 		!strings.Contains(body, "database_check_succeeded") ||
-		!strings.Contains(body, "The bounded database check completed successfully.") ||
+		!strings.Contains(body, "The database check completed successfully.") ||
 		!strings.Contains(body, "Request ID:") {
 		t.Fatalf("checked Status = %d %q", page.Code, body)
 	}

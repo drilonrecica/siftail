@@ -275,7 +275,7 @@
     if (renderedNoticeShown) return;
     renderedNoticeShown = true;
     addNotice(
-      "Older rows were removed from this browser view. Persisted History is unchanged.",
+      "Older rows were removed from this view. They are still stored and available in History.",
       "rendered-limit",
     );
   };
@@ -393,7 +393,7 @@
     try {
       payload = JSON.parse(event.data);
     } catch {
-      addNotice("A malformed Live event was ignored.", "malformed");
+      addNotice("A Live event could not be read and was skipped.", "malformed");
       return;
     }
     if (paused || !trackingNewest) {
@@ -499,7 +499,7 @@
     clearNotice("rendered-limit");
     ensureEmptyState();
     syncRows();
-    announce("Live browser view cleared. Persisted logs were not deleted.");
+    announce("Live view cleared. Stored logs were not deleted.");
   };
 
   const togglePause = () => {
@@ -570,7 +570,7 @@
     window.history.replaceState(null, "", pageURLFromForm());
     syncHistoryLink();
     clearView();
-    addNotice("Live filters changed. Showing newly committed matching events.", "filters");
+    addNotice("Live filters changed. Showing new matching events.", "filters");
     connect();
   };
 

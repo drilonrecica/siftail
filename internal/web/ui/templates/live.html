@@ -18,8 +18,7 @@
        stream stay hidden until live.js starts. */}}
   <noscript>
     <div class="notice notice-warning live-noscript">
-      <h2>Live needs JavaScript</h2>
-      <p>Live streaming runs in the browser and cannot start with JavaScript turned off. <a href="{{.HistoryURL}}">Open History</a> to read committed logs for these filters; it works without JavaScript.</p>
+      <p><strong>Live needs JavaScript.</strong> Live streaming runs in the browser and cannot start with JavaScript turned off. <a href="{{.HistoryURL}}">Open History</a> to read stored logs for these filters; it works without JavaScript.</p>
     </div>
   </noscript>
   <details class="history-filter-disclosure" open>
@@ -101,9 +100,12 @@
        speaks their changes through the shell's one announcer (UX-16). */}}
   <div class="live-notices" data-live-notices></div>
   <div class="live-list-wrap" data-live-scroll>
+    {{/* The scope phrase follows the selected scope; the link carries the
+         current filters (DESIGN.md §24.4). */}}
     <div class="empty-state" data-live-empty data-live-script-only hidden>
-      <h2>Waiting for new events from this source</h2>
-      <p>Live events will appear here after they are committed.</p>
+      <h2>Waiting for events from {{.ScopePhrase}}</h2>
+      <p>New events appear here as soon as they are stored.</p>
+      <div class="empty-state-actions"><a class="button" href="{{.HistoryURL}}" data-live-empty-history>Look in History</a></div>
     </div>
     <div id="live-rows" class="log-list" role="list" aria-label="Live log events, times in {{.Zone}}"></div>
   </div>

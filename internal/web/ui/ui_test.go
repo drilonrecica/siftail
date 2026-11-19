@@ -186,8 +186,8 @@ func TestSettingsShellRendersBoundedAccessibleRetentionForm(t *testing.T) {
 		`aria-invalid="true"`,
 		`id="retention-days-error"`,
 		`id="maximum-database-error"`,
-		`not forensic erasure`,
-		`security audit history`,
+		`Siftail does not claim forensic erasure.`,
+		`the audit history`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("Settings shell missing %q", want)
@@ -338,11 +338,11 @@ func TestSourceDetailMutationFormsKeepActionsDistinctAndEscaped(t *testing.T) {
 	body := response.Body.String()
 	for _, want := range []string{
 		`action="/sources/9/alias"`,
-		`Alias changes only how this source is displayed. Original metadata remains unchanged.`,
+		`Aliases change display names only. Original source metadata remains unchanged.`,
 		`action="/sources/9/clear-logs"`,
-		`keeping the source, alias, and container observations`,
+		`The source, its alias, and its container history remain.`,
 		`action="/sources/9/remove"`,
-		`active sender may discover this source again`,
+		`a server that still sends logs for this service creates it again`,
 		`This is not secure forensic erasure.`,
 		`id="clear-confirmation"`,
 		`aria-describedby="clear-error" autofocus`,
@@ -388,7 +388,7 @@ func TestOneTimeTokenTemplateContainsNoSecretURLOrUnsafeMarkup(t *testing.T) {
 		`action="/servers/3/test-ingestion"`,
 		`tabindex="0" aria-label="Coolify configuration"`,
 		`__SIFTAIL_INGEST_TOKEN__`,
-		`Guided committed-receipt test`,
+		`Test connection`,
 		`stores only a hash and cannot show it again`,
 		`href="/servers/3">Done</a>`,
 		`Production &lt;unsafe&gt;`,

@@ -1,30 +1,27 @@
 {{define "servers.html"}}
-<section class="workspace-panel server-management" aria-labelledby="servers-title">
-  <header class="catalog-heading">
-    <div><h2 id="servers-title">Servers</h2><p>A token binds every accepted event to exactly one trusted Server.</p></div>
-  </header>
+<section class="workspace-panel server-management">
   {{if .Error}}<div class="history-error" role="alert"><strong>{{.Error}}</strong>{{if .ErrorRequestID}}<span>Request ID: <code>{{.ErrorRequestID}}</code></span>{{end}}</div>{{end}}
   <div class="server-management-grid">
     <section>
-      <h3>Configured Servers</h3>
-      {{if .Rows}}<div class="source-table-scroll" tabindex="0" role="region" aria-label="Server table">
+      <h2>Your servers</h2>
+      {{if .Rows}}<div class="source-table-scroll" tabindex="0" role="region" aria-label="Servers">
         <table class="source-table"><thead><tr><th scope="col">Server</th><th scope="col">Sources</th><th scope="col">Active tokens</th><th scope="col">Last event</th></tr></thead>
         <tbody>{{range .Rows}}<tr>
           <th scope="row"><a href="{{.DetailURL}}">{{.Name}}</a>{{if .Hostname}}<span class="source-path">{{.Hostname}}</span>{{end}}</th>
           <td>{{.SourceCount}}</td><td>{{.TokenCount}}</td><td>{{.LastEvent}}</td>
         </tr>{{end}}</tbody></table>
       </div>
-      <nav class="history-pagination" aria-label="Server pagination">{{if .NextURL}}<a class="button" href="{{.NextURL}}">Next Servers</a>{{else}}<span class="pagination-end">End of Server list</span>{{end}}</nav>
-      {{else}}<p>No Servers are configured.</p>{{end}}
+      <nav class="history-pagination" aria-label="Server pagination">{{if .NextURL}}<a class="button" href="{{.NextURL}}">Next servers</a>{{else}}<span class="pagination-end">End of servers</span>{{end}}</nav>
+      {{else}}<p>No servers yet. Create one to get its ingestion token.</p>{{end}}
     </section>
     <section>
-      <h3>Create Server</h3>
+      <h2>Create server</h2>
       <form method="post" action="/servers" class="source-action-form">
         <label for="server-name">Display name<input id="server-name" name="name" value="{{.Name}}" maxlength="128" required{{if .ServerError}} aria-describedby="server-error" autofocus{{end}}></label>
         <label for="server-hostname">Descriptive hostname, optional<input id="server-hostname" name="hostname" value="{{.Hostname}}" maxlength="255"></label>
         {{if .ServerError}}<p id="server-error" class="form-error" role="alert">{{.ServerError}}</p>{{end}}
         <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
-        <button class="button button-primary" type="submit">Create Server</button>
+        <button class="button button-primary" type="submit">Create server</button>
       </form>
     </section>
   </div>
@@ -32,15 +29,15 @@
 {{end}}
 
 {{define "server-detail.html"}}
-<section class="workspace-panel server-management" aria-labelledby="server-title">
+<section class="workspace-panel server-management">
   <header class="catalog-heading">
-    <div><a class="back-link" href="/servers">{{template "icon.html" "chevron"}}All Servers</a><h2 id="server-title">{{.Name}}</h2>{{if .Hostname}}<p>{{.Hostname}}</p>{{end}}</div>
+    <div><a class="back-link" href="/servers">{{template "icon.html" "chevron"}}All servers</a></div>
   </header>
   <div class="server-management-grid">
     <section>
-      <h3>Ingestion tokens</h3>
-      <p>Token plaintext is never stored and cannot be shown again.</p>
-      {{if .Tokens}}<div class="source-table-scroll" tabindex="0" role="region" aria-label="Ingestion token table">
+      <h2>Ingestion tokens</h2>
+      <p>Siftail stores only a hash of each token and cannot show it again.</p>
+      {{if .Tokens}}<div class="source-table-scroll" tabindex="0" role="region" aria-label="Ingestion tokens">
         <table class="source-table"><thead><tr><th scope="col">Token</th><th scope="col">Fingerprint</th><th scope="col">Created</th><th scope="col">Last used</th><th scope="col">State</th><th scope="col">Action</th></tr></thead>
         <tbody>{{range .Tokens}}<tr>
           <th scope="row">{{.Name}}</th><td><code>{{.Fingerprint}}</code></td><td>{{.Created}}</td><td>{{.LastUsed}}</td>
@@ -51,13 +48,13 @@
             <button class="button button-danger" type="submit">Revoke</button>
           </form>{{else}}—{{end}}</td>
         </tr>{{end}}</tbody></table>
-      </div>{{else}}<p>No ingestion tokens have been created for this Server.</p>{{end}}
-      {{if .TokensTruncated}}<p class="notice notice-info">Showing the 1,000 newest token records.</p>{{end}}
+      </div>{{else}}<p>This server has no ingestion tokens yet.</p>{{end}}
+      {{if .TokensTruncated}}<p class="notice notice-info">Showing the 1,000 newest tokens.</p>{{end}}
       {{if .RevokeError}}<p class="form-error" role="alert">{{.RevokeError}}</p>{{end}}
     </section>
     <section>
-      <h3>Create or rotate token</h3>
-      <p>Creating a replacement does not revoke existing tokens. Update the sender, test the new token, then revoke the old one.</p>
+      <h2>Create or rotate token</h2>
+      <p>A new token does not revoke the existing ones. Update the sender, test the new token, then revoke the old one.</p>
       <form method="post" action="/servers/{{.ID}}/tokens" class="source-action-form">
         <label for="token-name">Token name<input id="token-name" name="name" value="{{.TokenName}}" maxlength="128" required{{if .TokenError}} aria-describedby="token-error" autofocus{{end}}></label>
         {{if .TokenError}}<p id="token-error" class="form-error" role="alert">{{.TokenError}}</p>{{end}}
@@ -81,16 +78,16 @@
       <button class="button button-primary" data-token-copy type="button">Copy token</button>
     </div>
     <p data-token-status role="status" aria-live="polite"></p>
-    <div class="notice notice-warning"><p>Leaving this screen permanently removes the plaintext from Siftail. Creating this replacement did not revoke another token.</p></div>
+    <div class="notice notice-warning"><p>Once you leave this screen the token cannot be shown again. Creating it did not revoke any other token.</p></div>
     {{if .GuideAvailable}}
     <section class="ingestion-guide" aria-labelledby="configuration-title">
-      <h3 id="configuration-title">Connect this Server</h3>
+      <h3 id="configuration-title">Connect this server</h3>
       <p>Endpoint: <code>{{.Endpoint}}</code></p>
-      <div class="notice notice-warning"><p>Copied configuration contains this token. Protect the Coolify configuration, set <code>COOLIFY_APP_NAME=siftail-self</code> on Siftail, keep Drain Logs disabled for Siftail itself, and restart affected resources.</p></div>
+      <div class="notice notice-warning"><p>The copied configuration contains this token. Protect the Coolify configuration, set <code>COOLIFY_APP_NAME=siftail-self</code> on Siftail, keep Drain Logs disabled for Siftail itself, and restart affected resources.</p></div>
       <div class="notice notice-warning"><p>The Forward input listens on <code>127.0.0.1</code> only, because an unauthenticated listener reachable from the network lets anyone inject records that carry this token. If senders are on another host or network, bind a specific interface, set <code>Shared_Key</code> on both ends, and restrict port 24224 with a firewall or network policy.</p></div>
       <details open>
         <summary>Coolify custom Fluent Bit configuration</summary>
-        <p>The exact self marker is excluded before metadata is renamed. Coolify's <code>/tmp</code> retry buffer does not survive replacement of the log-drain container.</p>
+        <p>Siftail's own logs are skipped by the <code>siftail-self</code> marker. Coolify keeps its retry buffer in <code>/tmp</code>, so it is lost when the log-drain container is replaced.</p>
         <pre class="copy-material" tabindex="0" aria-label="Coolify configuration"><code data-token-material data-material-name="coolify">{{.CoolifyConfig}}</code></pre>
         <button class="button" data-material-copy="coolify" type="button">Copy Coolify config</button>
       </details>
@@ -101,25 +98,25 @@
         <button class="button" data-material-copy="generic" type="button">Copy generic config</button>
       </details>
       <details>
-        <summary>External curl delivery test</summary>
-        <p>Run this outside Siftail to verify the real proxy/network path. A <code>204</code> means committed; retry <code>429</code>, <code>503</code>, or <code>507</code> only after addressing the reported pressure.</p>
-        <pre class="copy-material" tabindex="0" aria-label="Curl delivery test"><code data-token-material data-material-name="curl">{{.CurlCommand}}</code></pre>
-        <button class="button" data-material-copy="curl" type="button">Copy curl test</button>
+        <summary>Test from the command line</summary>
+        <p>Run this from the sending host to check the real network and proxy path. A <code>204</code> means the event was stored; after a <code>429</code>, <code>503</code>, or <code>507</code>, fix the reported problem before retrying.</p>
+        <pre class="copy-material" tabindex="0" aria-label="Command-line test"><code data-token-material data-material-name="curl">{{.CurlCommand}}</code></pre>
+        <button class="button" data-material-copy="curl" type="button">Copy command</button>
       </details>
     </section>
     <section class="ingestion-guide" aria-labelledby="guided-test-title">
-      <h3 id="guided-test-title">Guided committed-receipt test</h3>
-      <p>This explicit action sends one bounded synthetic event through the configured public ingestion URL. It stores that event under <code>{{.SourcePreview}}</code>.</p>
+      <h3 id="guided-test-title">Test connection</h3>
+      <p>Sends one small test event through the public ingestion URL with this token. Siftail stores it under <code>{{.SourcePreview}}</code>.</p>
       <ol class="guide-stages" data-guide-stages>
-        <li data-guide-stage="delivery">Endpoint delivery <span>Not tested</span></li>
-        <li data-guide-stage="authentication">Token authentication <span>Not tested</span></li>
-        <li data-guide-stage="normalization">Event normalization <span>Not tested</span></li>
-        <li data-guide-stage="commit">Durable commit <span>Not tested</span></li>
-        <li data-guide-stage="source">Source discovery <span>Not tested</span></li>
+        <li data-guide-stage="delivery">Endpoint reached <span>Not tested</span></li>
+        <li data-guide-stage="authentication">Token accepted <span>Not tested</span></li>
+        <li data-guide-stage="normalization">Event read <span>Not tested</span></li>
+        <li data-guide-stage="commit">Event stored <span>Not tested</span></li>
+        <li data-guide-stage="source">Source listed <span>Not tested</span></li>
       </ol>
       <form action="{{.TestURL}}" method="post" data-guide-test>
         <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
-        <button class="button button-primary" type="button" data-guide-test-button>Send guided test</button>
+        <button class="button button-primary" type="button" data-guide-test-button>Test connection</button>
       </form>
       <div data-guide-result role="status" aria-live="polite"></div>
     </section>

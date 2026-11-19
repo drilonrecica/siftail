@@ -89,7 +89,7 @@
     testButton.addEventListener("click", async () => {
       stageItems.forEach((_item, name) => setStage(name, "pending"));
       testButton.disabled = true;
-      testResult.textContent = "Sending the bounded test event…";
+      testResult.textContent = "Sending the test event…";
       const values = new URLSearchParams(new FormData(testForm));
       values.set("token", secret.value);
       try {
@@ -112,8 +112,8 @@
         if (response.redirected || !response.headers.get("Content-Type")?.startsWith("application/json")) {
           setStage("delivery", "failed");
           testResult.textContent = response.ok
-            ? "The guided test could not complete: Siftail sent an unexpected answer. The token is still shown here; try again."
-            : `The guided test could not complete (HTTP ${response.status}). The token is still shown here; check the browser session and try again.`;
+            ? "The connection test could not complete: Siftail sent an unexpected answer. The token is still shown here; try again."
+            : `The connection test could not complete (HTTP ${response.status}). The token is still shown here; check the browser session and try again.`;
           return;
         }
         const result = await response.json();
@@ -130,7 +130,7 @@
         }
       } catch {
         setStage("delivery", "failed");
-        testResult.textContent = "The guided test could not complete. Check the browser session and try again.";
+        testResult.textContent = "The connection test could not complete. Check the browser session and try again.";
       } finally {
         testButton.disabled = false;
       }

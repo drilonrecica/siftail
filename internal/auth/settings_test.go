@@ -33,7 +33,7 @@ func TestBrowserRetentionSettingsLifecycle(t *testing.T) {
 		!strings.Contains(body, `value="14"`) ||
 		!strings.Contains(body, `name="maximum_database_gib"`) ||
 		!strings.Contains(body, `value="4"`) ||
-		!strings.Contains(body, "not forensic erasure") {
+		!strings.Contains(body, "does not claim forensic erasure") {
 		t.Fatalf("initial Settings = %d %#v %q", initial.Code, initial.Header(), body)
 	}
 

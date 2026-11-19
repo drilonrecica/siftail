@@ -73,3 +73,24 @@ approval. Entries are in the order they were taken, newest last.
 - **Options:** keep the variable files; ship the four static files as specified.
 - **Chosen:** the four static files: §28.1 and D13 require them, they remove the weights the specification forbids (the variable axis allowed 400–800), and FTL's 700 is a real instance, not a synthesised weight. Only the 400 latin file is preloaded, so a page that shows no FTL code never fetches the 700 files. Binary: 20,998,528 → 21,028,216 bytes (+29,688, including the CSS, templates, and code of this task).
 - **Reversal cost:** low — restore the two variable files and their `@font-face` rules and the asset map entries.
+
+## SFT-122 — The System menu becomes the single mobile menu below 40rem (2026-11-19)
+
+- **Question:** §6.2 asks for "a single menu containing all destinations" at narrow widths but names neither the control nor the width; the header already has a native `<details>` System menu.
+- **Options:** (a) a second, separate menu button for the primary items; (b) reuse the System menu: it also carries Logs/Sources/Servers (shown only when collapsed), its summary reads "Menu" with the §31 `menu` icon, and the bar's primary nav is hidden. Breakpoints considered: 52rem (where the brand name already hides), 40rem, 32rem.
+- **Chosen:** (b) at 40rem. One menu, no JavaScript, no new component; display:none keeps exactly one "Primary" landmark in the accessibility tree at any width and the palette skips the in-menu copy. 40rem is where the three primary items plus a worded health label stop fitting; Playwright asserts no header truncation at 1280, 660, and 390 px.
+- **Reversal cost:** low — the `data-menu-primary` nav and two summary spans in `topbar.html`, one media query in `app.css`, the palette selector, and the header-menu Playwright test.
+
+## SFT-122 — Copy pass reaches Go and JavaScript strings, including CLI-visible diagnostics (2026-11-19)
+
+- **Question:** The acceptance says "a copy pass over every template", but much of what the operator reads comes from handlers (flash notices, server errors, guided-test results, backup state, Status warnings), from `live.js`/`tokens.js`/`palette.js`, and from `internal/status` diagnostic summaries that `siftail diagnostics` also prints.
+- **Options:** templates only; templates plus every string that renders in the interface.
+- **Chosen:** templates plus the interface strings, since leaving "committed", "bounded", or "Server" in notices on the same pages would fail §36.2/§36.3. Five diagnostic summaries in `internal/status/state.go` changed wording ("bounded database check" → "database check", "verified artifact" → "verified file", …), which also changes the CLI `diagnostics` text; categories, codes, and JSON fields are unchanged. README, `docs/operations/export-formats.md`, and the `DESIGN.md` copy tables quote the new labels.
+- **Reversal cost:** low — string literals and the tests that quote them.
+
+## SFT-122 — Logs tabs titled by mode; detail pages titled by entity (2026-11-19)
+
+- **Question:** With the eyebrow gone (D15), History and Live both render `h1` "Logs"; §6.4 fixes detail-page titles to the entity but says nothing about the Logs `<title>`, and the token page has no entity name of its own.
+- **Options:** keep `<title>` "Logs" for both modes; title them "History" and "Live"; for the token page, title it "Copy this token now" or after the server.
+- **Chosen:** "History · Siftail" and "Live · Siftail", so two tabs are told apart while the `h1` stays the destination name; the token page uses `h1` = server name and `<title>` "New token for <server>". The full table is in `DESIGN.md` §6.4.
+- **Reversal cost:** low — the `PageMeta` switch in `ui.go` and the title assertions in `copy_test.go` and Playwright.

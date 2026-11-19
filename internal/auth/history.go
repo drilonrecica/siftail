@@ -240,7 +240,7 @@ func buildHistoryView(
 		view.EmptyTitle = "No log sources yet"
 		view.EmptyMessage = "Create a server, generate its ingestion token, and " +
 			"point a Coolify or Fluent Bit log drain at Siftail. Logs appear " +
-			"here the moment the first event commits."
+			"here as soon as the first event is stored."
 		view.EmptyActions = []webui.ActionLink{
 			{Label: "Create server", URL: "/servers"},
 		}
@@ -587,7 +587,7 @@ func sourceSummary(query logs.HistoryQuery, catalog logs.SourceCatalog) string {
 		}
 	}
 	if len(parts) == 0 {
-		return "All retained sources"
+		return webui.AllSourcesSummary
 	}
 	return strings.Join(parts, " / ")
 }

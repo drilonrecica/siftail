@@ -36,7 +36,7 @@ func TestBrowserBackupIsProtectedStartsAndShowsVerifiedOutcome(t *testing.T) {
 		page.Header().Get("Cache-Control") != "no-store" ||
 		!strings.Contains(body, `aria-current="page">Backup</a>`) ||
 		!strings.Contains(body, "Browser sessions are always excluded") ||
-		!strings.Contains(body, "Configuration-only backup") ||
+		!strings.Contains(body, "Configuration backup") ||
 		!strings.Contains(body, "replaces the database") ||
 		!strings.Contains(body, "not a merge") ||
 		!strings.Contains(body, "Verification is read-only") ||

@@ -1,6 +1,5 @@
 {{define "audit.html"}}
-<section class="workspace-panel audit-workspace" aria-labelledby="audit-heading">
-  <h2 id="audit-heading">Security audit events</h2>
+<section class="workspace-panel audit-workspace">
   {{if .Error}}<div class="form-error" role="alert">
     <p>{{.Error}}</p>
     {{if .ErrorRequestID}}<p>Request ID: <code>{{.ErrorRequestID}}</code></p>{{end}}
@@ -26,16 +25,16 @@
       <input name="action" value="{{.Action}}" placeholder="session.revoke">
     </label>
     <p id="audit-time-help" class="field-help">Use exact UTC timestamps such as 2026-07-28T12:00:00Z. The range may cover at most 366 days.</p>
-    <button class="button button-primary" type="submit">Apply audit filters</button>
+    <button class="button button-primary" type="submit">Apply filters</button>
   </form>
 
-  <p class="audit-retention-notice">Security audit events are retained separately from application logs.</p>
-  {{if .Rows}}<div class="audit-table-scroll" tabindex="0" role="region" aria-label="Security audit event table">
+  <p class="audit-retention-notice">Audit events are kept separately from application logs; log retention does not delete them.</p>
+  {{if .Rows}}<div class="audit-table-scroll" tabindex="0" role="region" aria-label="Audit events">
     <table class="audit-table">
       <thead><tr>
         <th scope="col">Time ({{.Zone}})</th><th scope="col">Action</th>
         <th scope="col">Outcome</th><th scope="col">Actor / context</th>
-        <th scope="col">Safe summary</th><th scope="col">Request ID</th>
+        <th scope="col">Summary</th><th scope="col">Request ID</th>
       </tr></thead>
       <tbody>{{range .Rows}}<tr>
         <td><time datetime="{{.TimeUTC}}">{{.Time}}</time><span class="audit-category">{{.Category}}</span></td>

@@ -21,7 +21,7 @@ func (b *Browser) serversPage(w http.ResponseWriter, r *http.Request) {
 	query, notice, err := parseServerPageQuery(r.URL.Query())
 	if err != nil {
 		b.renderServersError(w, r, session.CSRFToken, http.StatusBadRequest,
-			"Check the Server page parameters.", "")
+			"Check the server page parameters.", "")
 		return
 	}
 	if b.sources == nil {
@@ -46,7 +46,7 @@ func (b *Browser) serverDetailPage(w http.ResponseWriter, r *http.Request) {
 	id, err := serverPathID(r)
 	if err != nil || len(r.URL.Query()) != 0 {
 		b.renderServersError(w, r, session.CSRFToken, http.StatusBadRequest,
-			"Check the Server identifier.", "")
+			"Check the server identifier.", "")
 		return
 	}
 	b.renderServerDetail(w, r, session.CSRFToken, id, "",
@@ -78,7 +78,7 @@ func (b *Browser) serverCreate(w http.ResponseWriter, r *http.Request) {
 			}
 			message := "Use a unique 1–128 byte UTF-8 display name and an optional hostname without control characters."
 			if errors.Is(err, sources.ErrServerNameInUse) {
-				message = "That Server name is already in use."
+				message = "That server name is already in use."
 			}
 			view := buildServersView(sources.ServerPageQuery{
 				Limit: sources.DefaultServerPageLimit,
@@ -90,7 +90,7 @@ func (b *Browser) serverCreate(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		b.renderServersError(w, r, session.CSRFToken, http.StatusServiceUnavailable,
-			"The Server could not be created because the database is temporarily unavailable.",
+			"The server could not be created because the database is temporarily unavailable.",
 			web.RequestIDFromContext(r.Context()))
 		return
 	}
@@ -117,7 +117,7 @@ func (b *Browser) tokenCreate(w http.ResponseWriter, r *http.Request) {
 			errors.Is(err, sources.ErrTokenNameInUse) {
 			message := "Use a unique 1–128 byte UTF-8 token name without control characters."
 			if errors.Is(err, sources.ErrTokenNameInUse) {
-				message = "That token name is already in use for this Server."
+				message = "That token name is already in use for this server."
 			}
 			b.renderServerDetail(w, r, session.CSRFToken, serverID, "",
 				http.StatusUnprocessableEntity, message, values.Get("name"), "")
@@ -178,7 +178,7 @@ func (b *Browser) guidedIngestionTest(w http.ResponseWriter, r *http.Request) {
 	if idErr != nil || formErr != nil {
 		b.recordGuidedTestRejected(r)
 		b.writeGuidedTestJSON(w, http.StatusBadRequest, ingest.TestResult{
-			Outcome: ingest.TestRejected, Title: "Guided test request was invalid",
+			Outcome: ingest.TestRejected, Title: "Connection test request was invalid",
 			Detail: "Reload the one-time token page and try again.",
 		})
 		return

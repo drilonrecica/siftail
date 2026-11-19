@@ -9,10 +9,10 @@ workflow. This is not a public API.
 
 ## Browser workflow and security
 
-Open **Export matching History** from the History result view. Before
-generation, the dialog shows the exact source scope, inclusive-from/
-exclusive-to absolute UTC range, active filters, selected format, and all hard
-limits. Every export requires confirmation because Siftail deliberately avoids
+Open **Export results** from the History result view; the dialog's button is
+**Download**. Before generation, the dialog shows the exact source scope,
+inclusive-from/exclusive-to absolute UTC range, active filters, selected
+format, and all hard limits. Every export requires confirmation because Siftail deliberately avoids
 an expensive pre-export total count.
 
 Initiation is a same-origin, CSRF-protected POST under the current opaque

@@ -12,14 +12,12 @@
   <main id="main-content" class="login-main">
     <section class="login-panel" aria-labelledby="login-title">
       <div class="login-heading">
-        <p class="eyebrow">Private log inspection</p>
         <h1 id="login-title">Sign in to Siftail</h1>
         <p>Sign in to inspect your private application logs.</p>
       </div>
       {{if .AdministratorMissing}}
       <div class="notice notice-warning" role="status">
-        <h2>No administrator is configured</h2>
-        <p>Create the administrator with <code>siftail admin create --username &lt;name&gt;</code> on the host, then return here.</p>
+        <p><strong>No administrator is configured.</strong> Create the administrator with <code>siftail admin create --username &lt;name&gt;</code> on the host, then return here.</p>
       </div>
       {{else}}
       {{if .Expired}}

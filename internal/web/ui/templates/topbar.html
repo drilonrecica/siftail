@@ -21,8 +21,16 @@
         <span class="visually-hidden">Open command palette</span>
       </button>
       <details class="system-menu" data-system-menu>
-        <summary>System {{template "icon.html" "chevron"}}</summary>
+        {{/* At narrow widths the primary navigation moves into this menu,
+             which becomes the header's single menu (DESIGN.md §6.2); CSS
+             swaps the summary word and shows the second nav. */}}
+        <summary><span class="system-menu-label">System {{template "icon.html" "chevron"}}</span><span class="system-menu-label-narrow">{{template "icon.html" "menu"}} Menu</span></summary>
         <div class="system-menu-panel">
+          <nav class="system-menu-nav system-menu-primary" aria-label="Primary" data-menu-primary>
+            <a href="/logs"{{if eq $p.NavSection "logs"}} aria-current="page"{{end}}>Logs</a>
+            <a href="/sources"{{if eq $p.NavSection "sources"}} aria-current="page"{{end}}>Sources</a>
+            <a href="/servers"{{if eq $p.NavSection "servers"}} aria-current="page"{{end}}>Servers</a>
+          </nav>
           <nav class="system-menu-nav" aria-label="System">
             <a href="/status"{{if eq $p.NavSection "status"}} aria-current="page"{{end}}>Status</a>
             <a href="/settings"{{if eq $p.NavSection "settings"}} aria-current="page"{{end}}>Settings</a>

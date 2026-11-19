@@ -57,7 +57,7 @@ func TestBrowserServerAndOneTimeTokenLifecycle(t *testing.T) {
 		!strings.Contains(body, "Siftail stores only a hash and cannot show it again") ||
 		!strings.Contains(body, `data-one-time-token`) ||
 		!strings.Contains(body, "Coolify custom Fluent Bit configuration") ||
-		!strings.Contains(body, "Guided committed-receipt test") ||
+		!strings.Contains(body, "Test connection") ||
 		!strings.Contains(body, ingest.GuideTokenPlaceholder) ||
 		strings.Count(body, plaintext) != 1 ||
 		strings.Contains(createTokenResponse.Header().Get("Location"), plaintext) ||

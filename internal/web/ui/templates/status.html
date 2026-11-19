@@ -1,5 +1,5 @@
 {{define "status.html"}}
-<section class="workspace-panel status-workspace" aria-label="Siftail status">
+<section class="workspace-panel status-workspace" aria-label="Status details">
   {{if .StorageWarning}}<div class="notice notice-warning" role="alert">
     <p>{{.StorageWarning}}</p>
   </div>{{end}}
@@ -39,18 +39,18 @@
         <div><dt>Last database check</dt><dd>{{.DatabaseCheck}}</dd></div>
         <div><dt>Database check time</dt><dd>{{.DatabaseCheckAt}}</dd></div>
       </dl>
-      <label for="database-usage">Active SQLite footprint · {{.DatabaseUsage}}%</label>
+      <label for="database-usage">Database size used: {{.DatabaseUsage}}% of the limit</label>
       <progress id="database-usage" max="100" value="{{.DatabaseUsage}}">{{.DatabaseUsage}}%</progress>
       <form method="post" action="/status/database-check">
         <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
-        <button class="button button-quiet" type="submit">Run safe database check</button>
+        <button class="button button-quiet" type="submit">Check database</button>
       </form>
     </section>
 
     <section aria-labelledby="status-ingestion">
       <h2 id="status-ingestion">Ingestion</h2>
       <dl class="status-facts">
-        <div><dt>Events accepted today (this process)</dt><dd>{{.EventsToday}}</dd></div>
+        <div><dt>Events accepted today (since start)</dt><dd>{{.EventsToday}}</dd></div>
         <div><dt>Recent rate</dt><dd>{{.RecentRate}}</dd></div>
         <div><dt>Queued events</dt><dd>{{.QueuedEvents}}</dd></div>
         <div><dt>Queued bytes</dt><dd>{{.QueuedBytes}}</dd></div>
@@ -61,14 +61,14 @@
         <div><dt>Last successful ingest</dt><dd>{{.LastIngest}}</dd></div>
         <div><dt>Last database error</dt><dd>{{.LastDatabaseError}}</dd></div>
       </dl>
-      {{if .ConflictServers}}<h3 id="status-conflicts">Conflicting duplicates by Server</h3>
-      <p>Records that reused a stable source event ID for different content. The first stored content was kept; these records were not stored. Counts reset when Siftail restarts.</p>
+      {{if .ConflictServers}}<h3 id="status-conflicts">Conflicting duplicates by server</h3>
+      <p>Records that reused an event ID the sender had already used for different content. Siftail kept the first content and did not store these. Counts reset when Siftail restarts.</p>
       <dl class="status-facts" aria-labelledby="status-conflicts">
         {{range .ConflictServers}}<div><dt>{{.Server}}</dt><dd>{{.Dropped}} · last {{.LastAt}}</dd></div>{{end}}
       </dl>
       {{if .ConflictServersMore}}<p>{{.ConflictServersMore}}</p>{{end}}{{end}}
-      {{if .LateServers}}<h3 id="status-late">Late events by Server</h3>
-      <p>Events whose own time was already older than the retention age when Siftail received them, usually a wrong clock or a replayed backlog. They were stored and are kept for the retention age after receipt; History shows them at their own time. Counts reset when Siftail restarts.</p>
+      {{if .LateServers}}<h3 id="status-late">Late events by server</h3>
+      <p>Events whose own time was already older than the retention age when Siftail received them, usually a wrong clock or a replayed backlog. They were stored and are kept for the retention age from when they arrived; History shows them at their own time. Counts reset when Siftail restarts.</p>
       <dl class="status-facts" aria-labelledby="status-late">
         {{range .LateServers}}<div><dt>{{.Server}}</dt><dd>{{.Late}} · last {{.LastAt}}</dd></div>{{end}}
       </dl>
@@ -85,7 +85,7 @@
           {{if .RequestID}}<span>Request ID: <code>{{.RequestID}}</code></span>{{end}}
           {{if .RecoveredAt}}<span>Recovered: <time datetime="{{.RecoveredAtUTC}}">{{.RecoveredAt}}</time></span>{{end}}
         </li>{{end}}
-      </ol>{{else}}<p>No recent operational diagnostics.</p>{{end}}
+      </ol>{{else}}<p>No recent problems.</p>{{end}}
     </section>
   </div>
   {{end}}

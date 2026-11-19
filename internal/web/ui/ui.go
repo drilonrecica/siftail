@@ -85,10 +85,11 @@ type ShellView struct {
 }
 
 // PageMeta describes the per-page shell chrome so templates never branch on
-// Mode for titles, eyebrows, headings, or navigation state.
+// Mode for titles, headings, or navigation state.
 type PageMeta struct {
+	// Title is the <title> before " · Siftail"; Heading is the page's one
+	// h1. Detail pages name the entity in both (DESIGN.md §6.4).
 	Title      string
-	Eyebrow    string
 	Heading    string
 	Context    string
 	NavSection string
@@ -97,10 +98,9 @@ type PageMeta struct {
 	KbScope string
 }
 
-func pageMeta(title, eyebrow, heading, context, navSection string) PageMeta {
+func pageMeta(title, heading, context, navSection string) PageMeta {
 	meta := PageMeta{
 		Title:      title,
-		Eyebrow:    eyebrow,
 		Heading:    heading,
 		Context:    context,
 		NavSection: navSection,
@@ -112,32 +112,33 @@ func pageMeta(title, eyebrow, heading, context, navSection string) PageMeta {
 }
 
 // PageMeta derives the shell chrome for the active Mode. It is the single
-// authority for page titles, eyebrows, headings, context lines, and the
-// active navigation section.
+// authority for page titles, headings, context lines, and the active
+// navigation section. The context lines are the ADR 0011 D5 wording.
 func (v ShellView) PageMeta() PageMeta {
 	switch v.Mode {
 	case "live":
-		return pageMeta("Logs", "Live", "Logs", v.Live.SourceSummary, "logs")
+		return pageMeta("Live", "Logs", v.Live.SourceSummary, "logs")
 	case "sources":
-		return pageMeta("Sources", "Source catalog", "Sources", "Stable sources discovered from committed logs", "sources")
+		return pageMeta("Sources", "Sources", "Services that have sent logs", "sources")
 	case "source-detail":
-		return pageMeta("Sources", "Source catalog", "Sources", v.Source.Server+" · "+v.Source.Project+" / "+v.Source.Environment, "sources")
+		return pageMeta(v.Source.DisplayName, v.Source.DisplayName,
+			v.Source.Server+" · "+v.Source.Project+" / "+v.Source.Environment, "sources")
 	case "servers":
-		return pageMeta("Servers", "Ingestion administration", "Servers", "Trusted identities for authenticated ingestion", "servers")
+		return pageMeta("Servers", "Servers", "Each server sends logs with its own token", "servers")
 	case "server-detail":
-		return pageMeta("Servers", "Ingestion administration", "Servers", v.Server.Name, "servers")
+		return pageMeta(v.Server.Name, v.Server.Name, v.Server.Hostname, "servers")
 	case "token-created":
-		return pageMeta("Servers", "Ingestion administration", "Servers", v.Token.ServerName+" · token shown once", "servers")
+		return pageMeta("New token for "+v.Token.ServerName, v.Token.ServerName, "New ingestion token", "servers")
 	case "settings":
-		return pageMeta("Settings", "Runtime settings", "Settings", "Bounded local storage controls", "settings")
+		return pageMeta("Settings", "Settings", "Retention", "settings")
 	case "status":
-		return pageMeta("Status", "Appliance status", "Status", v.Status.Severity+" · sanitized local operational state", "status")
+		return pageMeta("Status", "Status", v.Status.Severity, "status")
 	case "audit":
-		return pageMeta("Audit", "Security history", "Audit", "Immutable, bounded administrative security events", "audit")
+		return pageMeta("Audit", "Audit", "Sign-ins and administrative actions", "audit")
 	case "backup":
-		return pageMeta("Backup", "Recovery preparation", "Backup", "Verified local SQLite recovery artifacts", "backup")
+		return pageMeta("Backup", "Backup", "Database backups", "backup")
 	default:
-		return pageMeta("Logs", "History", "Logs", v.History.SourceSummary+" · "+v.History.RangeSummary, "logs")
+		return pageMeta("History", "Logs", v.History.SourceSummary+" · "+v.History.RangeSummary, "logs")
 	}
 }
 
@@ -348,6 +349,19 @@ type LiveView struct {
 	ErrorRequestID string
 }
 
+// AllSourcesSummary is the source summary when no scope is selected. It
+// starts a sentence in headings and is lower-cased inside one.
+const AllSourcesSummary = "All sources"
+
+// ScopePhrase names the Live scope inside a sentence: "Waiting for events
+// from all sources", or from "nextup/api" (DESIGN.md §24.4).
+func (v LiveView) ScopePhrase() string {
+	if v.SourceSummary == AllSourcesSummary {
+		return "all sources"
+	}
+	return v.SourceSummary
+}
+
 func (v LiveView) ModeSwitch() ModeSwitchView {
 	return ModeSwitchView{
 		HistoryURL: v.HistoryURL, LiveURL: v.CanonicalURL, Active: "live",
@@ -368,7 +382,7 @@ func (v SourcesView) EmptyState() EmptyStateView {
 		Title: "No log sources yet",
 		Message: "Create a server, generate its ingestion token, and point a " +
 			"Coolify or Fluent Bit log drain at Siftail. Sources appear here " +
-			"the moment the first event commits.",
+			"as soon as the first event is stored.",
 		Actions: []ActionLink{{Label: "Create server", URL: "/servers"}},
 	}
 }

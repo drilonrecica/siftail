@@ -20,7 +20,8 @@
 
   const collectCommands = () => {
     const collected = [];
-    document.querySelectorAll(".primary-nav a, .system-menu-nav a").forEach((link) => {
+    // The in-menu copy of the primary links (narrow widths) is skipped.
+    document.querySelectorAll(".primary-nav a, .system-menu-nav:not([data-menu-primary]) a").forEach((link) => {
       collected.push({
         label: link.textContent.trim(),
         kind: "Go to",
@@ -36,7 +37,7 @@
     });
     if (document.querySelector("[data-open-export]")) {
       collected.push({
-        label: "Export matching History",
+        label: "Export results",
         kind: "Action",
         run: () => document.querySelector("[data-open-export]")?.click(),
       });

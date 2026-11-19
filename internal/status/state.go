@@ -321,7 +321,7 @@ func (s *State) RecordDatabaseRecovered(at time.Time) {
 	s.appendDiagnosticLocked(Diagnostic{
 		At: at, Severity: "information", Component: "database",
 		Category: "storage_recovered",
-		Summary:  "Database writability recovered after a bounded probe.",
+		Summary:  "The database can write again.",
 	})
 	s.mu.Unlock()
 }
@@ -388,7 +388,7 @@ func (s *State) RecordIngestRejected(
 		s.appendDiagnosticLocked(Diagnostic{
 			At: at, Severity: "attention", Component: "ingestion",
 			Category: "batch_internal_error",
-			Summary:  "An ingestion batch failed with an internal error and was not committed.",
+			Summary:  "An ingestion batch failed with an internal error and was not stored.",
 		})
 	}
 	s.mu.Unlock()
@@ -584,22 +584,22 @@ func sanitizeDiagnostic(input DiagnosticInput) (Diagnostic, error) {
 		summary = "Ingestion could not commit because storage was unavailable."
 	case "database/database_check_succeeded":
 		severity = "information"
-		summary = "The bounded database check completed successfully."
+		summary = "The database check completed successfully."
 	case "database/database_check_failed":
 		severity = "degraded"
-		summary = "The bounded database check did not complete successfully."
+		summary = "The database check did not complete successfully."
 	case "database/database_checkpoint_busy":
 		severity = "attention"
 		summary = "The passive WAL checkpoint was busy."
 	case "database/storage_recovered":
 		severity = "information"
-		summary = "Database writability recovered after a bounded probe."
+		summary = "The database can write again."
 	case "backup/backup_succeeded":
 		severity = "information"
 		summary = "A backup completed and passed verification."
 	case "backup/backup_failed":
 		severity = "attention"
-		summary = "A backup did not produce a verified artifact."
+		summary = "A backup did not produce a verified file."
 	case "retention/retention_cleanup":
 		severity = "attention"
 		summary = "Retention cleanup did not complete."
@@ -614,7 +614,7 @@ func sanitizeDiagnostic(input DiagnosticInput) (Diagnostic, error) {
 		summary = "Ingestion admission was temporarily saturated."
 	case "ingestion/batch_internal_error":
 		severity = "attention"
-		summary = "An ingestion batch failed with an internal error and was not committed."
+		summary = "An ingestion batch failed with an internal error and was not stored."
 	case "ingestion/conflicting_duplicate":
 		severity = "attention"
 		summary = conflictingDuplicateSummary

@@ -121,7 +121,7 @@ func TestDatabaseCheckAndDiagnosticsCLIUseActiveControlSocket(t *testing.T) {
 	if code := run([]string{"diagnostics"}, &stdout, &stderr); code != 0 ||
 		!strings.Contains(stdout.String(), "database_check_succeeded") ||
 		!strings.Contains(stdout.String(),
-			"The bounded database check completed successfully.") ||
+			"The database check completed successfully.") ||
 		!strings.Contains(stdout.String(), "request_id=") ||
 		strings.Contains(stdout.String(), cfg.DatabasePath) {
 		t.Fatalf("active diagnostics = code %d stdout=%q stderr=%q",

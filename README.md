@@ -233,7 +233,7 @@ one-time screen offers:
 - an external curl command;
 - exact `COOLIFY_APP_NAME=siftail-self` recursive-ingestion prevention;
 - bounded 256 MiB source-side retry storage and its data-loss warning; and
-- an explicit guided committed-receipt test.
+- an explicit **Test connection** check that confirms a committed receipt.
 
 The plaintext exists in one password field. Configuration and curl previews
 contain a nonsecret placeholder; their copy buttons substitute the token only
@@ -241,7 +241,7 @@ into the clipboard. Page exit clears the field and previews, browser history is
 replaced with the nonsecret Server detail URL, and later pages cannot recover
 the token.
 
-The guided button sends one bounded synthetic event to the configured public
+The **Test connection** button sends one bounded synthetic event to the configured public
 ingestion URL. It bypasses environment proxy variables, refuses redirects, and
 never logs or returns the token. Only `204 No Content` with Siftail's
 `X-Siftail-Ingest-Outcome: committed` marker is shown as committed.
@@ -484,7 +484,7 @@ schema-bounded event. There is no detail download or export route. Copy actions
 read `textContent` through the browser clipboard API, and deletion or an unknown
 ID returns the same safe not-found fragment.
 
-History offers an authenticated **Export matching History** action for the
+History offers an authenticated **Export results** action for the
 stable `siftail-text-v1` and NDJSON schema-1 formats. The confirmation shows
 the exact source scope, absolute range, active filters, format, and limits.
 Export reuses the typed History filters, includes the complete matching range
@@ -667,7 +667,7 @@ Run a bounded quick database check with:
 When Siftail is active, this uses the owner-only control socket, runs
 `quick_check` on the bounded read pool, and orders a passive WAL checkpoint
 through the database maintenance coordinator. The authenticated Status page
-offers the same check through `Run safe database check`.
+offers the same check through **Check database**.
 
 For a stopped server, the command opens the existing database read-only. It
 does not create, migrate, checkpoint, or rewrite the database. A full

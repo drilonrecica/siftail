@@ -68,11 +68,11 @@ func TestSourceDetailShowsStableIdentityAndContainerObservations(t *testing.T) {
 	body := response.Body.String()
 	for _, want := range []string{
 		`Public &lt;API&gt;`,
-		`Stable identity`,
+		`Identity`,
 		`<code>project-a</code>`,
-		`Container observations`,
+		`Containers`,
 		`api-current`,
-		`Containers are ephemeral observations`,
+		`A redeployed container stays part of the same source`,
 		`application=api`,
 		`service=web`,
 	} {

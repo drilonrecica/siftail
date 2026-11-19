@@ -180,7 +180,7 @@ func (b *Browser) backupView(csrfToken string, zone displayZone) webui.BackupVie
 	case backup.StateRunning:
 		view.StateLabel = "Full backup in progress."
 		if status.BackupType == backup.TypeConfiguration {
-			view.StateLabel = "Configuration-only backup in progress."
+			view.StateLabel = "Configuration backup in progress."
 		} else if status.Operation == backup.OperationVerify {
 			view.StateLabel = "Backup verification in progress."
 		}
@@ -193,11 +193,11 @@ func (b *Browser) backupView(csrfToken string, zone displayZone) webui.BackupVie
 			view.Checksum = status.Result.SHA256
 		}
 	case backup.StateCanceled:
-		view.StateLabel = "Backup was canceled before a verified artifact was published."
+		view.StateLabel = "Backup was canceled before a verified file was written."
 	case backup.StateFailed:
 		view.StateLabel = "Backup did not complete. Check destination capacity and permissions."
 		if status.Operation == backup.OperationVerify {
-			view.StateLabel = "Backup verification failed. Check the artifact type, compatibility, integrity, and permissions."
+			view.StateLabel = "Backup verification failed. Check the file type, version compatibility, integrity, and permissions."
 		}
 	}
 	return view

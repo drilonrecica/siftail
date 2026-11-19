@@ -270,6 +270,16 @@ below that the header collapses to brand, health, palette, and a single menu
 containing all destinations. Current mode and source context remain visible
 in the workspace heading.
 
+The collapse happens below 40rem (640 px), where Logs, Sources, Servers, and
+a worded health label no longer fit beside the header actions without
+truncation. The collapsed menu is the same native `<details>` System menu
+with its summary reading **Menu** beside the `menu` icon (§31); it lists
+Logs, Sources, and Servers first, then Status, Settings, Audit, Backup, the
+preferences, and Sign out.
+It works without JavaScript, there is never more than one navigation landmark
+named Primary in the accessibility tree, and the command palette lists each
+destination once.
+
 ### 6.3 Global degraded banner
 
 Critical states such as disk-full mode display a persistent banner below the
@@ -290,6 +300,23 @@ the context line wraps below. Detail pages name the entity in the `h1` and
 the `<title>` ("api/web", not "Sources"). Page metadata comes from one
 server-side definition per page; the shell must not contain per-page
 conditional chains for titles or headings.
+
+| Page | `<title>` | `h1` | Context line |
+|---|---|---|---|
+| Logs, History mode | History · Siftail | Logs | source scope · time range |
+| Logs, Live mode | Live · Siftail | Logs | source scope |
+| Sources | Sources · Siftail | Sources | Services that have sent logs |
+| Source detail | <source> · Siftail | <source> | server · project / environment |
+| Servers | Servers · Siftail | Servers | Each server sends logs with its own token |
+| Server detail | <server> · Siftail | <server> | hostname, when set |
+| New token | New token for <server> · Siftail | <server> | New ingestion token |
+| Settings | Settings · Siftail | Settings | Retention |
+| Status | Status · Siftail | Status | the severity word alone |
+| Audit | Audit · Siftail | Audit | Sign-ins and administrative actions |
+| Backup | Backup · Siftail | Backup | Database backups |
+
+Below the `h1`, a page does not repeat its own name as a section heading,
+and notices carry a bold lead-in instead of a heading.
 
 ---
 
@@ -862,14 +889,15 @@ itself from its own drain.
 
 ## 17. Guided ingestion test
 
-Five stages with success/failure state and safe detail:
+Shown in the interface as **Test connection**. Five stages with
+success/failure state and safe detail (labels as of SFT-122):
 
 ```text
-1. Request received
-2. Token authenticated
-3. Event normalized
-4. Event committed
-5. Source discovered
+1. Endpoint reached
+2. Token accepted
+3. Event read
+4. Event stored
+5. Source listed
 ```
 
 Failure copy examples: "The request reached Siftail, but the ingestion token
@@ -891,7 +919,7 @@ A compact appliance-status page, not a metrics dashboard.
 
 **Storage:** database size; WAL size; schema and SQLite version; configured
 limit; oldest/newest event; retention age; last cleanup; last bounded
-database-check result and a `Run safe database check` action that preserves
+database-check result and a **Check database** action that preserves
 the page and never exposes paths or raw SQLite errors.
 
 **Ingestion:** events accepted today; recent rate; queued events/bytes;
@@ -1091,8 +1119,8 @@ control, not prose.
 > **No log sources yet.**
 >
 > Create a server, generate its ingestion token, and point a Coolify or
-> Fluent Bit log drain at Siftail. Logs appear here the moment the first
-> event commits.
+> Fluent Bit log drain at Siftail. Logs appear here as soon as the first
+> event is stored.
 
 Action: **Create server** (→ `/servers`, which carries the token and
 setup-guide flow).
@@ -1467,7 +1495,7 @@ input and a ranked result list:
   navigates with the new scope in the current mode;
 - **Navigation** — every destination, including System pages;
 - **Page actions** — the current page's server-declared commands (e.g.
-  "Export matching History", "Create server", "Run safe database check" as
+  "Export results", "Create server", "Check database" as
   navigation to the relevant control).
 
 Matching is client-side fuzzy scoring over server-rendered entries; the
@@ -1651,6 +1679,22 @@ are set in `<code>` exactly as typed.
 | Status context "Healthy · sanitized local operational state" | the severity word alone |
 | Header health indicator name | System health: <severity> |
 | Live empty state "Waiting for new events from this source" | "Waiting for events from <scope>" with a Look in History link |
+
+Further renames from the SFT-122 copy pass:
+
+| Old | New |
+|---|---|
+| Send guided test · stages Endpoint delivery, Token authentication, Event normalization, Durable commit, Source discovery | Test connection · Endpoint reached, Token accepted, Event read, Event stored, Source listed |
+| External curl delivery test · Copy curl test | Test from the command line · Copy command |
+| Configured Servers · All Servers · No Servers are configured. | Your servers · All servers · No servers yet. Create one to get its ingestion token. |
+| Discovered sources · Stable identity · Lifecycle · Display alias · Container observations | (page h1 only) · Identity · Activity · Alias · Containers |
+| Save retention settings | Save changes |
+| Run safe database check · Active SQLite footprint | Check database · Database size used |
+| Conflicting duplicates by Server · Late events by Server | Conflicting duplicates by server · Late events by server |
+| Security audit events (h2) · Apply audit filters · Safe summary | (page h1 only) · Apply filters · Summary |
+| Create verified full backup · Create verified configuration-only backup · Verify an artifact | Create full backup · Create configuration backup · Verify a backup |
+| Latest process result · Artifact | Latest backup · File |
+| Event, Settings, login, and unavailable-page eyebrows | removed |
 
 The destination names Logs, Sources, Servers, Status, Settings, Audit, and
 Backup stay.

@@ -170,14 +170,6 @@ button,
   color: var(--text-secondary);
 }
 
-.eyebrow {
-  margin: 0 0 var(--space-1);
-  color: var(--text-muted);
-  font-size: var(--text-xs);
-  font-weight: 600;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-}
 
 .login-form {
   display: grid;
@@ -237,11 +229,6 @@ button,
   color: var(--status-error);
   font-size: var(--text-sm);
   font-weight: 600;
-}
-
-.notice h2 {
-  margin: 0 0 var(--space-2);
-  font-size: var(--text-md);
 }
 
 .notice p,
@@ -440,12 +427,19 @@ code {
   display: none;
 }
 
-.system-menu > summary .icon {
+.system-menu-label .icon {
   transform: rotate(90deg);
 }
 
-.system-menu[open] > summary .icon {
+.system-menu[open] .system-menu-label .icon {
   transform: rotate(-90deg);
+}
+
+.system-menu-label,
+.system-menu-label-narrow {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
 }
 
 .system-menu > summary:hover,
@@ -492,6 +486,13 @@ code {
 .system-menu-nav a[aria-current="page"] {
   background: var(--surface-selected);
   font-weight: 600;
+}
+
+/* The primary destinations inside the menu, and the menu's narrow-width
+   name, exist only once the header collapses (DESIGN.md §6.2). */
+.system-menu-primary,
+.system-menu-label-narrow {
+  display: none;
 }
 
 .prefs-form {
@@ -642,10 +643,6 @@ code {
 .audit-workspace {
   min-width: 0;
   padding: var(--space-4);
-}
-
-.audit-workspace > h2 {
-  margin-top: 0;
 }
 
 .audit-filters {
@@ -1993,9 +1990,11 @@ kbd {
   padding: var(--space-4);
 }
 
-.source-detail-grid h3,
-.container-observations h3 {
+.source-detail-grid h2,
+.container-observations h2,
+.server-management-grid h2 {
   margin-top: 0;
+  font-size: var(--text-lg);
 }
 
 .source-detail-grid dl {
@@ -2047,9 +2046,10 @@ kbd {
   border-top: 1px solid var(--border-subtle);
 }
 
-.source-danger-zone > h3 {
+.source-danger-zone > h2 {
   margin-top: 0;
   color: var(--status-error);
+  font-size: var(--text-lg);
 }
 
 .source-danger-actions {
@@ -2064,9 +2064,13 @@ kbd {
   border-radius: var(--radius-sm);
 }
 
-.source-danger-actions h4,
+.source-danger-actions h3,
 .source-danger-actions p {
   margin: 0;
+}
+
+.source-danger-actions h3 {
+  font-size: var(--text-md);
 }
 
 .server-management-grid {
@@ -2080,9 +2084,6 @@ kbd {
   min-width: 0;
 }
 
-.server-management-grid h3 {
-  margin-top: 0;
-}
 
 .inline-confirmation {
   display: grid;
@@ -2189,6 +2190,27 @@ kbd {
 
 .guide-stages li[data-state="failed"] span {
   color: var(--status-error);
+}
+
+/* Below this width the three primary items no longer fit beside the
+   header actions without truncating, so the header collapses to brand,
+   health, palette, and one menu holding every destination (DESIGN.md §6.2,
+   audit UX-19). */
+@media (max-width: 40rem) {
+  .primary-nav,
+  .system-menu-label {
+    display: none;
+  }
+
+  .system-menu-primary {
+    display: grid;
+    padding-bottom: var(--space-3);
+    border-bottom: 1px solid var(--border-subtle);
+  }
+
+  .system-menu-label-narrow {
+    display: inline-flex;
+  }
 }
 
 @media (max-width: 52rem) {
@@ -2408,7 +2430,7 @@ summary .icon {
 }
 
 .system-menu > summary .icon {
-  margin-inline: var(--space-1) 0;
+  margin: 0;
 }
 
 .event-toggle .icon {

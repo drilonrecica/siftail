@@ -268,10 +268,10 @@ test("confirmed History export preserves filters, focus, themes, mobile, and exp
   await login(page);
   await page.locator("#contains-filter").fill("needle-hostile");
   await expect(page).toHaveURL(/contains=needle-hostile/);
-  const open = page.getByRole("link", { name: "Export matching History" });
+  const open = page.getByRole("link", { name: "Export results" });
   await open.focus();
   await open.press("Enter");
-  const dialog = page.getByRole("dialog", { name: "Export matching History" });
+  const dialog = page.getByRole("dialog", { name: "Export results" });
   await expect(dialog).toBeVisible();
   await expect(dialog.getByText("needle-hostile", { exact: true })).toBeVisible();
   await expect(dialog.getByText(/100,000 events/)).toBeVisible();
@@ -286,7 +286,7 @@ test("confirmed History export preserves filters, focus, themes, mobile, and exp
   await dialog.locator("select[name='format']").selectOption("ndjson");
   await dialog.getByRole("checkbox").check();
   const downloadPromise = page.waitForEvent("download");
-  await dialog.getByRole("button", { name: "Create download" }).click();
+  await dialog.getByRole("button", { name: "Download" }).click();
   const download = await downloadPromise;
   expect(download.suggestedFilename()).toMatch(
     /^siftail-history-\d{8}T\d{6}Z-\d{8}T\d{6}Z\.ndjson$/,
@@ -315,7 +315,7 @@ test("confirmed History export preserves filters, focus, themes, mobile, and exp
   });
   await open.click();
   await dialog.getByRole("checkbox").check();
-  await dialog.getByRole("button", { name: "Create download" }).click();
+  await dialog.getByRole("button", { name: "Download" }).click();
   await expect(page).toHaveURL(/\/login\?.*expired=1/);
 });
 
@@ -381,14 +381,14 @@ test("Live states its JavaScript need and export submits as a plain form without
   await expect(page.locator(".log-row")).toHaveCount(1);
   const exportForm = page.locator("[data-export-form]");
   await expect(exportForm).toBeHidden();
-  await page.getByRole("link", { name: "Export matching History" }).click();
+  await page.getByRole("link", { name: "Export results" }).click();
   await expect(page).toHaveURL(/#history-export-dialog$/);
   await expect(exportForm).toBeVisible();
   await expect(exportForm.getByText("needle-hostile", { exact: true })).toBeVisible();
   await exportForm.locator("select[name='format']").selectOption("ndjson");
   await exportForm.getByRole("checkbox").check();
   const downloadPromise = page.waitForEvent("download");
-  await exportForm.getByRole("button", { name: "Create download" }).click();
+  await exportForm.getByRole("button", { name: "Download" }).click();
   const download = await downloadPromise;
   expect(download.suggestedFilename()).toMatch(/\.ndjson$/);
   expect(await download.failure()).toBeNull();
@@ -404,7 +404,8 @@ test("Live states its JavaScript need and export submits as a plain form without
   await page.goto("/logs?mode=live&application=api");
   const notice = page.locator(".live-noscript");
   await expect(notice).toBeVisible();
-  await expect(notice.getByRole("heading", { name: "Live needs JavaScript" })).toBeVisible();
+  await expect(notice.getByText("Live needs JavaScript.")).toBeVisible();
+  await expect(notice.getByRole("heading")).toHaveCount(0);
   await expect(page.locator("[data-live-status]")).toBeHidden();
   await expect(page.getByRole("button", { name: "Pause" })).toBeHidden();
   await expect(page.locator("[data-live-empty]")).toBeHidden();
@@ -608,6 +609,13 @@ test("Live rows keep the roving tab stop on the newest or selected row and colla
   await expect(page.locator("[data-live-status]")).toHaveText("Live");
   const list = page.getByRole("list", { name: "Live log events" });
   await expect(page.locator("[data-live-empty]")).toBeVisible();
+  // The empty state names the selected scope and offers History with the
+  // same filters (DESIGN.md §24.4).
+  const empty = page.locator("[data-live-empty]");
+  await expect(empty.getByRole("heading", { name: "Waiting for events from all sources" })).toBeVisible();
+  await expect(empty.getByRole("link", { name: "Look in History" }))
+    .toHaveAttribute("href", /mode=history/);
+  await expect(page).toHaveTitle("Live · Siftail");
 
   await ingestLive(["live-roving-0", "live-roving-1\nsecond line", "live-roving-2"]);
   const rows = list.getByRole("listitem");
@@ -869,7 +877,7 @@ test("Live pause, pending, clear-view, filters, reconnect, focus, and safe rende
 
   await page.getByRole("button", { name: "Clear view" }).click();
   await expect(page.locator("#live-rows .log-row")).toHaveCount(0);
-  await expect(page.getByText(/Persisted logs were not deleted/)).toBeAttached();
+  await expect(page.getByText(/Stored logs were not deleted/)).toBeAttached();
   await page.locator(".mode-switch").getByRole("link", { name: "History" }).click();
   await expect(page.locator(".log-row").filter({ hasText: "paused-three" })).toHaveCount(1);
   await page.locator(".mode-switch").getByRole("link", { name: "Live" }).click();
@@ -1382,7 +1390,7 @@ test("one throttled announcer speaks each Live state change and the flash once",
   });
   await expect(page.locator("#live-rows .log-row")).toHaveCount(1000);
   await expect.poll(() => count(
-    "Older rows were removed from this browser view. Persisted History is unchanged.",
+    "Older rows were removed from this view. They are still stored and available in History.",
   )).toBe(1);
   // Individual log events are never announced (DESIGN.md §33.3).
   expect((await announcements(page)).some((spoken) => spoken.includes("announce-cap-"))).toBe(false);
@@ -1399,7 +1407,7 @@ test("one throttled announcer speaks each Live state change and the flash once",
 
   // A flash is present at load as visible text and spoken after load.
   await navigateSystem(page, "Settings");
-  await page.getByRole("button", { name: "Save retention settings" }).click();
+  await page.getByRole("button", { name: "Save changes" }).click();
   await expect(page.getByText("Retention settings saved.")).toBeVisible();
   expect(await page.locator("[data-flash]").evaluate((flash) => flash.hasAttribute("role")))
     .toBe(false);
@@ -1848,7 +1856,9 @@ test("source catalog preserves hierarchy, observations, responsive layout, and l
   await login(page);
   await page.getByRole("link", { name: "Sources", exact: true }).click();
   await expect(page).toHaveURL(/\/sources$/);
-  await expect(page.getByRole("heading", { name: "Discovered sources" })).toBeVisible();
+  await expect(page).toHaveTitle("Sources · Siftail");
+  await expect(page.getByRole("heading", { level: 1, name: "Sources" })).toBeVisible();
+  await expect(page.getByText("Services that have sent logs")).toBeVisible();
   await expect(page.getByRole("navigation", { name: "Primary" })
     .getByRole("link", { name: "Sources" })).toHaveAttribute("aria-current", "page");
 
@@ -1859,10 +1869,13 @@ test("source catalog preserves hierarchy, observations, responsive layout, and l
   await expect(apiRow).toContainText("Retained logs");
   await apiRow.getByRole("link", { name: "api/web" }).click();
 
-  await expect(page.getByRole("heading", { name: "api/web" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Stable identity" })).toBeVisible();
+  // Detail pages name the entity in the h1 and the <title> (DESIGN.md §6.4).
+  await expect(page).toHaveTitle("api/web · Siftail");
+  await expect(page.getByRole("heading", { level: 1, name: "api/web" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "api/web" })).toHaveCount(1);
+  await expect(page.getByRole("heading", { level: 2, name: "Identity" })).toBeVisible();
   await expect(page.getByText(
-    "Containers are ephemeral observations of this stable source, not separate sources.",
+    "Containers that have sent logs for this source. A redeployed container stays part of the same source.",
   )).toBeVisible();
   await expect(page.getByRole("row").filter({ hasText: "api-1" })).toContainText("Active");
 
@@ -1922,14 +1935,14 @@ test("source aliases, clear logs, removal, confirmation focus, and expired sessi
   await page.getByRole("button", { name: "Save alias" }).click();
   await expect(page.getByRole("heading", { name: hostileAlias })).toBeVisible();
   await expect(page.getByText(
-    "Source alias updated. Stable identity and stored events were unchanged.",
+    "Source alias updated. Original source metadata and stored events are unchanged.",
   )).toBeVisible();
   await expect(page.locator("img")).toHaveCount(0);
   expect(await page.evaluate(
     () => (window as Window & { siftailSourceXSS?: boolean }).siftailSourceXSS,
   )).toBeUndefined();
   await expect(page.getByText(
-    "Alias changes only how this source is displayed. Original metadata remains unchanged.",
+    "Aliases change display names only. Original source metadata remains unchanged.",
   )).toBeVisible();
 
   await page.getByRole("button", { name: "Clear logs" }).click();
@@ -1955,7 +1968,7 @@ test("source aliases, clear logs, removal, confirmation focus, and expired sessi
   await page.locator("#clear-confirmation").fill(hostileAlias);
   await page.getByRole("button", { name: "Clear logs" }).click();
   await expect(page.getByText(
-    "Retained logs were cleared. The source, alias, and container observations remain.",
+    "Stored logs were cleared. The source, its alias, and its container history remain.",
   )).toBeVisible();
   await expect(page.getByRole("heading", { name: hostileAlias })).toBeVisible();
   await expect(page.getByText("No retained logs", { exact: true })).toBeVisible();
@@ -1982,11 +1995,13 @@ test("Server token creation, one-time copy, rotation, navigation loss, and revoc
 }) => {
   await login(page);
   await page.getByRole("link", { name: "Servers", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "Servers", exact: true, level: 2 })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Servers", exact: true, level: 1 })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Servers", exact: true })).toHaveCount(1);
   await page.locator("#server-name").fill("Browser managed");
   await page.locator("#server-hostname").fill("managed.example");
-  await page.getByRole("button", { name: "Create Server" }).press("Enter");
-  await expect(page.getByRole("heading", { name: "Browser managed" })).toBeVisible();
+  await page.getByRole("button", { name: "Create server" }).press("Enter");
+  await expect(page.getByRole("heading", { level: 1, name: "Browser managed" })).toBeVisible();
+  await expect(page).toHaveTitle("Browser managed · Siftail");
 
   await page.locator("#token-name").fill("primary");
   await page.getByRole("button", { name: "Create token" }).click();
@@ -2002,7 +2017,7 @@ test("Server token creation, one-time copy, rotation, navigation loss, and revoc
   await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
   await page.getByRole("button", { name: "Copy token" }).click();
   await expect(page.getByText("Token copied.")).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Connect this Server" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Connect this server" })).toBeVisible();
   await expect(page.getByText("COOLIFY_APP_NAME=siftail-self")).toBeVisible();
   await page.getByRole("button", { name: "Copy Coolify config" }).click();
   const copiedConfig = await page.evaluate(() => navigator.clipboard.readText());
@@ -2012,8 +2027,8 @@ test("Server token creation, one-time copy, rotation, navigation loss, and revoc
     .toBeLessThan(copiedConfig.indexOf("Rename COOLIFY_APP_NAME"));
   expect(copiedConfig).not.toContain("__SIFTAIL_INGEST_TOKEN__");
 
-  await page.getByRole("button", { name: "Send guided test" }).click();
-  await expect(page.getByText("Test event committed.")).toBeVisible();
+  await page.getByRole("button", { name: "Test connection" }).click();
+  await expect(page.getByText("Test event stored.")).toBeVisible();
   await expect(page.locator("[data-guide-stage] span").filter({ hasText: "Passed" }))
     .toHaveCount(5);
   await expect(page.getByText("siftail-test / setup / guided-ingestion / probe"))
@@ -2101,7 +2116,7 @@ test("retention settings validate, persist, remain responsive, and expire safely
   await expect(maximumDatabaseGiB).toHaveValue("4");
 
   await retentionDays.fill("0");
-  await page.getByRole("button", { name: "Save retention settings" }).click();
+  await page.getByRole("button", { name: "Save changes" }).click();
   await expect(page.getByText(
     "Retention must be a whole number from 1 to 3,650 days.",
   )).toBeVisible();
@@ -2109,7 +2124,7 @@ test("retention settings validate, persist, remain responsive, and expire safely
 
   await retentionDays.fill("30");
   await maximumDatabaseGiB.fill("8");
-  await page.getByRole("button", { name: "Save retention settings" }).press("Enter");
+  await page.getByRole("button", { name: "Save changes" }).press("Enter");
   await expect(page).toHaveURL(/\/settings$/);
   await expect(page.getByText("Retention settings saved.")).toBeVisible();
   await page.reload();
@@ -2167,7 +2182,7 @@ test("status is authenticated, refreshable, sanitized, responsive, and accessibl
     (candidate) => candidate.url().endsWith("/status/database-check") &&
       candidate.request().method() === "POST",
   );
-  await page.getByRole("button", { name: "Run safe database check" }).click();
+  await page.getByRole("button", { name: "Check database" }).click();
   expect((await checkResponse).status()).toBe(303);
   await expect(page).toHaveURL(/\/status$/);
   await expect(page.getByText("Database check completed.")).toBeVisible();
@@ -2178,7 +2193,7 @@ test("status is authenticated, refreshable, sanitized, responsive, and accessibl
   await expect(page.getByText(/database_check_succeeded/))
     .toBeVisible();
   await expect(page.getByText(
-    "The bounded database check completed successfully.",
+    "The database check completed successfully.",
   )).toBeVisible();
   expect(await page.content()).not.toContain("/tmp/");
   expect(await page.content()).not.toContain("/home/");
@@ -2205,6 +2220,77 @@ test("status is authenticated, refreshable, sanitized, responsive, and accessibl
   });
 });
 
+test("narrow header collapses into one menu without truncation", async ({ page }) => {
+  await login(page);
+  const header = page.locator(".app-header");
+  const menu = page.locator("[data-system-menu]");
+  const primary = page.getByRole("navigation", { name: "Primary" });
+  // Nothing in the header is cut off: no element is narrower than its text
+  // and the header itself never scrolls sideways (audit UX-19).
+  const truncated = () => header.evaluate((root) => [root, ...root.querySelectorAll("*")]
+    .filter((element) => (element as HTMLElement).offsetParent !== null || element === root)
+    // Screen-reader-only text is clipped to 1 px on purpose.
+    .filter((element) => element.clientWidth > 1)
+    .filter((element) => element.scrollWidth > element.clientWidth + 1)
+    .map((element) => element.className || element.tagName));
+
+  // Desktop: three primary items in the bar, the menu is "System".
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await expect(primary).toHaveCount(1);
+  await expect(page.locator(".primary-nav")).toBeVisible();
+  await expect(menu.locator(".system-menu-label")).toBeVisible();
+  await expect(menu.locator(".system-menu-label-narrow")).toBeHidden();
+  await openSystemMenu(page);
+  await expect(page.locator("[data-menu-primary]")).toBeHidden();
+  await closeSystemMenu(page);
+  expect(await truncated()).toEqual([]);
+
+  // Just above the collapse point the primary items still fit whole.
+  await page.setViewportSize({ width: 660, height: 800 });
+  await expect(page.locator(".primary-nav")).toBeVisible();
+  expect(await truncated()).toEqual([]);
+
+  // 390 px: brand, health, palette, and one menu holding every destination
+  // (DESIGN.md §6.2).
+  for (const theme of ["light", "dark"] as const) {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await setTheme(page, theme);
+    await expect(page.locator(".primary-nav")).toBeHidden();
+    await expect(menu.locator(".system-menu-label-narrow")).toBeVisible();
+    await expect(menu.locator(".system-menu-label")).toBeHidden();
+    expect(await truncated()).toEqual([]);
+    expect(await page.evaluate(
+      () => document.documentElement.scrollWidth > window.innerWidth,
+    )).toBe(false);
+    await openSystemMenu(page);
+    await expect(primary).toHaveCount(1);
+    for (const name of ["Logs", "Sources", "Servers", "Status", "Settings", "Audit", "Backup"]) {
+      await expect(menu.getByRole("link", { name, exact: true })).toBeVisible();
+    }
+    await expect(primary.getByRole("link", { name: "Logs" })).toHaveAttribute("aria-current", "page");
+    const results = await new AxeBuilder({ page })
+      .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"])
+      .analyze();
+    expect(results.violations.map((violation) => violation.id)).toEqual([]);
+    await page.screenshot({ path: `.playwright-artifacts/header-menu-mobile-${theme}.png` });
+    await closeSystemMenu(page);
+  }
+
+  // The menu navigates, and the palette lists each destination once.
+  await openSystemMenu(page);
+  await primary.getByRole("link", { name: "Sources" }).click();
+  await expect(page).toHaveURL(/\/sources$/);
+  await expect(page.getByRole("heading", { level: 1, name: "Sources" })).toBeVisible();
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.keyboard.press("Control+k");
+  const palette = page.locator("[data-command-palette]");
+  await expect(palette).toBeVisible();
+  await page.locator("[data-palette-input]").fill("Servers");
+  await expect(palette.locator(".palette-label").filter({ hasText: /^Servers$/ })).toHaveCount(1);
+  await page.keyboard.press("Escape");
+  await setTheme(page, "system");
+});
+
 test("full and configuration backups are typed, verified, and accessible", async ({
   page,
 }) => {
@@ -2225,14 +2311,14 @@ test("full and configuration backups are typed, verified, and accessible", async
   const escape = path.join(state.runDirectory, "escape.sqlite");
   for (const value of [escape, "../escape.sqlite"]) {
     await page.locator("#backup-file-name").fill(value);
-    await page.getByRole("button", { name: "Create verified full backup" }).click();
+    await page.getByRole("button", { name: "Create full backup" }).click();
     await expect(page.getByRole("alert")).toContainText("Paths are not accepted.");
   }
   expect(fs.existsSync(escape)).toBe(false);
   expect(fs.existsSync(path.join(state.dataDirectory, "escape.sqlite"))).toBe(false);
 
   await page.locator("#backup-file-name").fill("browser-full.sqlite");
-  await page.getByRole("button", { name: "Create verified full backup" }).click();
+  await page.getByRole("button", { name: "Create full backup" }).click();
   await expect(page).toHaveURL(/\/backup$/);
   await expect(page.locator("#backup-region").getByText("Backup verified.", { exact: true })).toBeVisible({
     timeout: 15_000,
@@ -2247,14 +2333,14 @@ test("full and configuration backups are typed, verified, and accessible", async
   await expect(page.getByText("not a merge", { exact: false })).toBeVisible();
   await page.locator("#configuration-backup-file-name").fill("");
   await page.getByRole("button", {
-    name: "Create verified configuration-only backup",
+    name: "Create configuration backup",
   }).click();
   await expect(page.locator("#backup-region").getByText("Backup verified.", { exact: true })).toBeVisible({
     timeout: 15_000,
   });
   await expect(page.getByText("configuration", { exact: true })).toBeVisible();
   const configurationName = (await page
-    .locator(".status-facts div", { hasText: "Artifact" })
+    .locator(".status-facts div", { has: page.locator("dt", { hasText: /^File$/ }) })
     .locator("dd")
     .textContent())?.trim() ?? "";
   expect(configurationName).toMatch(/^siftail-configuration-\d{8}T\d{6}Z\.sqlite$/);
@@ -2262,7 +2348,7 @@ test("full and configuration backups are typed, verified, and accessible", async
   expect(fs.statSync(path.join(backupDirectory, configurationName)).mode & 0o777)
     .toBe(0o600);
 
-  await page.getByLabel("Artifact file name").fill(configurationName);
+  await page.getByLabel("Backup file name").fill(configurationName);
   await page.getByRole("button", { name: "Verify backup" }).click();
   await expect(page.locator("#backup-region").getByText("Backup verified.", { exact: true })).toBeVisible({
     timeout: 15_000,
@@ -2338,12 +2424,11 @@ test("audit filters, pagination, escaping, keyboard, themes, and mobile remain b
   });
   const response = await page.goto(`/audit?${auditQuery.toString()}`);
   expect(response?.headers()["cache-control"]).toBe("no-store");
-  await expect(page.getByRole("heading", {
-    name: "Security audit events",
-    exact: true,
-  })).toBeVisible();
+  await expect(page).toHaveTitle("Audit · Siftail");
+  await expect(page.getByRole("heading", { level: 1, name: "Audit", exact: true })).toBeVisible();
+  await expect(page.getByText("Sign-ins and administrative actions")).toBeVisible();
   await expect(page.getByText(
-    "Security audit events are retained separately from application logs.",
+    "Audit events are kept separately from application logs; log retention does not delete them.",
   )).toBeVisible();
   expect(await page.locator(".audit-table tbody tr").count()).toBe(100);
   const older = page.getByRole("link", { name: "Load older audit events" });
@@ -2354,7 +2439,7 @@ test("audit filters, pagination, escaping, keyboard, themes, and mobile remain b
   await page.getByLabel("Category").selectOption("source_administration");
   await page.getByLabel("Outcome").selectOption("succeeded");
   await page.getByLabel("Exact action").fill("source.alias_set");
-  await page.getByRole("button", { name: "Apply audit filters" }).click();
+  await page.getByRole("button", { name: "Apply filters" }).click();
   await expect(page.locator("code", { hasText: "source.alias_set" }).first()).toBeVisible();
   await expect(page.getByText(hostileAlias).first()).toBeVisible();
   await expect(page.locator(".audit-table img")).toHaveCount(0);
@@ -2444,7 +2529,7 @@ test("guided ingestion handles session expiry without retaining one-time materia
     env: siftailEnvironment({ SIFTAIL_DATA_DIR: state.dataDirectory }),
     encoding: "utf8",
   });
-  await page.getByRole("button", { name: "Send guided test" }).click();
+  await page.getByRole("button", { name: "Test connection" }).click();
   await expect(page).toHaveURL(/\/login\?.*expired=1/);
   expect(await page.content()).not.toContain(token);
 });
@@ -2462,13 +2547,13 @@ test("a failed guided test stays on the one-time token page and shows the error"
   // browser to that URL and lost the token (audit UX-25).
   await page.route((url) => url.pathname.endsWith("/test-ingestion"), (route) =>
     route.fulfill({ status: 405, contentType: "text/plain", body: "Method Not Allowed" }));
-  await page.getByRole("button", { name: "Send guided test" }).click();
+  await page.getByRole("button", { name: "Test connection" }).click();
   const result = page.locator("[data-guide-result]");
-  await expect(result).toContainText("The guided test could not complete (HTTP 405).");
+  await expect(result).toContainText("The connection test could not complete (HTTP 405).");
   expect(page.url()).not.toContain("test-ingestion");
   await expect(page.locator("[data-token-secret]")).toHaveValue(token);
   await expect(page.locator("[data-guide-stage='delivery'] span")).toHaveText("Failed");
-  await expect(page.getByRole("button", { name: "Send guided test" })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "Test connection" })).toBeEnabled();
   await page.unroute((url) => url.pathname.endsWith("/test-ingestion"));
 });
 

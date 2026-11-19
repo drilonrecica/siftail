@@ -1,19 +1,15 @@
 {{define "sources.html"}}
-<section class="workspace-panel source-catalog" aria-labelledby="source-catalog-title">
-  <header class="catalog-heading">
-    <div>
-      <h2 id="source-catalog-title">Discovered sources</h2>
-      <p>Stable services are grouped by their trusted Server and source identity.</p>
-    </div>
-    {{if .Rows}}<p>{{.LoadedCount}} sources on this page</p>{{end}}
-  </header>
+<section class="workspace-panel source-catalog">
+  {{if .Rows}}<header class="catalog-heading">
+    <p>{{.LoadedCount}} sources on this page</p>
+  </header>{{end}}
   {{if .Error}}
   <div class="history-error" role="alert">
     <strong>{{.Error}}</strong>
     {{if .ErrorRequestID}}<span>Request ID: <code>{{.ErrorRequestID}}</code></span>{{end}}
   </div>
   {{else if .Rows}}
-  <div class="source-table-scroll" tabindex="0" role="region" aria-label="Source catalog table">
+  <div class="source-table-scroll" tabindex="0" role="region" aria-label="Sources">
     <table class="source-table">
       <thead><tr>
         <th scope="col">Source</th>
@@ -39,9 +35,9 @@
       </tbody>
     </table>
   </div>
-  <nav class="history-pagination" aria-label="Source catalog pagination">
+  <nav class="history-pagination" aria-label="Sources pagination">
     {{if .NextURL}}<a class="button" href="{{.NextURL}}">Next sources</a>
-    {{else}}<span class="pagination-end">End of source catalog</span>{{end}}
+    {{else}}<span class="pagination-end">End of sources</span>{{end}}
   </nav>
   {{else}}
   {{template "empty-state.html" .EmptyState}}
@@ -50,12 +46,11 @@
 {{end}}
 
 {{define "source-detail.html"}}
-<section class="workspace-panel source-detail" aria-labelledby="source-detail-title">
+<section class="workspace-panel source-detail">
   <header class="catalog-heading">
     <div>
       <a class="back-link" href="/sources">{{template "icon.html" "chevron"}}All sources</a>
-      <h2 id="source-detail-title">{{.DisplayName}}</h2>
-      <p>{{.Application}} / {{.Service}}{{if .Alias}} · administrator alias{{end}}</p>
+      <p>{{.Application}} / {{.Service}}{{if .Alias}} · shown by its alias{{end}}</p>
     </div>
     <div class="source-detail-actions">
       <span class="lifecycle-state{{if .Active}} lifecycle-active{{end}}">{{.Status}}</span>
@@ -63,11 +58,11 @@
     </div>
   </header>
   {{if .CleanupEligible}}<div class="notice notice-info">
-    <p>This source has been inactive for at least 90 days. Retained logs or administrative metadata may still protect it from cleanup.</p>
+    <p>This source has sent nothing for at least 90 days. Cleanup removes it unless stored logs or administrative settings still refer to it.</p>
   </div>{{end}}
   <div class="source-detail-grid">
     <section>
-      <h3>Stable identity</h3>
+      <h2>Identity</h2>
       <dl>
         <div><dt>Server</dt><dd>{{.Server}}{{if .ServerHostname}} · {{.ServerHostname}}{{end}}</dd></div>
         <div><dt>Project</dt><dd>{{.Project}} <code>{{.ProjectKey}}</code></dd></div>
@@ -75,10 +70,10 @@
         <div><dt>Application</dt><dd>{{.Application}} <code>{{.ApplicationKey}}</code></dd></div>
         <div><dt>Service</dt><dd>{{.Service}} <code>{{.ServiceKey}}</code></dd></div>
       </dl>
-      <p class="field-help">Container observations and aliases do not change this identity.</p>
+      <p class="field-help">Siftail groups logs by these names. A new container or an alias does not change them.</p>
     </section>
     <section>
-      <h3>Lifecycle</h3>
+      <h2>Activity</h2>
       <dl>
         <div><dt>First seen</dt><dd>{{.FirstSeen}}</dd></div>
         <div><dt>Last seen</dt><dd>{{.LastSeen}}</dd></div>
@@ -86,8 +81,8 @@
       </dl>
     </section>
     <section>
-      <h3>Display alias</h3>
-      <p>Alias changes only how this source is displayed. Original metadata remains unchanged.</p>
+      <h2>Alias</h2>
+      <p>Aliases change display names only. Original source metadata remains unchanged.</p>
       <form method="post" action="/sources/{{.ID}}/alias" class="source-action-form">
         <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
         <label for="source-alias">Alias
@@ -100,10 +95,10 @@
     </section>
   </div>
   <section class="container-observations">
-    <h3>Container observations</h3>
-    <p>Containers are ephemeral observations of this stable source, not separate sources.</p>
+    <h2>Containers</h2>
+    <p>Containers that have sent logs for this source. A redeployed container stays part of the same source.</p>
     {{if .Containers}}
-    <div class="source-table-scroll" tabindex="0" role="region" aria-label="Container observation table">
+    <div class="source-table-scroll" tabindex="0" role="region" aria-label="Containers">
       <table class="source-table">
         <thead><tr><th scope="col">Container</th><th scope="col">State</th><th scope="col">First seen</th><th scope="col">Last seen</th></tr></thead>
         <tbody>{{range .Containers}}<tr>
@@ -113,15 +108,15 @@
         </tr>{{end}}</tbody>
       </table>
     </div>
-    {{if .ContainersTruncated}}<p class="notice notice-info">Showing the 200 most recently seen container observations.</p>{{end}}
-    {{else}}<p>No container identity has been observed for this source.</p>{{end}}
+    {{if .ContainersTruncated}}<p class="notice notice-info">Showing the 200 most recently seen containers.</p>{{end}}
+    {{else}}<p>No container has sent logs for this source.</p>{{end}}
   </section>
   <section class="source-danger-zone" aria-labelledby="source-danger-title">
-    <h3 id="source-danger-title">Destructive actions</h3>
+    <h2 id="source-danger-title">Destructive actions</h2>
     <div class="source-danger-actions">
       <form method="post" action="/sources/{{.ID}}/clear-logs" class="source-action-form">
-        <h4>Clear logs</h4>
-        <p>Delete retained application logs for <strong>{{.DisplayName}}</strong> while keeping the source, alias, and container observations.</p>
+        <h3>Clear logs</h3>
+        <p>Delete the stored logs for <strong>{{.DisplayName}}</strong>. The source, its alias, and its container history remain.</p>
         <p>This is not secure forensic erasure.</p>
         <label for="clear-confirmation"><span>Type <strong>{{.DisplayName}}</strong> to confirm</span>
           <input id="clear-confirmation" name="confirmation" autocomplete="off"{{if .ClearError}} aria-describedby="clear-error" autofocus{{end}}>
@@ -131,9 +126,9 @@
         <button class="button button-danger" type="submit">Clear logs</button>
       </form>
       <form method="post" action="/sources/{{.ID}}/remove" class="source-action-form">
-        <h4>Remove source</h4>
-        <p>Delete retained logs, aliases, unreferenced container history, and removable metadata for <strong>{{.DisplayName}}</strong>.</p>
-        <p>Events committed after deletion starts remain, and an active sender may discover this source again. This is not secure forensic erasure.</p>
+        <h3>Remove source</h3>
+        <p>Delete the stored logs, the alias, and the container history for <strong>{{.DisplayName}}</strong>.</p>
+        <p>Events that arrive after removal starts are kept, and a server that still sends logs for this service creates it again. This is not secure forensic erasure.</p>
         <label for="remove-confirmation"><span>Type <strong>remove {{.DisplayName}}</strong> to confirm</span>
           <input id="remove-confirmation" name="confirmation" autocomplete="off"{{if .RemoveError}} aria-describedby="remove-error" autofocus{{end}}>
         </label>

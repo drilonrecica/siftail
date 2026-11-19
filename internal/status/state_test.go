@@ -212,7 +212,7 @@ func TestBackupDiagnosticsUseClosedPayloadFreeSummaries(t *testing.T) {
 	diagnostics := state.Snapshot(at).Diagnostics
 	if len(diagnostics) != 2 ||
 		diagnostics[0].Summary !=
-			"A backup did not produce a verified artifact." ||
+			"A backup did not produce a verified file." ||
 		diagnostics[1].Summary !=
 			"A backup completed and passed verification." {
 		t.Fatalf("backup diagnostics = %#v", diagnostics)

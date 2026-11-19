@@ -178,14 +178,14 @@ func statusView(
 	}
 	switch state.DegradedCategory {
 	case string(ingest.CategoryStorageFull):
-		view.StorageWarning = "Storage is full. Ingestion is returning 507 while retained reads remain available. Free host space or reduce retention pressure; Siftail will test recovery automatically."
+		view.StorageWarning = "Storage is full. Ingestion is returning 507 while stored logs remain readable. Free disk space or shorten the retention age; Siftail detects recovery automatically."
 	case "retention_target_unmet":
-		view.StorageWarning = "The configured storage target cannot be reached after bounded retention. Ingestion is returning 507 while retained reads remain available. Increase the limit or reduce retention pressure."
+		view.StorageWarning = "The database is still over its size limit after retention cleanup. Ingestion is returning 507 while stored logs remain readable. Raise the limit or shorten the retention age."
 	}
 	for _, conflict := range snapshot.Conflicts {
 		server := conflict.ServerName
 		if server == "" {
-			server = "Removed Server #" + strconv.FormatInt(conflict.ServerID, 10)
+			server = "Removed server #" + strconv.FormatInt(conflict.ServerID, 10)
 		}
 		view.ConflictServers = append(view.ConflictServers, webui.StatusConflictView{
 			Server:  server,
@@ -195,13 +195,13 @@ func statusView(
 	}
 	if hidden := len(state.Conflicts) - len(snapshot.Conflicts); hidden > 0 {
 		view.ConflictServersMore = fmt.Sprintf(
-			"%d more Servers with conflicting duplicates are counted in the total.", hidden,
+			"%d more servers with conflicting duplicates are counted in the total.", hidden,
 		)
 	}
 	for _, counter := range snapshot.Late {
 		server := counter.ServerName
 		if server == "" {
-			server = "Removed Server #" + strconv.FormatInt(counter.ServerID, 10)
+			server = "Removed server #" + strconv.FormatInt(counter.ServerID, 10)
 		}
 		view.LateServers = append(view.LateServers, webui.StatusLateView{
 			Server: server,
@@ -211,7 +211,7 @@ func statusView(
 	}
 	if hidden := len(state.Late) - len(snapshot.Late); hidden > 0 {
 		view.LateServersMore = fmt.Sprintf(
-			"%d more Servers with late events are counted in the total.", hidden,
+			"%d more servers with late events are counted in the total.", hidden,
 		)
 	}
 	for index, diagnostic := range state.Diagnostics {
