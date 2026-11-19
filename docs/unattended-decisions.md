@@ -94,3 +94,24 @@ approval. Entries are in the order they were taken, newest last.
 - **Options:** keep `<title>` "Logs" for both modes; title them "History" and "Live"; for the token page, title it "Copy this token now" or after the server.
 - **Chosen:** "History · Siftail" and "Live · Siftail", so two tabs are told apart while the `h1` stays the destination name; the token page uses `h1` = server name and `<title>` "New token for <server>". The full table is in `DESIGN.md` §6.4.
 - **Reversal cost:** low — the `PageMeta` switch in `ui.go` and the title assertions in `copy_test.go` and Playwright.
+
+## SFT-124 — Compared screenshots pin fonts and bypass CSP for that one test (2026-11-19)
+
+- **Question:** The acceptance asks for screenshot comparison against committed references, but proportional text uses the host's `system-ui` face (Fedora on the maintainer's machine, Ubuntu on CI), so pixel references would differ by host. Playwright's `stylePath`, caret hiding, and animation freezing are injected as a `<style>` element, which Siftail's `style-src 'self'` CSP blocks silently.
+- **Options:** (a) compare as shipped and accept per-host references; (b) pin `--font-sans` to the vendored JetBrains Mono through `stylePath` and run only the comparison test with `bypassCSP`; (c) compare only element regions with no proportional text.
+- **Chosen:** (b). References cover login, palette, and help (the data- and clock-independent views) at 1280 and 390 px in both themes, `maxDiffPixelRatio` 0.01, stored as `tests/browser/__screenshots__/<name>-chromium-linux.png`, refreshed with `make playwright-update`. Every other test still runs under the shipped CSP, and the console-clean test still asserts no CSP violation.
+- **Reversal cost:** low — `screenshot.css`, the `toHaveScreenshot` block in `playwright.config.ts`, and the twelve PNGs.
+
+## SFT-124 — Fix the 320 px reflow failure the new test found (2026-11-19)
+
+- **Question:** The new 320 px reflow test failed on real pages: a server or source name with no break opportunity (for example the hostile alias another test sets) widened a source detail page by up to 1,148 px through its `h1`, the key subtitle, definition values, and the typed-confirmation forms. The task's impact is "test code and reference screenshots", and no H3 task owns this defect.
+- **Options:** mark the check `test.fail` and leave the bug for a later task; fix it here.
+- **Chosen:** fix it with one `overflow-wrap: anywhere` rule in `app.css` for `h1`–`h3`, `dd`, `.catalog-heading p`, `.source-action-form`, and `.inline-confirmation`. `DESIGN.md` §33 targets WCAG 2.2 AA, which includes 1.4.10 Reflow, and §34.3 allows horizontal scrolling only inside raw payload regions, never the page and a known-failing test would hide the regression it exists to catch. Scrolling tables keep their own scroll region and are unchanged.
+- **Reversal cost:** low — one CSS rule.
+
+## SFT-124 — Live reconnect test asserts native reconnects, not the Last-Event-ID header (2026-11-19)
+
+- **Question:** The SSE drop test scripts the stream with `page.route`; Chromium reconnects natively after each drop but does not attach `Last-Event-ID` to a request Playwright fulfils, so the header cannot be asserted in the browser.
+- **Options:** drive drops through the real server (no way to sever one stream from outside without a test-only endpoint); assert reconnect count in the browser and rely on the Go test for the server's `possible_gap` reply to `Last-Event-ID`.
+- **Chosen:** the second: the browser test proves three native reconnects, each control event's effect, no retry after `shutdown` or a 401, and recovery against the real server; `internal/auth/live_test.go` already proves the server sends `possible_gap` for a valid `Last-Event-ID`.
+- **Reversal cost:** low — add a test-only stream-sever hook later if end-to-end header proof is wanted.

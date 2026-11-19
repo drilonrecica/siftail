@@ -1,0 +1,9 @@
+/* Applied only while Playwright captures a compared reference screenshot
+   (toHaveScreenshot, see playwright.config.ts). Proportional text uses the
+   host's system-ui face, which differs between the maintainer's machine and
+   the CI runner; pinning it to the vendored JetBrains Mono keeps the
+   references host-independent. Layout, colour, borders and the mono face
+   are compared as shipped. */
+:root {
+  --font-sans: "JetBrains Mono", monospace !important;
+}

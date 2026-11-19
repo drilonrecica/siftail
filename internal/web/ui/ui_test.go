@@ -5,7 +5,6 @@ import (
 	"compress/gzip"
 	"crypto/sha512"
 	"encoding/hex"
-	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -102,14 +101,6 @@ func TestShellTemplateUsesLocalCSPCompatibleAssets(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Errorf("shell missing %q", want)
 		}
-	}
-	liveAsset, err := files.ReadFile("assets/live.js")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(liveAsset), `"retention_purged"`) ||
-		!strings.Contains(string(liveAsset), "may no longer be available in History") {
-		t.Fatal("Live asset lacks explicit retention-purge handling")
 	}
 	for _, forbidden := range []string{
 		`<script>`, `<style`, `https://`, `http://`, `"><script>`,
@@ -586,92 +577,12 @@ func TestEmbeddedAssetsTypesIntegrityAndSafety(t *testing.T) {
 	if err != nil || !strings.Contains(string(license), "Zero-Clause BSD") {
 		t.Fatalf("HTMX license missing or invalid: %v", err)
 	}
-	appJS, err := files.ReadFile("assets/app.js")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(appJS), "innerHTML") ||
-		!strings.Contains(string(appJS), "historyCacheSize = 0") ||
-		!strings.Contains(string(appJS), "historyRowCap = 1000") ||
-		!strings.Contains(string(appJS), "navigator.clipboard.writeText(source.textContent)") ||
-		!strings.Contains(string(appJS), "replaceChildren()") {
-		t.Fatal("application JavaScript violates DOM/history constraints")
-	}
-	liveJS, err := files.ReadFile("assets/live.js")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, forbidden := range []string{".innerHTML =", "insertAdjacentHTML", "document.write"} {
-		if strings.Contains(string(liveJS), forbidden) {
-			t.Fatalf("Live JavaScript contains unsafe DOM API %q", forbidden)
-		}
-	}
-	for _, required := range []string{
-		"const renderedLimit = 1000",
-		"const pendingLimit = 2000",
-		// Message previews and their matches are text nodes (DESIGN.md §12.4).
-		"document.createTextNode(text",
-		"mark.textContent",
-		"eventSource.close()",
-		`window.addEventListener("pagehide"`,
-	} {
-		if !strings.Contains(string(liveJS), required) {
-			t.Errorf("Live JavaScript missing lifecycle constraint %q", required)
-		}
-	}
-	tokenJS, err := files.ReadFile("assets/tokens.js")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, forbidden := range []string{"innerHTML", "document.write", "console."} {
-		if strings.Contains(string(tokenJS), forbidden) {
-			t.Fatalf("token JavaScript contains unsafe API %q", forbidden)
-		}
-	}
-	for _, required := range []string{
-		`history.replaceState(null, "", doneURL)`,
-		`navigator.clipboard.writeText(secret.value)`,
-		`material.textContent.split(placeholder).join(secret.value)`,
-		`values.set("token", secret.value)`,
-		`result.outcome === "committed"`,
-		`response.redirected`,
-		`window.addEventListener("pagehide"`,
-		`secret.value = ""`,
-	} {
-		if !strings.Contains(string(tokenJS), required) {
-			t.Errorf("token JavaScript missing one-time constraint %q", required)
-		}
-	}
-	css, err := files.ReadFile("assets/app.css")
-	if err != nil {
-		t.Fatal(err)
-	}
-	tokens, err := files.ReadFile("assets/tokens.css")
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Theming is token-owned: every semantic color is declared once with
-	// light-dark() plus a static dark fallback, and explicit theme choices
-	// switch color-scheme (DESIGN.md §27.2).
-	for _, want := range []string{
-		`:root[data-theme="light"]`,
-		`:root[data-theme="dark"]`,
-		`light-dark(`,
-		`@font-face`,
-	} {
-		if !strings.Contains(string(tokens), want) {
-			t.Errorf("tokens.css missing %q", want)
-		}
-	}
-	for _, want := range []string{
-		`prefers-reduced-motion: reduce`,
-		`@media (max-width: 32rem)`,
-		`:focus-visible`,
-	} {
-		if !strings.Contains(string(css), want) {
-			t.Errorf("CSS missing %q", want)
-		}
-	}
+	// What the scripts and stylesheets do is proven by the Playwright suite
+	// (tests/browser), not by searching their source text (audit SEC-15):
+	// hostile payloads stay text in History, Live and details; row caps,
+	// pending caps, Back/Forward refetches, clipboard and one-time token
+	// handling, Live control events, themes, reduced motion, focus
+	// indicators and narrow layouts are all exercised in a browser.
 }
 
 func TestHashedAssetsAreImmutableAndGzipped(t *testing.T) {
@@ -801,23 +712,6 @@ func TestSharedComponentPartials(t *testing.T) {
 	}
 }
 
-func TestLiveSeverityCodesMirrorGoMap(t *testing.T) {
-	liveAsset, err := files.ReadFile("assets/live.js")
-	if err != nil {
-		t.Fatal(err)
-	}
-	script := string(liveAsset)
-	for level, code := range severityCodes {
-		pair := level + `: "` + code + `"`
-		if !strings.Contains(script, pair) {
-			t.Errorf("live.js severity map missing %q", pair)
-		}
-	}
-	if !strings.Contains(script, "severityCodes[level]") {
-		t.Error("live.js does not render severity through the shared code map")
-	}
-}
-
 func TestRowToggleLabelNamesRowsFromContent(t *testing.T) {
 	long := strings.Repeat("é", 70)
 	for _, test := range []struct {
@@ -833,27 +727,5 @@ func TestRowToggleLabelNamesRowsFromContent(t *testing.T) {
 			t.Errorf("RowToggleLabel(%q, %q, %q) = %q, want %q",
 				test.level, test.source, test.message, got, test.want)
 		}
-	}
-}
-
-func TestLiveRowsMirrorHistoryRowSemantics(t *testing.T) {
-	liveAsset, err := files.ReadFile("assets/live.js")
-	if err != nil {
-		t.Fatal(err)
-	}
-	script := string(liveAsset)
-	for _, want := range []string{
-		fmt.Sprintf("const toggleMessageRunes = %d;", rowToggleMessageRunes),
-		`row.setAttribute("role", "listitem");`,
-		"toggle.tabIndex = -1;",
-		"toggleLabel(code, sourceText, messageText)",
-		"return `Details: ${code} ${source}, ${prefix}`;",
-	} {
-		if !strings.Contains(script, want) {
-			t.Errorf("live.js row rendering missing %q", want)
-		}
-	}
-	if strings.Contains(script, "for event ${id}") {
-		t.Error("live.js names detail toggles by event ID")
 	}
 }

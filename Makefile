@@ -1,4 +1,4 @@
-.PHONY: fmt fmt-check vet test race-test build compose-check check bench frontend-check playwright clean
+.PHONY: fmt fmt-check vet test race-test build compose-check check bench frontend-check playwright playwright-update clean
 
 GO       := go
 # Upper bound for one package's test binary; a hung test fails instead of stalling igris.
@@ -53,6 +53,11 @@ frontend-check:
 
 playwright:
 	npm run playwright
+
+# Rewrites the compared reference screenshots under tests/browser/__screenshots__
+# after an intended visual change; review the image diff before committing.
+playwright-update:
+	npm run playwright:update
 
 clean:
 	rm -f $(BINARY)

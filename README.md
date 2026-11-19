@@ -165,6 +165,20 @@ make frontend-check
 make playwright
 ```
 
+The suite compares the login page, the command palette, and the keyboard help
+overlay, desktop and 390 px in both themes, against reference screenshots
+committed under `tests/browser/__screenshots__/`; every other capture is a
+review artifact written to `.playwright-artifacts/`. After an intended visual
+change, refresh the references and review the image diff before committing:
+
+```bash
+make playwright-update
+```
+
+Compared screenshots pin proportional text to the vendored JetBrains Mono
+(`tests/browser/screenshot.css`) so they do not depend on the host's
+`system-ui` font.
+
 An installed Chromium may be used locally with
 `SIFTAIL_PLAYWRIGHT_CHROMIUM=/path/to/chromium make playwright`. Node,
 Playwright, axe, browsers, and their reports are not production runtime

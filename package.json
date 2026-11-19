@@ -8,7 +8,8 @@
   },
   "scripts": {
     "frontend-check": "playwright test --list",
-    "playwright": "playwright test"
+    "playwright": "playwright test",
+    "playwright:update": "playwright test --update-snapshots"
   },
   "devDependencies": {
     "@axe-core/playwright": "4.14.0",

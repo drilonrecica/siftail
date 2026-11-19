@@ -7,7 +7,18 @@ export default defineConfig({
   fullyParallel: false,
   workers: 1,
   timeout: 30_000,
-  expect: { timeout: 5_000 },
+  expect: {
+    timeout: 5_000,
+    // Compared references live under tests/browser/__screenshots__ and are
+    // refreshed with `make playwright-update` (see README).
+    toHaveScreenshot: {
+      animations: "disabled",
+      caret: "hide",
+      maxDiffPixelRatio: 0.01,
+      stylePath: "./tests/browser/screenshot.css",
+    },
+  },
+  snapshotPathTemplate: "{testDir}/__screenshots__/{arg}-{projectName}-{platform}{ext}",
   globalSetup: "./tests/browser/global-setup.ts",
   globalTeardown: "./tests/browser/global-teardown.ts",
   reporter: [["line"], ["html", { open: "never" }]],

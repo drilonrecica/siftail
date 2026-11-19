@@ -269,6 +269,19 @@ code {
   overflow-wrap: anywhere;
 }
 
+/* Headings, entity subtitles, and definition values carry operator-supplied
+   names (servers, sources, aliases); a long unbroken name wraps instead of
+   widening the page at 320 px (WCAG 1.4.10). */
+h1,
+h2,
+h3,
+dd,
+.catalog-heading p,
+.source-action-form,
+.inline-confirmation {
+  overflow-wrap: anywhere;
+}
+
 .app-header {
   position: sticky;
   z-index: 10;

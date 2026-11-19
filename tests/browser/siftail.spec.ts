@@ -10,6 +10,7 @@ import {
   navigateSystem,
   openSystemMenu,
   readState,
+  setDensity,
   setShortcuts,
   setTheme,
   siftailEnvironment,
@@ -277,6 +278,68 @@ test("assets are hashed, immutable and gzipped, HTML is no-store, and every page
   expect(problems).toEqual([]);
 });
 
+// Compared against committed references in tests/browser/__screenshots__
+// (playwright.config.ts). Only views whose content does not depend on
+// ingested data or the clock are compared: the login page, the command
+// palette on a page without source filters, and the keyboard help overlay.
+// After an intended visual change run `make playwright-update` and review
+// the image diff. Playwright applies tests/browser/screenshot.css and its
+// caret and animation freezing as an injected <style>, which Siftail's
+// `style-src 'self'` policy would block, so only this comparison bypasses
+// CSP; every other test runs under the shipped policy.
+test.describe("reference screenshots", () => {
+test.use({ bypassCSP: true });
+test("login, palette, and help overlay match their reference screenshots", async ({ page }) => {
+  const sizes = [
+    { label: "desktop", width: 1280, height: 800 },
+    { label: "mobile", width: 390, height: 844 },
+  ] as const;
+  const settle = async () => {
+    await page.evaluate(() => document.fonts.ready);
+    await page.mouse.move(0, 0);
+  };
+  for (const size of sizes) {
+    await page.setViewportSize({ width: size.width, height: size.height });
+    for (const scheme of ["dark", "light"] as const) {
+      await page.emulateMedia({ colorScheme: scheme });
+      await page.goto("/login");
+      await expect(page.locator("#username")).toBeFocused();
+      await settle();
+      await expect(page).toHaveScreenshot(`login-${size.label}-${scheme}.png`);
+    }
+  }
+
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.emulateMedia({ colorScheme: "dark" });
+  await login(page);
+  const palette = page.getByRole("dialog", { name: "Command palette" });
+  const help = page.getByRole("dialog", { name: "Keyboard shortcuts" });
+  for (const size of sizes) {
+    await page.setViewportSize({ width: size.width, height: size.height });
+    for (const scheme of ["dark", "light"] as const) {
+      await page.goto("/settings");
+      await setTheme(page, scheme);
+      await page.locator("[data-palette-open]").click();
+      await expect(palette).toBeVisible();
+      await expect(page.locator("[data-palette-input]")).toBeFocused();
+      await settle();
+      await expect(palette).toHaveScreenshot(`palette-${size.label}-${scheme}.png`);
+      await page.keyboard.press("Escape");
+      await expect(palette).toBeHidden();
+
+      await page.goto("/logs");
+      await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+      await page.keyboard.press("?");
+      await expect(help).toBeVisible();
+      await settle();
+      await expect(help).toHaveScreenshot(`help-${size.label}-${scheme}.png`);
+      await page.keyboard.press("Escape");
+      await expect(help).toBeHidden();
+    }
+  }
+});
+});
+
 test("primary filters update and restore URL-owned History state", async ({ page }) => {
   await login(page);
   await page.locator("#server-filter").selectOption("1");
@@ -441,7 +504,7 @@ test("Live states its JavaScript need and export submits as a plain form without
   const exported = fs.readFileSync(await download.path(), "utf8").trim().split("\n");
   expect(exported).toHaveLength(1);
   expect(exported[0]).toContain("needle-hostile");
-  await page.screenshot({ path: ".playwright-artifacts/nojs-export-desktop.png", fullPage: true });
+  await page.screenshot({ path: ".playwright-artifacts/nojs-export-desktop.png" });
   await exportForm.getByRole("link", { name: "Cancel" }).click();
   await expect(exportForm).toBeHidden();
 
@@ -1265,6 +1328,16 @@ test("the row cap trims opposite to the load direction and keeps focused and exp
   await expect(page.locator("#history-tail").getByRole("link", { name: "Return to newest events" }))
     .toBeVisible();
   await expect(page.locator("#history-update-status")).toContainText("newest loaded rows were removed");
+  // A 1,000-row list is still one Tab stop, and J/K move through it.
+  await expect(page.locator('#history-rows [tabindex="0"]')).toHaveCount(1);
+  await rows.nth(500).focus();
+  await page.keyboard.press("j");
+  await expect(rows.nth(501)).toBeFocused();
+  await page.keyboard.press("k");
+  await page.keyboard.press("k");
+  await expect(rows.nth(499)).toBeFocused();
+  await expect(page.locator('#history-rows [tabindex="0"]')).toHaveCount(1);
+  await expect(rows.nth(499)).toHaveAttribute("tabindex", "0");
 
   // Newer direction: 1,000 events loaded, then 200 newer arrive.
   const newerBase = Date.now() - 4 * 60 * 60 * 1000;
@@ -1320,6 +1393,16 @@ test("Live enforces rendered and pending caps and does not steal scroll", async 
   }
   await expect(page.locator("#live-rows .log-row")).toHaveCount(1000);
   await expect(page.locator("[data-live-notices]").getByText(/Older rows were removed/)).toBeVisible();
+  // The capped 1,000-row list is one Tab stop, and J/K move through it.
+  const liveRows = page.locator("#live-rows > .log-row");
+  await expect(page.locator('#live-rows [tabindex="0"]')).toHaveCount(1);
+  await liveRows.nth(500).focus();
+  await page.keyboard.press("j");
+  await expect(liveRows.nth(501)).toBeFocused();
+  await page.keyboard.press("k");
+  await page.keyboard.press("k");
+  await expect(liveRows.nth(499)).toBeFocused();
+  await expect(page.locator('#live-rows [tabindex="0"]')).toHaveCount(1);
 
   const scroll = page.locator("[data-live-scroll]");
   await scroll.evaluate((element) => {
@@ -2063,6 +2146,7 @@ test("Server token creation, one-time copy, rotation, navigation loss, and revoc
   await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
   await page.getByRole("button", { name: "Copy token" }).click();
   await expect(page.getByText("Token copied.")).toBeVisible();
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(primary);
   await expect(page.getByRole("heading", { name: "Connect this server" })).toBeVisible();
   await expect(page.getByText("COOLIFY_APP_NAME=siftail-self")).toBeVisible();
   await page.getByRole("button", { name: "Copy Coolify config" }).click();
@@ -2098,6 +2182,10 @@ test("Server token creation, one-time copy, rotation, navigation loss, and revoc
     fullPage: true,
   });
 
+  // Leaving the page wipes the token and the filled-in configuration.
+  await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent("pagehide")));
+  await expect(tokenInput).toHaveValue("");
+  expect(await page.locator("body").innerText()).not.toContain(primary);
   await page.getByRole("link", { name: "Done" }).click();
   await expect(page.getByRole("heading", { name: "Browser managed" })).toBeVisible();
   expect(await page.content()).not.toContain(primary);
@@ -2524,19 +2612,27 @@ test("keyboard, themes, reduced motion, mobile inspection, and axe smoke", async
   await page.reload();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
   await expect(page.locator("[data-theme-select]")).toHaveValue("dark");
+  const surface = () => page.evaluate(() => ({
+    scheme: getComputedStyle(document.documentElement).colorScheme,
+    background: getComputedStyle(document.body).backgroundColor,
+  }));
+  const dark = await surface();
+  expect(dark.scheme).toBe("dark");
   const darkResults = await new AxeBuilder({ page })
     .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"])
     .analyze();
   expect(darkResults.violations.map((violation) => violation.id)).toEqual([]);
-  await page.screenshot({
-    path: ".playwright-artifacts/history-desktop-dark.png",
-    fullPage: true,
-  });
+  await page.screenshot({ path: ".playwright-artifacts/history-desktop-dark.png" });
   await page.keyboard.press("f");
   await expect(page.locator("#contains-filter")).toBeFocused();
   await page.locator("#contains-filter").fill("");
   await setTheme(page, "light");
   await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+  // An explicit theme wins over the system scheme in both directions.
+  await page.emulateMedia({ colorScheme: "dark" });
+  const light = await surface();
+  expect(light.scheme).toBe("light");
+  expect(light.background).not.toBe(dark.background);
   await page.emulateMedia({ reducedMotion: "reduce" });
   const transitionDuration = await page.locator(".log-row").first().evaluate(
     (element) => getComputedStyle(element).transitionDuration,
@@ -2550,10 +2646,8 @@ test("keyboard, themes, reduced motion, mobile inspection, and axe smoke", async
   expect(overflow).toBe(false);
   await page.locator(".event-toggle").first().click();
   await expect(page.locator(".event-detail").first()).toBeVisible();
-  await page.screenshot({
-    path: ".playwright-artifacts/history-mobile-light-details.png",
-    fullPage: true,
-  });
+  await page.locator(".event-detail").first().scrollIntoViewIfNeeded();
+  await page.screenshot({ path: ".playwright-artifacts/history-mobile-light-details.png" });
 
   const results = await new AxeBuilder({ page })
     .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"])
@@ -3008,7 +3102,7 @@ test("signature items: severity edge, icons, +N lines, selection, wrap, and matc
     await page.screenshot({ path: `.playwright-artifacts/signature-history-desktop-${scheme}.png` });
     await page.setViewportSize({ width: 390, height: 844 });
     await page.locator("#history-rows").scrollIntoViewIfNeeded();
-    await page.screenshot({ path: `.playwright-artifacts/signature-history-mobile-${scheme}.png`, fullPage: true });
+    await page.screenshot({ path: `.playwright-artifacts/signature-history-mobile-${scheme}.png` });
   }
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.emulateMedia({ colorScheme: "dark" });
@@ -3051,6 +3145,573 @@ test("signature items: severity edge, icons, +N lines, selection, wrap, and matc
   }
 });
 
+
+// ---------------------------------------------------------------------------
+// SFT-124: behaviour coverage for the audit's test gaps (audit §4 "Test
+// gaps", SEC-15). These replace Go assertions that searched JavaScript
+// source text.
+
+// Severity codes and toggle names are built in Go for History and in
+// live.js for Live; rendering every level in both modes proves they agree.
+test("Live rows render the same severity codes and toggle names as History", async ({ page }) => {
+  await login(page);
+  const base = Date.now() - 20_000;
+  await ingestLevels("mirror", [{ level: "INFO", log: "seed row" }], base);
+  const entries = [
+    { level: "TRACE", log: "mirror trace" },
+    { level: "DEBUG", log: "mirror debug" },
+    { level: "INFO", log: "mirror info" },
+    { level: "WARN", log: "  mirror warn first line\nsecond line" },
+    { level: "ERROR", log: `mirror error ${"é".repeat(70)} tail` },
+    { level: "FATAL", log: "mirror fatal already cut…" },
+    { level: "bogus-level", log: "mirror unknown" },
+  ];
+  type RowFacts = { code: string; severity: string; label: string; role: string; toggleTab: number };
+  const facts = (selector: string) => page.locator(selector).evaluateAll((rows) => rows
+    .filter((row) => row.querySelector(".row-text")?.textContent?.includes("mirror"))
+    .map((row) => {
+      const severity = row.querySelector(".severity");
+      const toggle = row.querySelector(".event-toggle") as HTMLElement;
+      return {
+        code: severity?.textContent?.trim() ?? "",
+        severity: [...(severity?.classList ?? [])].find((name) => name.startsWith("severity-")) ?? "",
+        label: toggle.getAttribute("aria-label") ?? "",
+        role: row.getAttribute("role") ?? "",
+        toggleTab: toggle.tabIndex,
+      };
+    })
+    .sort((a, b) => a.label.localeCompare(b.label)));
+
+  await page.goto("/logs?mode=live&server=1&project=browser-project&environment=test&application=mirror&service=web");
+  await expect(page.locator("[data-live-status]")).toHaveText("Live");
+  await ingestLevels("mirror", entries, Date.now());
+  await expect(page.locator("#live-rows > .log-row")).toHaveCount(entries.length);
+  const live: RowFacts[] = await facts("#live-rows > .log-row");
+
+  await page.goto(historyScopeURL("mirror", base - 1_000, Date.now() + 60_000));
+  await expect(page.locator("#history-rows > .log-row")).toHaveCount(entries.length + 1);
+  const history: RowFacts[] = await facts("#history-rows > .log-row");
+
+  expect(history.map((row) => row.code).sort())
+    .toEqual(["DBG", "ERR", "FTL", "INF", "TRC", "UNK", "WRN"]);
+  expect(history.find((row) => row.code === "WRN")?.label)
+    .toBe("Details: WRN mirror/web, mirror warn first line…");
+  expect(history.find((row) => row.code === "ERR")?.label)
+    .toBe(`Details: ERR mirror/web, mirror error ${"é".repeat(47)}…`);
+  expect(history.find((row) => row.code === "FTL")?.label)
+    .toBe("Details: FTL mirror/web, mirror fatal already cut…");
+  expect(history.every((row) => row.role === "listitem" && row.toggleTab === -1)).toBe(true);
+  expect(live).toEqual(history);
+});
+
+// The real EventSource parser and reconnect logic run against a scripted
+// stream: drops reconnect natively, each control event takes its
+// documented effect, shutdown and a 401 stop retrying, and Reconnect
+// recovers against the real server.
+test("Live handles stream drops, each control event, and a 401 on the stream", async ({ page }) => {
+  await trackEventSources(page);
+  await page.addInitScript(() => {
+    const states: string[] = [];
+    Object.defineProperty(window, "__siftailLiveStates", { value: states });
+    document.addEventListener("DOMContentLoaded", () => {
+      const status = document.querySelector("[data-live-status]");
+      if (!status) return;
+      new MutationObserver(() => {
+        const text = status.textContent?.trim() ?? "";
+        if (text && states[states.length - 1] !== text) states.push(text);
+      }).observe(status, { childList: true, characterData: true, subtree: true });
+    });
+  });
+  await login(page);
+
+  const frame = (event: string, data: unknown, id?: number) =>
+    `${id ? `id: ${id}\n` : ""}event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+  const log = (id: number, message: string) => frame("log", {
+    id,
+    level: "info",
+    message,
+    stream: "stdout",
+    event_at_us: Date.now() * 1000,
+    source: { application: "api", service: "web" },
+  }, id);
+  const control = (type: string) => frame("control", { type });
+  const replies: Array<{ status: number; body: string }> = [
+    // A first connection that delivers a row and a retention purge, then drops.
+    { status: 200, body: `retry: 200\n\n${log(101, "stream-one")}${control("retention_purged")}` },
+    // The reconnect: a possible gap, a row, then the source is removed.
+    { status: 200, body: `${control("possible_gap")}${log(102, "stream-two")}${control("source_removed")}` },
+    // A third connection: a row, then shutdown, after which nothing retries.
+    { status: 200, body: `${log(103, "stream-three")}${control("shutdown")}` },
+  ];
+  let connections = 0;
+  await page.route(/\/logs\/live\/stream/, async (route) => {
+    connections += 1;
+    const reply = replies.shift() ?? { status: 204, body: "" };
+    await route.fulfill({
+      status: reply.status,
+      headers: { "Content-Type": reply.status === 200 ? "text/event-stream" : "text/plain" },
+      body: reply.body,
+    });
+  });
+
+  await page.locator(".mode-switch").getByRole("link", { name: "Live" }).click();
+  const status = page.locator("[data-live-status]");
+  const notices = page.locator("[data-live-notices]");
+  const rows = page.locator("#live-rows > .log-row");
+  await expect(status).toHaveText("Disconnected");
+  await expect(notices.getByText(
+    "Retention removed older application events. Some Live rows may no longer be available in History.",
+  )).toBeVisible();
+  await expect(notices.getByText(
+    "Live reconnected without replay. Use History to inspect the possible gap.",
+  )).toBeVisible();
+  await expect(notices.getByText(
+    "This source changed and its previous rows are no longer retained.",
+  )).toBeVisible();
+  await expect(notices.getByText("Siftail is shutting down. Reconnect after it restarts.")).toBeVisible();
+  // source_removed cleared the earlier rows; only the row after it remains.
+  await expect(rows).toHaveCount(1);
+  await expect(rows.locator(".row-text")).toHaveText("stream-three");
+  // Each drop reconnected natively (EventSource retry, not a new
+  // subscription). The server's possible_gap answer to Last-Event-ID is
+  // covered in internal/auth/live_test.go; Chromium does not attach that
+  // header to a request Playwright fulfils.
+  expect(connections).toBe(3);
+  const states = await page.evaluate(
+    () => [...(window as Window & { __siftailLiveStates: string[] }).__siftailLiveStates],
+  );
+  expect(states.filter((state) => state === "Reconnecting").length).toBeGreaterThanOrEqual(2);
+  expect(states[states.length - 1]).toBe("Disconnected");
+  // Shutdown closed the stream: no retry follows.
+  await page.waitForTimeout(800);
+  expect(connections).toBe(3);
+  expect(await page.evaluate(
+    () => (window as Window & { __siftailEventSourceStats: { active: number } })
+      .__siftailEventSourceStats.active,
+  )).toBe(0);
+
+  // A 401 on the stream fails the connection without a retry storm.
+  replies.push({ status: 401, body: "Authentication required." });
+  const reconnect = page.getByRole("button", { name: "Reconnect" });
+  await expect(reconnect).toBeVisible();
+  await reconnect.click();
+  await expect.poll(() => connections).toBe(4);
+  await expect(status).toHaveText("Disconnected");
+  await page.waitForTimeout(800);
+  expect(connections).toBe(4);
+
+  // Reconnect recovers against the real server.
+  await page.unroute(/\/logs\/live\/stream/);
+  await reconnect.click();
+  await expect(status).toHaveText("Live");
+  await ingestLive(["after-recovery"]);
+  await expect(rows.filter({ hasText: "after-recovery" })).toHaveCount(1);
+
+  // Leaving the page closes the stream (pagehide).
+  await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent("pagehide")));
+  expect(await page.evaluate(
+    () => (window as Window & { __siftailEventSourceStats: { active: number } })
+      .__siftailEventSourceStats.active,
+  )).toBe(0);
+});
+
+// Extreme messages: one 10,000-character line without spaces and one
+// 500-line message, in History and Live, Compact and Comfortable, desktop
+// and 390 px. Rows stay one line with a +N lines hint, nothing scrolls the
+// page sideways, and the expanded detail holds the complete text.
+test("a 10,000-character line and a 500-line message stay bounded in both densities", async ({
+  page,
+}) => {
+  test.setTimeout(90_000);
+  await login(page);
+  const wide = `wide-start ${"x".repeat(9_980)} wide-end`;
+  expect(wide).toHaveLength(10_000);
+  const tall = Array.from({ length: 500 }, (_, index) => `tall line ${index + 1}`).join("\n");
+  const base = Date.now() - 20_000;
+  await ingestLevels("huge", [{ level: "INFO", log: wide }, { level: "ERROR", log: tall }], base);
+  const sidewaysOverflow = () => page.evaluate(
+    () => document.documentElement.scrollWidth - window.innerWidth,
+  );
+
+  await page.goto(historyScopeURL("huge", base - 1_000, Date.now() + 60_000));
+  const rows = page.locator("#history-rows > .log-row");
+  await expect(rows).toHaveCount(2);
+  const wideRow = rows.filter({ hasText: "wide-start" });
+  const tallRow = rows.filter({ hasText: "tall line 1" });
+  await expect(tallRow.locator(".row-lines")).toHaveText("+499 lines");
+  for (const density of ["compact", "comfortable"] as const) {
+    await setDensity(page, density);
+    await expect(page.locator("html")).toHaveAttribute("data-density", density);
+    for (const width of [1280, 390]) {
+      await page.setViewportSize({ width, height: 844 });
+      const label = `${density} ${width}px`;
+      expect(await sidewaysOverflow(), label).toBeLessThanOrEqual(0);
+      for (const row of [wideRow, tallRow]) {
+        const box = await row.boundingBox();
+        expect(box!.height, label).toBeLessThan(width < 600 ? 160 : 80);
+        expect(box!.x + box!.width, label).toBeLessThanOrEqual(width + 0.5);
+      }
+      for (const [row, last] of [[wideRow, "wide-end"], [tallRow, "tall line 500"]] as const) {
+        await row.locator(".event-toggle").click();
+        const detail = row.locator(".event-detail");
+        await expect(detail).toBeVisible();
+        await expect(detail).toContainText(last);
+        expect(await sidewaysOverflow(), `${label} expanded`).toBeLessThanOrEqual(0);
+        await detail.getByRole("button", { name: "Collapse details" }).click();
+        await expect(detail).toHaveCount(0);
+      }
+    }
+  }
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.screenshot({ path: ".playwright-artifacts/huge-history-comfortable.png" });
+
+  // Live: the same rows arrive capped at the 8 KiB preview, still bounded.
+  await page.locator(".mode-switch").getByRole("link", { name: "Live" }).click();
+  await expect(page.locator("[data-live-status]")).toHaveText("Live");
+  await ingestLevels("huge", [{ level: "INFO", log: wide }, { level: "ERROR", log: tall }], Date.now());
+  const liveRows = page.locator("#live-rows > .log-row");
+  await expect(liveRows).toHaveCount(2);
+  await expect(liveRows.filter({ hasText: "tall line 1" }).locator(".row-lines")).toHaveText(/^\+\d+ lines$/);
+  const previewLength = await liveRows.filter({ hasText: "wide-start" }).locator(".row-text")
+    .evaluate((element) => element.textContent?.length ?? 0);
+  expect(previewLength).toBeGreaterThan(1_000);
+  expect(previewLength).toBeLessThanOrEqual(8_192);
+  for (const density of ["compact", "comfortable"] as const) {
+    await setDensity(page, density);
+    for (const width of [1280, 390]) {
+      await page.setViewportSize({ width, height: 844 });
+      expect(await sidewaysOverflow(), `Live ${density} ${width}px`).toBeLessThanOrEqual(0);
+      for (const row of await liveRows.all()) {
+        expect((await row.boundingBox())!.height).toBeLessThan(width < 600 ? 160 : 80);
+      }
+    }
+  }
+  // The detail fetches the complete stored event, not the preview.
+  const liveWide = liveRows.filter({ hasText: "wide-start" });
+  await liveWide.locator(".event-toggle").click();
+  await expect(liveWide.locator(".event-detail")).toContainText("wide-end");
+  expect(await sidewaysOverflow()).toBeLessThanOrEqual(0);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await setDensity(page, "compact");
+});
+
+// htmx keeps no history snapshots (historyCacheSize = 0, with
+// refreshOnHistoryMiss), so every Back and Forward over swapped filter
+// states loads that URL from the server and lands on exactly that state.
+test("Back and Forward restore each swapped History state from the server", async ({ page }) => {
+  await login(page);
+  let reloads = 0;
+  page.on("request", (request) => {
+    if (request.isNavigationRequest() && new URL(request.url()).pathname === "/logs") reloads += 1;
+  });
+  const contains = () => new URL(page.url()).searchParams.get("contains");
+  const levels = () => new URL(page.url()).searchParams.get("levels");
+  const rows = page.locator("#history-rows > .log-row");
+  const field = page.locator("#contains-filter");
+  const allLevels = "trace,debug,info,warn,error,fatal,unknown";
+  const expectState = async (text: string, count: number, levelValue: string) => {
+    await expect.poll(contains).toBe(text);
+    await expect.poll(levels).toBe(levelValue);
+    await expect(field).toHaveValue(text);
+    await expect(rows).toHaveCount(count);
+    for (const message of await rows.locator(".row-text").allTextContents()) {
+      expect(message).toContain(text);
+    }
+  };
+
+  await field.fill("ordinary browser event 01");
+  await expectState("ordinary browser event 01", 10, allLevels);
+  await field.fill("ordinary browser event 02");
+  await expectState("ordinary browser event 02", 10, allLevels);
+  await page.getByRole("button", { name: "Errors" }).click();
+  await expectState("ordinary browser event 02", 3, "error,fatal");
+  // Loading a row's details is not a history entry.
+  await rows.first().locator(".event-toggle").click();
+  await expect(rows.first().locator(".event-detail")).toBeVisible();
+
+  reloads = 0;
+  await page.goBack();
+  await expectState("ordinary browser event 02", 10, allLevels);
+  await page.goBack();
+  await expectState("ordinary browser event 01", 10, allLevels);
+  await page.goForward();
+  await expectState("ordinary browser event 02", 10, allLevels);
+  await page.goForward();
+  await expectState("ordinary browser event 02", 3, "error,fatal");
+  await expect(rows.first().locator(".event-detail")).toHaveCount(0);
+  expect(reloads).toBe(4);
+});
+
+test("a tampered or foreign History cursor fails closed with an explained error", async ({ page }) => {
+  await login(page);
+  const olderURL = await page.locator("#load-older").getAttribute("hx-get");
+  const cursor = new URL(olderURL ?? "", page.url()).searchParams.get("cursor");
+  expect(cursor).toBeTruthy();
+  const start = new URL(page.url());
+
+  // The genuine cursor on its own filters is the next page.
+  const valid = new URL(start);
+  valid.searchParams.set("cursor", cursor!);
+  let response = await page.goto(valid.toString());
+  expect(response?.status()).toBe(200);
+  await expect(page.locator("#history-rows > .log-row").first()).toBeVisible();
+
+  const failure = page.locator("#history-region").getByRole("alert");
+  for (const [label, mutate] of [
+    ["tampered", (url: URL) => url.searchParams.set("cursor", "tampered")],
+    ["foreign filters", (url: URL) => {
+      url.searchParams.set("cursor", cursor!);
+      url.searchParams.set("contains", "ordinary");
+    }],
+    ["foreign direction", (url: URL) => {
+      url.searchParams.set("cursor", cursor!);
+      url.searchParams.set("direction", "newer");
+    }],
+  ] as const) {
+    const url = new URL(start);
+    mutate(url);
+    response = await page.goto(url.toString());
+    expect(response?.status(), label).toBe(400);
+    await expect(failure, label).toContainText("The page cursor is invalid for these filters.");
+    await expect(page.locator(".log-row"), label).toHaveCount(0);
+    // The shell still works: the History mode link starts over.
+    await expect(page.locator(".mode-switch").getByRole("link", { name: "History" })).toBeVisible();
+  }
+  await page.locator(".mode-switch").getByRole("link", { name: "History" }).click();
+  await expect(page.locator("#history-rows > .log-row").first()).toBeVisible();
+});
+
+test("dialogs and the flash expose stable accessibility trees", async ({ page }) => {
+  await login(page);
+  await page.getByRole("link", { name: "Export results" }).click();
+  const exportDialog = page.getByRole("dialog", { name: "Export results" });
+  await expect(exportDialog).toMatchAriaSnapshot(`
+    - dialog "Export results":
+      - heading "Export results" [level=2]
+      - paragraph: /every event that matches these filters/
+      - term: Source scope
+      - definition: All sources
+      - term: Time range
+      - definition:
+        - time: /\\d{2} \\w{3} \\d{4} \\d{2}:\\d{2}:\\d{2} UTC/
+        - text: to
+        - time: /\\d{2} \\w{3} \\d{4} \\d{2}:\\d{2}:\\d{2} UTC/
+      - term: Additional filters
+      - definition: None
+      - combobox "Format":
+        - option "Text (siftail-text-v1, .txt)" [selected]
+        - option "NDJSON (schema 1, .ndjson)"
+      - paragraph: /Limited to 100,000 events/
+      - checkbox "Export every matching event, not only the rows loaded on this page."
+      - button "Download"
+      - link "Cancel"
+  `);
+  await exportDialog.getByRole("link", { name: "Cancel" }).click();
+
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  await page.keyboard.press("?");
+  await expect(page.getByRole("dialog", { name: "Keyboard shortcuts" })).toMatchAriaSnapshot(`
+    - dialog "Keyboard shortcuts":
+      - heading "Keyboard shortcuts" [level=2]
+      - button "Close"
+      - region "Global shortcuts":
+        - heading "Everywhere" [level=3]
+        - term: Ctrl K
+        - definition: /Open the command palette/
+        - term: "?"
+        - definition: /Open this help/
+        - term: Esc
+        - definition: /Close the open overlay/
+      - region "Logs shortcuts":
+        - heading "Logs workspace" [level=3]
+        - term: F
+        - term: H
+        - term: L
+        - term: J / K
+        - term: Enter
+        - term: Space
+        - term: G
+      - paragraph: Every shortcut has a visible control that does the same thing.
+  `);
+  await page.keyboard.press("Escape");
+
+  await page.goto("/settings");
+  await page.locator("[data-palette-open]").click();
+  await expect(page.getByRole("dialog", { name: "Command palette" })).toMatchAriaSnapshot(`
+    - dialog "Command palette":
+      - heading "Command palette" [level=2]
+      - combobox "Search pages, sources, and actions" [expanded]
+      - listbox "Matching commands":
+        - option "Go to Logs" [selected]
+        - option "Go to Sources"
+        - option "Go to Servers"
+        - option "Go to Status"
+        - option "Go to Settings"
+        - option "Go to Audit"
+        - option "Go to Backup"
+  `);
+  await page.keyboard.press("Escape");
+
+  // The flash is plain visible text; the shell's one announcer speaks it.
+  await page.getByRole("button", { name: "Save changes" }).click();
+  await expect(page.locator("[data-flash]")).toMatchAriaSnapshot(`
+    - paragraph: Retention settings saved.
+  `);
+  await expect(page.locator("[data-announcer]")).toMatchAriaSnapshot(`
+    - status: Retention settings saved.
+  `);
+});
+
+// Tab walks the page in visual order, every stop shows a focus indicator,
+// a log list is one stop however many rows it holds, and the skip link
+// moves past the header.
+test("Tab order follows the visual order with a visible focus indicator", async ({ page }) => {
+  await login(page);
+  type Stop = { key: string; indicator: boolean; native: boolean };
+  const walk = async (limit: number): Promise<Stop[]> => {
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    const stops: Stop[] = [];
+    for (let index = 0; index < limit; index += 1) {
+      await page.keyboard.press("Tab");
+      const stop = await page.evaluate(() => {
+        const element = document.activeElement as HTMLElement;
+        if (element === document.body) return null;
+        const style = getComputedStyle(element);
+        const name = (element.getAttribute("aria-label") ?? element.textContent ?? "")
+          .replace(/\s+/g, " ").trim();
+        let key = element.id ? `#${element.id}` : name;
+        if (element.getAttribute("role") === "listitem") key = "row";
+        if (element.matches(".skip-link")) key = "skip";
+        return {
+          key,
+          indicator: style.outlineStyle !== "none" && parseFloat(style.outlineWidth) >= 2,
+          // Chromium focuses the date-time picker button inside the
+          // native control's shadow tree; its ring is the browser's.
+          native: element.matches("input[type='datetime-local']"),
+        };
+      });
+      if (!stop) break;
+      if (stop.key === "skip" && stops.length > 0) break;
+      stops.push(stop);
+    }
+    return stops;
+  };
+  const expectInOrder = (stops: Stop[], expected: string[]) => {
+    const keys = stops.map((stop) => stop.key);
+    let position = -1;
+    for (const want of expected) {
+      const next = keys.findIndex((key, index) => index > position &&
+        (key === want || key.startsWith(want)));
+      expect(next, `${want} after ${keys[position] ?? "start"} in ${keys.join(" | ")}`)
+        .toBeGreaterThan(position);
+      position = next;
+    }
+  };
+
+  const history = await walk(120);
+  expectInOrder(history, [
+    "skip", "Logs", "Sources", "Servers", "System health", "Ctrl K", "System",
+    "History", "Live", "Filters", "#server-filter", "#project-filter",
+    "#environment-filter", "#application-filter", "#service-filter",
+    "15m", "1h", "6h", "24h", "7d", "Custom", "Errors", "Problems", "All",
+    "#level-trace", "#level-unknown", "#stream-stdout", "#stream-unknown",
+    "#contains-filter", "#excludes-filter", "More filters", "Apply filters",
+    "Wrap", "#history-export-open", "#load-newer", "Go live", "row", "#load-older",
+  ]);
+  expect(history.filter((stop) => stop.key === "row")).toHaveLength(1);
+  expect(history.filter((stop) => !stop.indicator && !stop.native).map((stop) => stop.key))
+    .toEqual([]);
+
+  // The skip link lands in main, so the next Tab is the first control there.
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  await page.keyboard.press("Tab");
+  await expect(page.getByRole("link", { name: "Skip to main content" })).toBeFocused();
+  await page.keyboard.press("Enter");
+  await page.keyboard.press("Tab");
+  expect(await page.evaluate(() => document.activeElement?.closest("main") !== null)).toBe(true);
+  await expect(page.locator(".mode-switch").getByRole("link", { name: "History" })).toBeFocused();
+
+  await page.locator(".mode-switch").getByRole("link", { name: "Live" }).click();
+  await expect(page.locator("[data-live-status]")).toHaveText("Live");
+  await ingestLive(["tab-order-one", "tab-order-two"]);
+  await expect(page.locator("#live-rows > .log-row")).toHaveCount(2);
+  const live = await walk(80);
+  expectInOrder(live, [
+    "skip", "Logs", "System", "History", "Live", "Filters", "#live-server-filter",
+    "#live-service-filter", "Errors", "#live-contains-filter", "Apply filters",
+    "Pause", "Jump to newest", "Clear view", "row", "Wrap",
+  ]);
+  expect(live.filter((stop) => stop.key === "row")).toHaveLength(1);
+  expect(live.filter((stop) => !stop.indicator && !stop.native).map((stop) => stop.key))
+    .toEqual([]);
+
+  // A form page: header, then the form fields in order, then its action.
+  await navigateSystem(page, "Settings");
+  const settings = await walk(60);
+  expectInOrder(settings, ["skip", "Logs", "System", "Save changes"]);
+  expect(settings.filter((stop) => !stop.indicator && !stop.native).map((stop) => stop.key))
+    .toEqual([]);
+});
+
+// WCAG 1.4.10: at 320 CSS px (400% zoom of 1280, and stricter than 200%)
+// no page, menu, or overlay scrolls sideways.
+test("every page, menu, and overlay reflows at 320 px without sideways scrolling", async ({
+  page,
+}) => {
+  test.setTimeout(60_000);
+  const sideways = (label: string) => page.evaluate(
+    () => document.documentElement.scrollWidth - window.innerWidth,
+  ).then((overflow) => expect(overflow, label).toBeLessThanOrEqual(0));
+  await page.setViewportSize({ width: 320, height: 640 });
+  await page.goto("/login");
+  await sideways("login");
+  // Every page below also lists an operator-supplied name with no break
+  // opportunity, which must wrap rather than widen the page.
+  const longName = `reflow-${"unbroken".repeat(12)}`;
+  await ingestSource(["reflow-320 long name"], longName, "web", "reflow-container", "reflow-1");
+  await login(page);
+  await sideways("History");
+  await page.locator(".event-toggle").first().click();
+  await expect(page.locator(".event-detail").first()).toBeVisible();
+  await sideways("History detail");
+  await openSystemMenu(page);
+  await sideways("System menu");
+  await closeSystemMenu(page);
+  await page.getByRole("link", { name: "Export results" }).click();
+  await expect(page.getByRole("dialog", { name: "Export results" })).toBeVisible();
+  await sideways("export dialog");
+  await page.getByRole("dialog", { name: "Export results" }).getByRole("link", { name: "Cancel" }).click();
+  await page.locator("[data-palette-open]").click();
+  await expect(page.getByRole("dialog", { name: "Command palette" })).toBeVisible();
+  await sideways("palette");
+  await page.keyboard.press("Escape");
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  await page.keyboard.press("?");
+  await expect(page.getByRole("dialog", { name: "Keyboard shortcuts" })).toBeVisible();
+  await sideways("help");
+  await page.keyboard.press("Escape");
+
+  for (const route of [
+    "/logs?mode=live", "/servers", "/servers/1", "/sources", "/status",
+    "/settings", "/backup", "/audit",
+  ]) {
+    const response = await page.goto(route);
+    expect(response?.status(), route).toBe(200);
+    await sideways(route);
+  }
+  await page.goto("/sources");
+  await sideways("sources with a long name");
+  await page.locator("main a[href^='/sources/']", { hasText: longName }).first().click();
+  await expect(page).toHaveURL(/\/sources\/\d+/);
+  await expect(page.getByRole("heading", { level: 1 })).toContainText(longName);
+  await sideways("source detail with a long name");
+  await page.goto("/logs?mode=live");
+  await expect(page.locator("[data-live-status]")).toHaveText("Live");
+  await ingestLive(["reflow-320 live row"]);
+  await expect(page.locator("#live-rows > .log-row").last()).toContainText("reflow-320");
+  await sideways("Live with rows");
+  await page.screenshot({ path: ".playwright-artifacts/reflow-320-live.png" });
+});
 
 test("login failures are uniform and throttle the fifth attempt", async ({ page }) => {
   const fail = async (username: string) => {

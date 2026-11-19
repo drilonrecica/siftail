@@ -608,7 +608,8 @@ type AuditRowView struct {
 
 // severityCodes maps canonical levels to the fixed-width three-letter codes
 // every log surface renders (DESIGN.md §12.3). live.js carries the same map
-// for browser-built rows; a test asserts the two stay identical.
+// for browser-built rows; a browser test renders every level in both modes
+// and asserts the codes and toggle names match.
 var severityCodes = map[string]string{
 	"trace":   "TRC",
 	"debug":   "DBG",

@@ -122,8 +122,8 @@
     return allowed.has(value) ? value : "unknown";
   };
 
-  // Mirrors severityCodes in internal/web/ui/ui.go (DESIGN.md §12.3); a Go
-  // test asserts the two maps stay identical.
+  // Mirrors severityCodes in internal/web/ui/ui.go (DESIGN.md §12.3); a
+  // browser test renders every level in History and Live and compares them.
   const severityCodes = {
     trace: "TRC",
     debug: "DBG",
