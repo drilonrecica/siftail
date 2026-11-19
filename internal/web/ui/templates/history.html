@@ -24,7 +24,7 @@
     <fieldset id="history-source-filters" class="filter-group source-filters">{{template "history-source-fields" .}}</fieldset>
     <fieldset class="filter-group time-filters">
       <legend>Time range</legend>
-      <div id="history-presets" class="preset-links" aria-label="Quick time ranges">{{template "history-preset-links" .}}</div>
+      <div id="history-presets" class="preset-links" role="group" aria-label="Quick time ranges">{{template "history-preset-links" .}}</div>
       {{/* Without JavaScript these are UTC text fields labelled UTC. app.js
            replaces each with a picker in the display zone and relabels it
            (DESIGN.md §10.2); the URL always carries UTC. */}}
@@ -38,7 +38,7 @@
     </fieldset>
     <fieldset class="filter-group choice-filters">
       <legend>Levels</legend>
-      <div class="filter-shortcuts" aria-label="Level shortcuts">
+      <div class="filter-shortcuts" role="group" aria-label="Level shortcuts">
         <button type="button" data-choice-preset="levels" data-values="error,fatal">Errors</button>
         <button type="button" data-choice-preset="levels" data-values="warn,error,fatal">Problems</button>
         <button type="button" data-choice-preset="levels" data-values="*">All</button>

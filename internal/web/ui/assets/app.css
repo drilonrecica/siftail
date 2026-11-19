@@ -41,6 +41,7 @@ a:hover {
 }
 
 button,
+.button,
 input,
 select {
   min-height: 2.5rem;
@@ -71,6 +72,18 @@ button,
   padding: var(--space-2) var(--space-4);
   cursor: pointer;
   font-weight: 600;
+}
+
+/* A link styled as a button looks like the button it stands in for: the
+   shared border and surface from the control rule above, no underline, and
+   no link colour on hover (audit UX-09). */
+.button {
+  color: var(--text-primary);
+  text-decoration: none;
+}
+
+.button:hover {
+  color: var(--text-primary);
 }
 
 :focus-visible {
@@ -191,6 +204,7 @@ button,
 
 .button-primary:hover {
   background: var(--accent-hover);
+  color: var(--text-inverse);
 }
 
 /* Destructive actions read as destructive: filled, visually heavier than
@@ -203,6 +217,7 @@ button,
 
 .button-danger:hover {
   background: color-mix(in srgb, var(--status-error) 84%, var(--text-inverse));
+  color: var(--text-inverse);
 }
 
 .button-quiet {
@@ -263,7 +278,7 @@ button,
 }
 
 code {
-  font-family: ui-monospace, "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-family: var(--font-mono);
   overflow-wrap: anywhere;
 }
 
@@ -836,6 +851,9 @@ code {
 .filter-group {
   display: grid;
   min-width: 0;
+  /* Rows keep their natural height when a neighbouring group in the filter
+     grid is taller; controls never stretch (audit UX-18). */
+  align-content: start;
   margin: 0;
   padding: var(--space-3);
   gap: var(--space-2);
@@ -853,6 +871,7 @@ code {
 .filter-group label {
   display: grid;
   min-width: 0;
+  align-content: start;
   gap: var(--space-1);
   color: var(--text-secondary);
   font-size: 0.8rem;
@@ -1401,10 +1420,15 @@ code {
   min-width: 0;
 }
 
-.log-row time,
+/* Row metadata stays readable on the hover and selected surfaces
+   (DESIGN.md §12.5). */
+.log-row time {
+  color: var(--text-muted);
+}
+
 .row-source,
 .row-stream {
-  color: var(--text-muted);
+  color: var(--text-secondary);
 }
 
 .row-source,
@@ -1896,7 +1920,8 @@ kbd {
   gap: var(--space-3);
 }
 
-.source-action-form label {
+.source-action-form label,
+.inline-confirmation label {
   display: grid;
   gap: var(--space-1);
   font-weight: 600;
@@ -1954,10 +1979,6 @@ kbd {
   gap: var(--space-2);
 }
 
-.inline-confirmation label {
-  display: grid;
-  gap: var(--space-1);
-}
 
 .one-time-token-content {
   display: grid;
@@ -1992,7 +2013,7 @@ kbd {
 }
 
 .token-secret-control input {
-  font-family: ui-monospace, "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-family: var(--font-mono);
 }
 
 .ingestion-guide {

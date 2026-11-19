@@ -7,7 +7,7 @@
     <p>{{.Error}}</p>
     {{if .ErrorRequestID}}<p>Request ID: <code>{{.ErrorRequestID}}</code></p>{{end}}
   </div>{{else}}
-  <div class="status-summary" aria-label="Current severity">
+  <div class="status-summary" role="group" aria-label="Current severity">
     <span class="status-indicator" data-severity="{{.Severity}}">{{.Severity}}</span>
     <span>UI {{.UIReady}} · Ingestion {{.IngestionReady}}</span>
   </div>

@@ -1218,7 +1218,7 @@ in the same change.
 | `--surface-selected` | `#26304B` | `#E1E5F7` |
 | `--text-primary` | `#E9EDF5` | `#1B202B` |
 | `--text-secondary` | `#B4BDCD` | `#444C5E` |
-| `--text-muted` | `#808B9D` | `#5F6879` |
+| `--text-muted` | `#8E99AB` | `#596273` |
 | `--text-inverse` | `#0D1017` | `#F5F7FC` |
 | `--border-subtle` | `#262E3E` | `#D6DAE5` |
 | `--border-strong` | `#5A6A86` | `#79849B` |
@@ -1226,9 +1226,9 @@ in the same change.
 | `--accent-hover` | `#A2ACF2` | `#3945B0` |
 | `--status-info` | `#85A9D6` | `#33608F` |
 | `--status-warning` | `#E2A93F` | `#8F5B00` |
-| `--status-error` | `#EE7B74` | `#BC3A31` |
+| `--status-error` | `#EE7B74` | `#B3352C` |
 | `--status-fatal` | `#FF6B63` | `#8F1D25` |
-| `--status-success` | `#6FC08D` | `#1F7A48` |
+| `--status-success` | `#6FC08D` | `#1A7041` |
 | `--mark-bg` | `#4A4420` | `#F5E7A3` |
 | `--focus-ring` | `#ADB7FF` | `#4653C8` |
 
@@ -1236,9 +1236,28 @@ Values amended by ADR 0011: `--border-strong` (non-text contrast ≥ 3:1 on
 base and raised surfaces in both themes: 3.43/3.19 dark, 3.42/3.66 light),
 `--status-fatal` dark (deeper and more saturated than error: 6.73:1 on base,
 4.69:1 on selected), and the new `--mark-bg` (match highlight; the row's text
-colour inherits at 8.4:1 dark and 13.1:1 light). `--text-muted` is used only
-on base and raised surfaces, never inside rows with hover or selected states
-(§12.5).
+colour inherits at 8.4:1 dark and 13.1:1 light). `--status-fatal` dark and
+`--mark-bg` land with the severity signature and match highlight (SFT-121).
+
+Values verified by SFT-120, whose test (`internal/web/ui/contrast_test.go`)
+computes every ratio from `tokens.css` in both themes:
+
+- every text token (`--text-primary`, `--text-secondary`, `--text-muted`,
+  `--accent`, `--accent-hover`, and the five status tokens) is at least
+  4.5:1 on all five surfaces, including `--surface-hover` and
+  `--surface-selected`. The tightest pairs are `--text-muted` on selected
+  (4.54:1 dark, 4.90:1 light; it was 3.79/4.48), `--status-error` on
+  selected (4.81:1 dark, 4.84:1 light; light was 4.42) and
+  `--status-success` on selected (light 4.87:1; it was 4.26);
+- `--border-strong` is 3.43:1 on base and 3.19:1 on raised in dark, 3.42:1
+  and 3.66:1 in light (it was about 2:1);
+- `--focus-ring` is at least 3:1 on every surface; `--text-inverse` is at
+  least 4.5:1 on the accent, accent-hover, error, and fatal fills, and those
+  fills are at least 3:1 on the base surface.
+
+Row metadata still prefers `--text-secondary` for source and stream (§12.5);
+`--text-muted` (timestamps, TRC and DBG codes) now passes on hover and
+selected rows as well.
 
 ### 27.4 Color rules
 

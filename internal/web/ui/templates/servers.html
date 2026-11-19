@@ -7,7 +7,7 @@
   <div class="server-management-grid">
     <section>
       <h3>Configured Servers</h3>
-      {{if .Rows}}<div class="source-table-scroll" tabindex="0" aria-label="Server table">
+      {{if .Rows}}<div class="source-table-scroll" tabindex="0" role="region" aria-label="Server table">
         <table class="source-table"><thead><tr><th scope="col">Server</th><th scope="col">Sources</th><th scope="col">Active tokens</th><th scope="col">Last event</th></tr></thead>
         <tbody>{{range .Rows}}<tr>
           <th scope="row"><a href="{{.DetailURL}}">{{.Name}}</a>{{if .Hostname}}<span class="source-path">{{.Hostname}}</span>{{end}}</th>
@@ -40,13 +40,13 @@
     <section>
       <h3>Ingestion tokens</h3>
       <p>Token plaintext is never stored and cannot be shown again.</p>
-      {{if .Tokens}}<div class="source-table-scroll" tabindex="0" aria-label="Ingestion token table">
+      {{if .Tokens}}<div class="source-table-scroll" tabindex="0" role="region" aria-label="Ingestion token table">
         <table class="source-table"><thead><tr><th scope="col">Token</th><th scope="col">Fingerprint</th><th scope="col">Created</th><th scope="col">Last used</th><th scope="col">State</th><th scope="col">Action</th></tr></thead>
         <tbody>{{range .Tokens}}<tr>
           <th scope="row">{{.Name}}</th><td><code>{{.Fingerprint}}</code></td><td>{{.Created}}</td><td>{{.LastUsed}}</td>
           <td>{{if .Active}}Active{{else}}Revoked {{.Revoked}}{{end}}</td>
           <td>{{if .Active}}<form method="post" action="/tokens/{{.ID}}/revoke" class="inline-confirmation">
-            <label>Type <strong>{{.Name}}</strong> to revoke<input name="confirmation" autocomplete="off"></label>
+            <label><span>Type <strong>{{.Name}}</strong> to revoke</span><input name="confirmation" autocomplete="off"></label>
             <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
             <button class="button button-danger" type="submit">Revoke</button>
           </form>{{else}}—{{end}}</td>

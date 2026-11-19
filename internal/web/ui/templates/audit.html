@@ -30,7 +30,7 @@
   </form>
 
   <p class="audit-retention-notice">Security audit events are retained separately from application logs.</p>
-  {{if .Rows}}<div class="audit-table-scroll" tabindex="0" aria-label="Security audit event table">
+  {{if .Rows}}<div class="audit-table-scroll" tabindex="0" role="region" aria-label="Security audit event table">
     <table class="audit-table">
       <thead><tr>
         <th scope="col">Time ({{.Zone}})</th><th scope="col">Action</th>

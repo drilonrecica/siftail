@@ -76,16 +76,16 @@
   --text-primary: light-dark(#1b202b, #e9edf5);
   --text-secondary: #b4bdcd;
   --text-secondary: light-dark(#444c5e, #b4bdcd);
-  --text-muted: #808b9d;
-  --text-muted: light-dark(#5f6879, #808b9d);
+  --text-muted: #8e99ab;
+  --text-muted: light-dark(#596273, #8e99ab);
   --text-inverse: #0d1017;
   --text-inverse: light-dark(#f5f7fc, #0d1017);
 
   /* Borders */
   --border-subtle: #262e3e;
   --border-subtle: light-dark(#d6dae5, #262e3e);
-  --border-strong: #3e4a61;
-  --border-strong: light-dark(#a7afc2, #3e4a61);
+  --border-strong: #5a6a86;
+  --border-strong: light-dark(#79849b, #5a6a86);
 
   /* Accent — the only brand hue; never used for status or severity */
   --accent: #8b96ec;
@@ -99,11 +99,11 @@
   --status-warning: #e2a93f;
   --status-warning: light-dark(#8f5b00, #e2a93f);
   --status-error: #ee7b74;
-  --status-error: light-dark(#bc3a31, #ee7b74);
+  --status-error: light-dark(#b3352c, #ee7b74);
   --status-fatal: #f79a94;
   --status-fatal: light-dark(#8f1d25, #f79a94);
   --status-success: #6fc08d;
-  --status-success: light-dark(#1f7a48, #6fc08d);
+  --status-success: light-dark(#1a7041, #6fc08d);
 
   --focus-ring: #adb7ff;
   --focus-ring: light-dark(#4653c8, #adb7ff);

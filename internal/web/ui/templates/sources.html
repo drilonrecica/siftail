@@ -13,7 +13,7 @@
     {{if .ErrorRequestID}}<span>Request ID: <code>{{.ErrorRequestID}}</code></span>{{end}}
   </div>
   {{else if .Rows}}
-  <div class="source-table-scroll" tabindex="0" aria-label="Source catalog table">
+  <div class="source-table-scroll" tabindex="0" role="region" aria-label="Source catalog table">
     <table class="source-table">
       <thead><tr>
         <th scope="col">Source</th>
@@ -103,7 +103,7 @@
     <h3>Container observations</h3>
     <p>Containers are ephemeral observations of this stable source, not separate sources.</p>
     {{if .Containers}}
-    <div class="source-table-scroll" tabindex="0" aria-label="Container observation table">
+    <div class="source-table-scroll" tabindex="0" role="region" aria-label="Container observation table">
       <table class="source-table">
         <thead><tr><th scope="col">Container</th><th scope="col">State</th><th scope="col">First seen</th><th scope="col">Last seen</th></tr></thead>
         <tbody>{{range .Containers}}<tr>
@@ -123,7 +123,7 @@
         <h4>Clear logs</h4>
         <p>Delete retained application logs for <strong>{{.DisplayName}}</strong> while keeping the source, alias, and container observations.</p>
         <p>This is not secure forensic erasure.</p>
-        <label for="clear-confirmation">Type <strong>{{.DisplayName}}</strong> to confirm
+        <label for="clear-confirmation"><span>Type <strong>{{.DisplayName}}</strong> to confirm</span>
           <input id="clear-confirmation" name="confirmation" autocomplete="off"{{if .ClearError}} aria-describedby="clear-error" autofocus{{end}}>
         </label>
         {{if .ClearError}}<p id="clear-error" class="form-error" role="alert">{{.ClearError}}</p>{{end}}
@@ -134,7 +134,7 @@
         <h4>Remove source</h4>
         <p>Delete retained logs, aliases, unreferenced container history, and removable metadata for <strong>{{.DisplayName}}</strong>.</p>
         <p>Events committed after deletion starts remain, and an active sender may discover this source again. This is not secure forensic erasure.</p>
-        <label for="remove-confirmation">Type <strong>remove {{.DisplayName}}</strong> to confirm
+        <label for="remove-confirmation"><span>Type <strong>remove {{.DisplayName}}</strong> to confirm</span>
           <input id="remove-confirmation" name="confirmation" autocomplete="off"{{if .RemoveError}} aria-describedby="remove-error" autofocus{{end}}>
         </label>
         {{if .RemoveError}}<p id="remove-error" class="form-error" role="alert">{{.RemoveError}}</p>{{end}}
