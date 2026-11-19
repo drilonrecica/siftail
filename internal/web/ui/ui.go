@@ -713,16 +713,6 @@ func RowToggleLabel(level, source, message string) string {
 	return "Details: " + SeverityCode(level) + " " + source + ", " + prefix
 }
 
-// PaginationView renders the shared bidirectional pagination component.
-type PaginationView struct {
-	PrevURL   string
-	PrevLabel string
-	NextURL   string
-	NextLabel string
-	EndLabel  string
-	Target    string
-}
-
 // ActionLink is a labeled navigation action, used by empty states.
 type ActionLink struct {
 	Label string

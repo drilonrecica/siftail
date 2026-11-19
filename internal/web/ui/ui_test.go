@@ -696,20 +696,6 @@ func TestSharedComponentPartials(t *testing.T) {
 		strings.Contains(body, "<script>") {
 		t.Fatalf("empty-state partial = %q", body)
 	}
-
-	pagination := &bytes.Buffer{}
-	if err := renderer.templates.ExecuteTemplate(pagination, "pagination.html", PaginationView{
-		PrevURL: "/logs/rows?newer=1", PrevLabel: "Load newer",
-		NextURL: "/logs/rows?older=1", NextLabel: "Load older",
-		Target: "#history-region",
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(pagination.String(), "Load newer") ||
-		!strings.Contains(pagination.String(), "Load older") ||
-		!strings.Contains(pagination.String(), `aria-label="Pagination"`) {
-		t.Fatalf("pagination partial = %q", pagination.String())
-	}
 }
 
 func TestRowToggleLabelNamesRowsFromContent(t *testing.T) {

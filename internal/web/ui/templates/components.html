@@ -20,16 +20,3 @@
     {{range .Actions}}<a class="button" href="{{.URL}}">{{.Label}}</a>
     {{end}}</div>{{end}}
 </div>{{end}}
-
-{{define "pagination.html"}}<nav class="pagination" aria-label="Pagination">
-  {{if .PrevURL}}<button class="button button-quiet" type="button"
-    hx-get="{{.PrevURL}}" hx-target="{{.Target}}" hx-swap="none"
-    hx-disabled-elt="this">
-    {{.PrevLabel}}<span class="htmx-indicator"> Loading…</span>
-  </button>{{end}}
-  {{if .NextURL}}<button class="button button-quiet" type="button"
-    hx-get="{{.NextURL}}" hx-target="{{.Target}}" hx-swap="none"
-    hx-disabled-elt="this">
-    {{.NextLabel}}<span class="htmx-indicator"> Loading…</span>
-  </button>{{else if .EndLabel}}<p class="pagination-end">{{.EndLabel}}</p>{{end}}
-</nav>{{end}}

@@ -26,7 +26,12 @@ Allowed task statuses:
 - `Ready`: dependencies are complete and implementation may begin;
 - `In Progress`: actively being implemented;
 - `Blocked`: cannot progress and names the concrete blocker;
-- `Done`: acceptance criteria and required verification are complete.
+- `Done`: acceptance criteria and required verification are complete;
+- `Accepted with exceptions`: the outcome is delivered but named acceptance
+  items were not performed or not met. Every exception must be listed in the
+  task's record with the task, issue, or release gate that tracks it; a task
+  without named, tracked exceptions is not `Done` and cannot use this status.
+  When the last tracked exception closes, change the status to `Done`.
 
 Update the relevant milestone file in the implementation change. Add the issue
 or PR link, or record `direct maintainer implementation` (or `direct maintainer
@@ -46,7 +51,7 @@ task does not tag, publish, or otherwise release a version.
 | `0.4.0` | SFT-038–SFT-049 | Implementation gate complete | Unreleased | [`docs/tasks/0.4.0.md`](docs/tasks/0.4.0.md) |
 | `0.5.0` | SFT-050–SFT-058, SFT-127–SFT-128 | In progress; SFT-050/051 Done; SFT-052 waits on the hardening gates below; SFT-056 waits on the human checks SFT-127/128 | Unreleased | [`docs/tasks/0.5.0.md`](docs/tasks/0.5.0.md) |
 | `0.5.0` hardening | SFT-082–SFT-126 | Planned; remediates the [2026-11-04 audit](docs/audit/2026-11-04-full-audit.md) in phases H0–H3 before the public release | Unreleased | [`docs/tasks/0.5.0-hardening.md`](docs/tasks/0.5.0-hardening.md) |
-| `0.6.0` | SFT-064–SFT-081 | Redesign complete (SFT-064–079 Done); SFT-080/081 Planned follow-ups | Unreleased | [`docs/tasks/0.6.0.md`](docs/tasks/0.6.0.md) |
+| `0.6.0` | SFT-064–SFT-081 | Redesign complete (SFT-064–079 Done or Accepted with exceptions; SFT-068 and SFT-079 are the latter); SFT-080/081 Planned follow-ups | Unreleased | [`docs/tasks/0.6.0.md`](docs/tasks/0.6.0.md) |
 | `1.0.0` | SFT-059–SFT-063 | Planned evidence gates | Unreleased | [`docs/tasks/1.0.0.md`](docs/tasks/1.0.0.md) |
 
 **Next implementable task:** SFT-082 — Make the test suite deterministic (phase
