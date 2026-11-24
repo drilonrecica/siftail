@@ -115,16 +115,37 @@ rename, or begins matching prefix/suffix application names.
 
 ## Forward input binding
 
-Both generated templates and fixtures declare `Listen 127.0.0.1` on the
-Forward input. Forward is unauthenticated by default: a listener reachable
-from the network lets any client inject records that Fluent Bit forwards to
-Siftail carrying the server's valid ingestion token. Coolify's own log-drain
-wiring targets `127.0.0.1:24224`, so loopback is correct for Coolify.
+Forward is unauthenticated by default: a listener reachable from the network
+lets any client inject records that Fluent Bit forwards to Siftail carrying
+the server's valid ingestion token. The exposure boundary differs between the
+two shapes.
 
-A non-loopback listener is required only when Docker log drivers or other
-senders live on a different host or network namespace from Fluent Bit (for
-example a separate Fluent Bit container reached over a bridge network).
-In that case:
+**Generic** template and fixture: `Listen 127.0.0.1`. Fluent Bit runs in the
+same network namespace as its senders (on the host), so loopback is enough.
+
+**Coolify** template and fixture: `Listen 0.0.0.0` *inside the log-drain
+container*. Coolify `v4.1.1`'s `StartLogDrain.php` runs
+`coolify-log-drain` on Docker's default bridge network with
+`ports: 127.0.0.1:24224:24224`, and every drained resource's Fluentd driver
+targets `tcp://127.0.0.1:24224` on the host. Docker delivers a published port
+to the container's bridge address, never to the container's own loopback, so
+a container-loopback listener would refuse every delivery. Because Coolify
+also sets `fluentd-async: true`, that failure is silent: applications keep
+running and their lines are dropped. The boundary is the host-side
+`127.0.0.1` publication, which Coolify owns. The residual exposure is other
+containers attached to Docker's default `bridge` network, which can reach the
+drain container's bridge address directly; Coolify-managed resources use
+their own networks. SFT-109 had moved the Coolify template to
+`127.0.0.1`; SFT-052 restored the container-wide listener for Coolify only
+(see `docs/unattended-decisions.md`).
+
+Docker's Fluentd logging driver cannot send a `Shared_Key`, so the Coolify
+shape cannot add sender authentication. Do not publish port 24224 beyond host
+loopback.
+
+A non-loopback listener for a generic Fluent Bit is required only when
+senders live on a different host or network namespace (for example a separate
+Fluent Bit container reached over a bridge network). In that case:
 
 - bind to the specific interface address, never `0.0.0.0`, where possible;
 - set `Shared_Key` (and `Self_Hostname`) on the Forward input and the same

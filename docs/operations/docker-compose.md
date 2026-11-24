@@ -414,6 +414,7 @@ and attach that file to the container. Deployment-only controls therefore use
 the `COMPOSE_SIFTAIL_` prefix; do not rename them into the application-reserved
 `SIFTAIL_` namespace.
 
-This file does not replace the SFT-052 manual Coolify guide. A one-click
-template, complete drain installation procedure, supported-version walkthrough,
-and Coolify teardown evidence remain separate work.
+The complete Coolify procedure (domains, administrator setup over SSH, drain
+installation, ingestion proof, recursive-loop diagnosis, upgrade, rollback,
+and teardown) is in [`coolify.md`](coolify.md). A one-click template remains
+separate work.

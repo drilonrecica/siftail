@@ -84,7 +84,7 @@
       <h3 id="configuration-title">Connect this server</h3>
       <p>Endpoint: <code>{{.Endpoint}}</code></p>
       <div class="notice notice-warning"><p>The copied configuration contains this token. Protect the Coolify configuration, set <code>COOLIFY_APP_NAME=siftail-self</code> on Siftail, keep Drain Logs disabled for Siftail itself, and restart affected resources.</p></div>
-      <div class="notice notice-warning"><p>The Forward input listens on <code>127.0.0.1</code> only, because an unauthenticated listener reachable from the network lets anyone inject records that carry this token. If senders are on another host or network, bind a specific interface, set <code>Shared_Key</code> on both ends, and restrict port 24224 with a firewall or network policy.</p></div>
+      <div class="notice notice-warning"><p>The Forward input is unauthenticated: anyone who reaches port 24224 can inject records that carry this token. Coolify publishes it on the host's <code>127.0.0.1</code> only, so its configuration listens inside the log-drain container; never publish 24224 more widely. The generic configuration listens on <code>127.0.0.1</code>. If senders are on another host or network, bind a specific interface, set <code>Shared_Key</code> on both ends, and restrict port 24224 with a firewall or network policy.</p></div>
       <details open>
         <summary>Coolify custom Fluent Bit configuration</summary>
         <p>Siftail's own logs are skipped by the <code>siftail-self</code> marker. Coolify keeps its retry buffer in <code>/tmp</code>, so it is lost when the log-drain container is replaced.</p>

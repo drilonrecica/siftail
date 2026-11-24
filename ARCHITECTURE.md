@@ -2387,10 +2387,11 @@ custom drain source and representative production-path payloads.
     storage.backlog.mem_limit 16M
 
 [INPUT]
-    # Loopback only: an unauthenticated Forward input must not be reachable
-    # from the network. Widen only with Shared_Key and a network policy.
+    # Coolify publishes 24224 on host 127.0.0.1 only and Docker delivers it
+    # to the container's bridge address, so listen on all container
+    # interfaces. A host-installed Fluent Bit listens on 127.0.0.1 instead.
     Name              forward
-    Listen            127.0.0.1
+    Listen            0.0.0.0
     Port              24224
     storage.type      filesystem
 

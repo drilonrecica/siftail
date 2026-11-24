@@ -57,8 +57,16 @@ func TestPinnedFluentBitConfigurations(t *testing.T) {
 				"False",
 				"storage.total_limit_size 256M",
 			)
-			if strings.Contains(config, "0.0.0.0") || !strings.Contains(config, "127.0.0.1") {
-				t.Fatal("fixture Forward input must listen on loopback only")
+			// Coolify publishes the drain container's port on host loopback
+			// and Docker delivers it to the bridge address; a generic
+			// Fluent Bit runs beside its senders and stays on loopback.
+			wantListen, otherListen := "127.0.0.1", "0.0.0.0"
+			if strings.HasPrefix(tt.name, "Coolify") {
+				wantListen, otherListen = "0.0.0.0", "127.0.0.1"
+			}
+			if !regexp.MustCompile(`(?m)^\s*Listen\s+`+regexp.QuoteMeta(wantListen)+`$`).MatchString(config) ||
+				regexp.MustCompile(`(?m)^\s*Listen\s+`+regexp.QuoteMeta(otherListen)+`$`).MatchString(config) {
+				t.Fatalf("fixture Forward input must listen on %s", wantListen)
 			}
 			if strings.Contains(config, "token (shown once)") ||
 				strings.Contains(config, "sft_") {

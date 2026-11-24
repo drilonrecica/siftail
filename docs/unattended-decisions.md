@@ -129,3 +129,17 @@ approval. Entries are in the order they were taken, newest last.
 - **Options:** commit the whole PNG matrix; commit a curated set; leave all screenshots in the git-ignored `.playwright-artifacts`.
 - **Chosen:** a curated set of 11 screens per build (22 JPEG files, quality 82, 1.4 MB) under `docs/release/h3-gate/`, captured by one script (`docs/release/h3-gate/capture.mjs`) against a build of `3e4f499` (the H2 gate, before SFT-112) and the current tree with identical fixtures, so the pairs differ only by the build. The full matrix stays reproducible with `make playwright` under `.playwright-artifacts/h3-gate/`.
 - **Reversal cost:** low — delete the directory, or rerun the script with other screens.
+
+## SFT-052 — Coolify drain template listens on 0.0.0.0 inside its container (2026-11-20)
+
+- **Question:** SFT-109 (audit SEC-05) set `Listen 127.0.0.1` on the Forward input of both generated templates. Coolify `v4.1.1`'s `StartLogDrain.php` runs `coolify-log-drain` on Docker's default bridge network with `ports: 127.0.0.1:24224:24224`; Docker delivers a published port to the container's bridge address, not its loopback, so the Coolify template would accept no deliveries, and Coolify's `fluentd-async: true` makes that failure silent. The audit premise ("Coolify targets 127.0.0.1:24224") is true for the host, not for the container. The owner delegated the call ("you decide whats best").
+- **Options:** (a) keep loopback and wait for the Coolify run to confirm; (b) restore `0.0.0.0` for the Coolify template only, keep the generic template on loopback; (c) split it into a separate task before SFT-052 closes.
+- **Chosen:** (b). Without it the guide's ingestion proof cannot pass, and the guide's acceptance requires matching tested behaviour. The boundary becomes Coolify's host-side `127.0.0.1` publication; Docker's Fluentd driver cannot send `Shared_Key`, so no sender authentication is possible in this shape. Residual exposure, documented: containers on Docker's default `bridge` network can reach the drain container's address. The owner's Coolify run is the confirming evidence.
+- **Reversal cost:** low — revert `internal/ingest/guide.go`'s Coolify `[INPUT]`, the Coolify fixture, the two test assertions, the `servers.html` notice, ARCHITECTURE §28.3 and the compatibility doc's "Forward input binding" section.
+
+## SFT-052 — Validation runs on locally built images, not a published tag (2026-11-20)
+
+- **Question:** `ghcr.io/drilonrecica/siftail:0.5.0` is not published, and publishing is the owner's release decision (SFT-057/058); the guide still needs an image for the Coolify run and two distinct tags for the upgrade step.
+- **Options:** (a) build `siftail:sft-052a` and `siftail:sft-052b` on the Coolify server from `master` and select them with `COMPOSE_SIFTAIL_IMAGE`; (b) push private pre-release tags to a registry the owner controls.
+- **Chosen:** (a), with (b) as fallback if Coolify's deploy step insists on pulling. Nothing is published, and the guide documents the released image path unchanged; the image source is recorded as a deviation in the validation record.
+- **Reversal cost:** none — rerun the upgrade step against published tags after release.

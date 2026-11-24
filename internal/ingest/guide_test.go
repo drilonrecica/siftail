@@ -42,8 +42,6 @@ func TestGenerateGuideHTTPSHTTPAndSafeMaterialization(t *testing.T) {
 					"Header                   Content-Type application/x-ndjson",
 					"Retry_Limit              False",
 					"storage.total_limit_size 256M",
-					"Listen",
-					"127.0.0.1",
 					GuideTokenPlaceholder,
 				} {
 					if !strings.Contains(artifact, want) {
@@ -51,10 +49,18 @@ func TestGenerateGuideHTTPSHTTPAndSafeMaterialization(t *testing.T) {
 					}
 				}
 			}
-			for _, artifact := range []string{guide.CoolifyTemplate, guide.GenericTemplate} {
-				if strings.Contains(artifact, "0.0.0.0") {
-					t.Error("template exposes an unauthenticated Forward input")
-				}
+			// Generic Fluent Bit runs beside its senders: loopback only.
+			if !strings.Contains(guide.GenericTemplate, "Listen       127.0.0.1") ||
+				strings.Contains(guide.GenericTemplate, "0.0.0.0") {
+				t.Error("generic template must keep the Forward input on loopback")
+			}
+			// Coolify's drain container receives the host-loopback-published
+			// port on its bridge address, so it must listen on all container
+			// interfaces and say why.
+			if !strings.Contains(guide.CoolifyTemplate, "Listen            0.0.0.0") ||
+				strings.Contains(guide.CoolifyTemplate, "Listen            127.0.0.1") ||
+				!strings.Contains(guide.CoolifyTemplate, "publishes\n    # port 24224 on the host's 127.0.0.1 only") {
+				t.Error("Coolify template must listen on the container bridge address and explain the host-loopback boundary")
 			}
 			excludeAt := strings.Index(guide.CoolifyTemplate,
 				"Exclude COOLIFY_APP_NAME ^siftail-self$")

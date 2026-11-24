@@ -116,11 +116,14 @@ func GenerateGuide(endpoint, eventID string, eventAt time.Time) (Guide, error) {
     storage.backlog.mem_limit 16M
 
 [INPUT]
-    # Loopback only: an unauthenticated Forward input reachable from the
-    # network lets anyone inject records that this pipeline forwards to
-    # Siftail with your valid token. See the Siftail guide before changing it.
+    # Coolify runs this container on Docker's bridge network and publishes
+    # port 24224 on the host's 127.0.0.1 only. Docker delivers that port to
+    # the container's bridge address, so the input listens on all container
+    # interfaces. Never publish 24224 beyond host loopback: an
+    # unauthenticated Forward input lets anyone who reaches it inject records
+    # that this pipeline forwards to Siftail with your valid token.
     Name              forward
-    Listen            127.0.0.1
+    Listen            0.0.0.0
     Port              24224
     Buffer_Chunk_Size 1M
     Buffer_Max_Size   6M
