@@ -121,6 +121,13 @@ measurements, and both-architecture smoke commands are recorded in
 [`docs/operations/container-image.md`](docs/operations/container-image.md).
 No public image is implied until the release workflow publishes one.
 
+### Operator guide and capacity
+
+Start with [`docs/operations/operator-guide.md`](docs/operations/operator-guide.md):
+one page from install to shutdown, with the active/stopped requirement of every
+command, and [`docs/operations/capacity.md`](docs/operations/capacity.md), which
+labels each sizing figure measured, bounded, or estimated.
+
 ### Supported Docker Compose deployment
 
 [`compose.yaml`](compose.yaml) runs exactly one Siftail service against one
