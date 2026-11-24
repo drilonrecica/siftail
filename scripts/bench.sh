@@ -76,7 +76,7 @@ group() {
 		run -count=3 -benchtime=1000x -timeout 60m -bench '^BenchmarkGroupCommitConcurrent$' ./internal/ingest
 		;;
 	logs) # docs/performance/history-queries.md
-		run -count=1 -benchtime=5x -bench '^BenchmarkHistoryStore(100K|1M)$' ./internal/logs
+		run -count=1 -benchtime=5x -bench '^BenchmarkHistoryStore(100K|1M|10M)$' ./internal/logs
 		;;
 	live) # docs/performance/live.md
 		run -count="$count" -benchtime=3s -bench '^BenchmarkLive(BrokerPublish16Subscribers|SSEFrame)$' ./internal/logs ./internal/auth

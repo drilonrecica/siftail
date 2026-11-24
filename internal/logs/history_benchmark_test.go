@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"io"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -26,6 +28,17 @@ func BenchmarkHistoryStore100K(b *testing.B) {
 
 func BenchmarkHistoryStore1M(b *testing.B) {
 	benchmarkHistoryStore(b, 1_000_000)
+}
+
+// BenchmarkHistoryStore10M is the pre-public 10-million-event plan and
+// latency review (docs/performance/0.5.0-container.md). Seeding takes several
+// minutes and about 5 GB of TMPDIR, so it runs only when
+// SIFTAIL_BENCH_10M=1.
+func BenchmarkHistoryStore10M(b *testing.B) {
+	if os.Getenv("SIFTAIL_BENCH_10M") != "1" {
+		b.Skip("set SIFTAIL_BENCH_10M=1 to seed and query 10,000,000 events")
+	}
+	benchmarkHistoryStore(b, 10_000_000)
 }
 
 func benchmarkHistoryStore(b *testing.B, eventCount int) {
@@ -74,6 +87,20 @@ func benchmarkHistoryStore(b *testing.B, eventCount int) {
 		query.Cursor = cursor
 		return query
 	}
+	// The equal-time case continues from the middle of the block of
+	// historyBenchmarkEqualRows events that share one timestamp, so the
+	// cursor's ID tie-break alone decides the page.
+	equalTime := func(query HistoryQuery) HistoryQuery {
+		at := historyBenchmarkEqualAtUS(eventCount)
+		query.FromUS, query.ToUS = at, at+1
+		cursor, err := codec.Encode(query, at,
+			int64(eventCount)+historyBenchmarkEqualRows/2)
+		if err != nil {
+			b.Fatal(err)
+		}
+		query.Cursor = cursor
+		return query
+	}
 	cases := []struct {
 		name  string
 		query HistoryQuery
@@ -98,6 +125,12 @@ func benchmarkHistoryStore(b *testing.B, eventCount int) {
 		{"deep_unfiltered", deep(base)},
 		{"deep_source", deep(source(base))},
 		{"deep_server_only", deep(serverOnly(base))},
+		{"request_id", func() HistoryQuery {
+			query := base
+			query.RequestID = fmt.Sprintf("req-%d", historyBenchmarkRequestN(eventCount))
+			return query
+		}()},
+		{"equal_time", equalTime(base)},
 	}
 	for _, test := range cases {
 		b.Run(test.name, func(b *testing.B) {
@@ -128,6 +161,68 @@ func benchmarkHistoryStore(b *testing.B, eventCount int) {
 			}
 		})
 	}
+	b.Run("detail", func(b *testing.B) {
+		id := int64(eventCount / 2)
+		plan, err := historyQueryPlan(db.Reader(),
+			historyEventColumns+"\nWHERE e.id = ?", []any{id})
+		if err != nil {
+			b.Fatal(err)
+		}
+		b.Logf("rows=%d plan=%s", eventCount, strings.Join(plan, " | "))
+		b.ReportAllocs()
+		b.ResetTimer()
+		for range b.N {
+			if _, err := store.Event(context.Background(), id); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+	// Export streams the newest minute of events, 60,000 rows (plus the
+	// equal-time block when it falls inside), within the 100,000-row cap.
+	b.Run("export_one_minute", func(b *testing.B) {
+		query := base
+		query.ToUS = historyBenchmarkBaseUS + int64(eventCount)*historyBenchmarkStepUS
+		query.FromUS = query.ToUS - 60_000_000
+		filter, arguments := buildHistoryFilterSQL(query, nil)
+		plan, err := historyQueryPlan(db.Reader(), historyEventColumns+
+			"\nWHERE "+filter+"\nORDER BY e.event_at_us DESC, e.id DESC\nLIMIT ?",
+			append(arguments, 100_001))
+		if err != nil {
+			b.Fatal(err)
+		}
+		b.Logf("rows=%d plan=%s", eventCount, strings.Join(plan, " | "))
+		want := 60_000
+		if at := historyBenchmarkEqualAtUS(eventCount); at > query.FromUS && at < query.ToUS {
+			want += historyBenchmarkEqualRows
+		}
+		exports := NewExportStore(db.Reader(), ExportLimits{})
+		b.ReportAllocs()
+		b.ResetTimer()
+		for range b.N {
+			result, err := exports.Export(context.Background(), query,
+				ExportFormatNDJSON, io.Discard)
+			if err != nil {
+				b.Fatal(err)
+			}
+			if result.Rows != want {
+				b.Fatalf("export rows = %d, want %d", result.Rows, want)
+			}
+		}
+	})
+}
+
+// historyBenchmarkEqualRows events share one timestamp, the one of the
+// middle event, so equal-time pagination is measured at every size.
+const historyBenchmarkEqualRows = 300
+
+func historyBenchmarkEqualAtUS(eventCount int) int64 {
+	return historyBenchmarkBaseUS + int64(eventCount/2)*historyBenchmarkStepUS
+}
+
+// historyBenchmarkRequestN names a seeded event that carries a request ID
+// (every seventh does) near the middle of the range.
+func historyBenchmarkRequestN(eventCount int) int {
+	return eventCount / 2 / 7 * 7
 }
 
 // historyBenchmarkMatches mirrors the seeded distribution for the hierarchy
@@ -185,7 +280,7 @@ func seedHistoryBenchmark(db *sql.DB, eventCount int) error {
 	)
 	INSERT INTO log_events(
 		id,event_at_us,received_at_us,source_id,stream,level_normalized,
-		message_raw,message_text
+		message_raw,message_text,request_id
 	)
 	SELECT
 		n,
@@ -195,11 +290,30 @@ func seedHistoryBenchmark(db *sql.DB, eventCount int) error {
 		CASE WHEN n %% 3 = 0 THEN 'stderr' ELSE 'stdout' END,
 		CASE WHEN n %% 10 = 0 THEN 'error' WHEN n %% 10 = 1 THEN 'warn' ELSE 'info' END,
 		cast(text AS BLOB),
-		text
+		text,
+		CASE WHEN n %% 7 = 0 THEN 'req-' || n END
 	FROM messages`, eventCount,
 		historyBenchmarkBaseUS, historyBenchmarkStepUS,
 		historyBenchmarkBaseUS, historyBenchmarkStepUS)
 	if _, err := tx.Exec(statement); err != nil {
+		return rollback(err)
+	}
+	// One block of events shares the middle event's timestamp; IDs follow
+	// the main sequence so the block is the newest rows at that time.
+	if _, err := tx.Exec(fmt.Sprintf(`WITH RECURSIVE sequence(n) AS (
+		VALUES(1)
+		UNION ALL
+		SELECT n + 1 FROM sequence WHERE n < %d
+	)
+	INSERT INTO log_events(
+		id,event_at_us,received_at_us,source_id,stream,level_normalized,
+		message_raw,message_text
+	)
+	SELECT %d + n, %d, %d, 1, 'stdout', 'info',
+		cast('equal-time event' AS BLOB), 'equal-time event'
+	FROM sequence`, historyBenchmarkEqualRows, eventCount,
+		historyBenchmarkEqualAtUS(eventCount),
+		historyBenchmarkEqualAtUS(eventCount))); err != nil {
 		return rollback(err)
 	}
 	return tx.Commit()

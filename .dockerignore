@@ -24,3 +24,4 @@ DESIGN.md
 DOMAIN.md
 PRODUCT.md
 Makefile
+.bench-tmp

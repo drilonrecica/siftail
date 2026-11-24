@@ -143,3 +143,11 @@ approval. Entries are in the order they were taken, newest last.
 - **Options:** (a) build `siftail:sft-052a` and `siftail:sft-052b` on the Coolify server from `master` and select them with `COMPOSE_SIFTAIL_IMAGE`; (b) push private pre-release tags to a registry the owner controls.
 - **Chosen:** (a), with (b) as fallback if Coolify's deploy step insists on pulling. Nothing is published, and the guide documents the released image path unchanged; the image source is recorded as a deviation in the validation record.
 - **Reversal cost:** none — rerun the upgrade step against published tags after release.
+
+## SFT-054 — Production image built on an amd64 base reconstructed from local layers (2026-11-24)
+
+- **Question:** The Dockerfile pins `gcr.io/distroless/cc-debian12:nonroot@sha256:fccdbb0a…`. Local podman storage held only its arm64 variant, and pulling the amd64 one needs network access to gcr.io, which the unattended rules do not name.
+- **Options:** (a) ask the owner to allow the pull; (b) measure an older local image (`sft083-amd64`); (c) rebuild the pinned amd64 base from the 18 distroless layers inside the local `localhost/siftail:sft083-amd64` production build, and build the current tree on it with `--pull=never`.
+- **Chosen:** (c). Those layers came from the same digest pin, so the runtime filesystem is the production one. The image is the current tree, and nothing leaves the machine. Tag: `localhost/distroless-cc-debian12-amd64:fccdbb0a-from-sft083`. The image ID differs from a registry-built image, so the results document must name it as a local build.
+- **Reversal cost:** low. Pull the pinned base, rebuild, and rerun `scripts/container-bench.sh` (SFT-129).
+

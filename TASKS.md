@@ -49,7 +49,7 @@ task does not tag, publish, or otherwise release a version.
 | `0.2.0` | SFT-016–SFT-024 | Complete | Unreleased | [`docs/tasks/0.2.0.md`](docs/tasks/0.2.0.md) |
 | `0.3.0` | SFT-025–SFT-037 | Implementation gate complete | Unreleased | [`docs/tasks/0.3.0.md`](docs/tasks/0.3.0.md) |
 | `0.4.0` | SFT-038–SFT-049 | Implementation gate complete | Unreleased | [`docs/tasks/0.4.0.md`](docs/tasks/0.4.0.md) |
-| `0.5.0` | SFT-050–SFT-058, SFT-127–SFT-128 | In progress; SFT-050/051 Done; SFT-052 waits on the hardening gates below; SFT-056 waits on the human checks SFT-127/128 | Unreleased | [`docs/tasks/0.5.0.md`](docs/tasks/0.5.0.md) |
+| `0.5.0` | SFT-050–SFT-058, SFT-127–SFT-129 | In progress; SFT-050/051 Done; SFT-052 waits on the hardening gates below; SFT-056 waits on the human checks SFT-127/128 | Unreleased | [`docs/tasks/0.5.0.md`](docs/tasks/0.5.0.md) |
 | `0.5.0` hardening | SFT-082–SFT-126 | Planned; remediates the [2026-11-04 audit](docs/audit/2026-11-04-full-audit.md) in phases H0–H3 before the public release | Unreleased | [`docs/tasks/0.5.0-hardening.md`](docs/tasks/0.5.0-hardening.md) |
 | `0.6.0` | SFT-064–SFT-081 | Redesign complete (SFT-064–079 Done or Accepted with exceptions; SFT-068 and SFT-079 are the latter); SFT-080/081 Planned follow-ups | Unreleased | [`docs/tasks/0.6.0.md`](docs/tasks/0.6.0.md) |
 | `1.0.0` | SFT-059–SFT-063 | Planned evidence gates | Unreleased | [`docs/tasks/1.0.0.md`](docs/tasks/1.0.0.md) |

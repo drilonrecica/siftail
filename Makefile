@@ -1,4 +1,4 @@
-.PHONY: fmt fmt-check vet test race-test build compose-check check bench frontend-check playwright playwright-update clean
+.PHONY: fmt fmt-check vet test race-test build compose-check check bench container-bench frontend-check playwright playwright-update clean
 
 GO       := go
 # Upper bound for one package's test binary; a hung test fails instead of stalling igris.
@@ -48,6 +48,12 @@ BENCH_GROUPS ?=
 bench:
 	scripts/bench.sh $(BENCH_GROUPS)
 
+# Production-container measurement and 10-million-event query gate
+# (docs/performance/0.5.0-container.md): about an hour and 20 GB of TMPDIR.
+# IMAGE names a built image, e.g. `make container-bench IMAGE=localhost/siftail:dev`.
+container-bench:
+	scripts/container-bench.sh $(IMAGE)
+
 frontend-check:
 	npm run frontend-check
 
@@ -61,4 +67,4 @@ playwright-update:
 
 clean:
 	rm -f $(BINARY)
-	rm -rf .bench-tmp
+	rm -rf .bench-tmp || podman unshare rm -rf .bench-tmp
