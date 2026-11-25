@@ -57,10 +57,10 @@ The Dockerfile pins these multi-architecture image indexes:
 
 | Input | Index digest |
 |---|---|
-| `golang:1.27.3-bookworm` | `sha256:d9b6a1beb9474adc2a1ce842573639b44b2a0dd49b6669f51d3821baf9ec37c9` |
+| `golang:1.27.4-bookworm` | `sha256:ce59b41415e2524ae99926fe1f37ce48ba8c194dcbd2a56a65436cdcefa2bd34` |
 | `distroless/cc-debian12:nonroot` | `sha256:fccdbb0a547c14e23fcf4ce8ad62ca5d43b4faae8d22cd292f490fef9946c96e` |
 
-The builder Go release matches `go.mod` (`go 1.27.0`, `toolchain go1.27.3`) and
+The builder Go release matches `go.mod` (`go 1.27.0`, `toolchain go1.27.4`) and
 CI. It stays on the Debian 12 (bookworm) variant on purpose. The runtime is
 `cc-debian12`, so the binary must not depend on glibc symbols newer than
 Debian 12's glibc 2.36. A trixie builder would break that. The SFT-083 binaries

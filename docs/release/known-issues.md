@@ -1,7 +1,7 @@
 # Known issues and limitations
 
 **Applies to:** 0.5.0 (public dogfood release). **Last reviewed:** 2026-11-25
-(SFT-057).
+(SFT-058 gate).
 
 This list is part of every release's notes. An entry stays until a release
 fixes it; the fixing release's notes say so. None of the issues below loses,
@@ -53,8 +53,8 @@ documented workflow; **low** is a visible flaw with a working path around it.
   stored events (SFT-129 was skipped). The figures in
   [`capacity.md`](../operations/capacity.md) are labelled measured, bounded, or
   estimated; do not size a deployment on a figure it marks as missing.
-- arm64 images pass the native smoke test in the release workflow, but no
-  native arm64 performance has been measured.
+- The release workflow smoke-tests the arm64 image natively before it
+  publishes, but no native arm64 performance has been measured.
 
 ## Interface
 

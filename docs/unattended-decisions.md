@@ -235,3 +235,10 @@ approval. Entries are in the order they were taken, newest last.
 - **Options:** (a) hold the task open for the owner's first `workflow_dispatch` run; (b) close it after running every step locally that can run here (build, reproduce, inspect, amd64 smoke, fixture upgrades, backup and restore, plan rules, actionlint, licenses, secrets, vulnerabilities) and name the unexercised steps.
 - **Chosen:** (b). The workflow's logic lives in the scripts that were run, the remaining steps are standard pinned actions, and SFT-058 already requires evidence on production artifacts, so the first dispatch belongs there. The record lists exactly what did not run.
 - **Reversal cost:** low. Run **Actions → Release → Run workflow** with `0.5.0-rc.1`; fix whatever it finds under SFT-058.
+
+## SFT-058 — Fix the reachable GO-2026-6859 in the gate task by moving to go1.27.4 (2026-11-25)
+
+- **Question:** SFT-057 left the reachable `net/http` vulnerability as a release blocker for "a follow-up before SFT-058", but no such task exists, and `AGENTS.md` §21 says a reachable vulnerability blocks the gate until fixed or accepted by the owner. The SFT-058 record says the gate is documentation only "unless verification exposes defects".
+- **Options:** (a) record the blocker again and stop the gate; (b) ask the owner to accept the vulnerability; (c) apply the patch-level toolchain update here (`go.mod`, the Dockerfile builder digest, three documents) and run the whole gate on it.
+- **Chosen:** (c). Fixing is the default §21 names, the change is a patch release of the standard library with no module or product-code change, and every gate result is then measured on the toolchain that would ship. The builder digest `sha256:ce59b414…bd34` is the `golang:1.27.4-bookworm` index read from Docker Hub with `skopeo inspect --raw`.
+- **Reversal cost:** low. Revert the five files; the gate's suite and artifact results would need rerunning on the other toolchain.

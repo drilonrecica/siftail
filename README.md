@@ -71,10 +71,10 @@ The name is explained subtly in selected copy: users can **sift through historic
 ## Development
 
 The supported Go toolchain is declared by [`go.mod`](go.mod): language version
-`go 1.27.0` and `toolchain go1.27.3`. With the default `GOTOOLCHAIN=auto`, an
-older local Go 1.27 downloads go1.27.3 through the Go module proxy. CI reads the
+`go 1.27.0` and `toolchain go1.27.4`. With the default `GOTOOLCHAIN=auto`, an
+older local Go 1.27 downloads go1.27.4 through the Go module proxy. CI reads the
 same file through `go-version-file`, and the Dockerfile builder is the
-digest-pinned `golang:1.27.3-bookworm` image. Builds need CGO and a C compiler
+digest-pinned `golang:1.27.4-bookworm` image. Builds need CGO and a C compiler
 for the SQLite driver.
 
 Common local checks:

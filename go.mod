@@ -2,7 +2,7 @@ module github.com/drilonrecica/siftail
 
 go 1.27.0
 
-toolchain go1.27.3
+toolchain go1.27.4
 
 require (
 	github.com/mattn/go-sqlite3 v1.14.52

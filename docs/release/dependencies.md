@@ -20,7 +20,7 @@ Generated with `go run github.com/google/go-licenses/v2@v2.0.1 report
 | `golang.org/x/sync` (`errgroup` only) | v0.24.0 | BSD-3-Clause | Owned component lifecycles. |
 | `golang.org/x/term` | v0.47.0 | BSD-3-Clause | No-echo password prompt. |
 | `golang.org/x/sys` | v0.49.0 | BSD-3-Clause | Required by `x/term`. |
-| Go standard library and runtime | go1.27.3 | BSD-3-Clause | Toolchain from `go.mod`. |
+| Go standard library and runtime | go1.27.4 | BSD-3-Clause | Toolchain from `go.mod`. |
 
 `golang.org/x/net` and `golang.org/x/text` appear in `go list -m all` as
 module-graph entries only; no package from them is linked. Why each linked
@@ -55,7 +55,7 @@ Never present in the image.
 
 | Input | Pinned as | Use |
 |---|---|---|
-| `golang:1.27.3-bookworm` | index digest in the Dockerfile | Builder stage. |
+| `golang:1.27.4-bookworm` | index digest in the Dockerfile | Builder stage. |
 | `gcc-aarch64-linux-gnu`, `libc6-dev-arm64-cross` (and the amd64 equivalents) | exact Debian versions in the Dockerfile | Cross-compiling the CGO binary. |
 | `moby/buildkit` v0.35.1 | digest in `release.yml` | Reproducible release builds. |
 | GitHub Actions | commit SHAs in `.github/workflows/` | CI and release automation. |
