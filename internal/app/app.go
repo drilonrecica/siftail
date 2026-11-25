@@ -586,8 +586,15 @@ func (a *App) runIngestServer(ctx context.Context) error {
 	return a.runHTTPServer(ctx, srv, a.cfg.IngestAddr, "ingest")
 }
 
+// listenTCP opens an HTTP listener. Tests replace it to hand over listeners
+// they already hold: a port that is released for the server to bind again can
+// be taken by another process in between.
+var listenTCP = func(addr string) (net.Listener, error) {
+	return net.Listen("tcp", addr)
+}
+
 func (a *App) runHTTPServer(ctx context.Context, srv *http.Server, addr, name string) error {
-	listener, err := net.Listen("tcp", addr)
+	listener, err := listenTCP(addr)
 	if err != nil {
 		return fmt.Errorf("%s listener: %w", name, err)
 	}

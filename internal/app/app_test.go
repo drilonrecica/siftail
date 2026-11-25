@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -58,14 +59,53 @@ var noKeepAliveClient = &http.Client{
 	Transport: &http.Transport{DisableKeepAlives: true},
 }
 
+// reservedListeners holds the listeners behind the addresses freePort handed
+// out. Closing a listener so the server can bind the same port again leaves a
+// gap in which another test process can take the port; the server then fails
+// with "address already in use", or the test talks to a foreign server. The
+// server therefore receives the open listener itself (see TestMain).
+var reservedListeners = struct {
+	sync.Mutex
+	byAddr map[string]net.Listener
+}{byAddr: map[string]net.Listener{}}
+
+func TestMain(m *testing.M) {
+	listenTCP = func(addr string) (net.Listener, error) {
+		if l := takeReserved(addr); l != nil {
+			return l, nil
+		}
+		return net.Listen("tcp", addr)
+	}
+	os.Exit(m.Run())
+}
+
+// takeReserved removes and returns the listener held for addr, or nil.
+func takeReserved(addr string) net.Listener {
+	reservedListeners.Lock()
+	defer reservedListeners.Unlock()
+	l := reservedListeners.byAddr[addr]
+	delete(reservedListeners.byAddr, addr)
+	return l
+}
+
+// freePort returns a loopback address whose listener stays open until the
+// server under test takes it over, so nothing else can bind it meanwhile.
 func freePort(t *testing.T) string {
 	t.Helper()
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("freePort: %v", err)
 	}
-	defer l.Close()
-	return l.Addr().String()
+	addr := l.Addr().String()
+	reservedListeners.Lock()
+	reservedListeners.byAddr[addr] = l
+	reservedListeners.Unlock()
+	t.Cleanup(func() {
+		if unused := takeReserved(addr); unused != nil {
+			_ = unused.Close()
+		}
+	})
+	return addr
 }
 
 func testLogger(t *testing.T) *slog.Logger {
@@ -294,9 +334,10 @@ func TestAppControlSocketOwnerOnly(t *testing.T) {
 
 func TestAppListenerCollision(t *testing.T) {
 	cfg := testConfig(t)
-	l, err := net.Listen("tcp", cfg.UIAddr)
-	if err != nil {
-		t.Fatalf("bind test listener: %v", err)
+	// Keep the reserved listener here, so the server finds the port occupied.
+	l := takeReserved(cfg.UIAddr)
+	if l == nil {
+		t.Fatal("no reserved listener for the UI address")
 	}
 	defer l.Close()
 
@@ -304,7 +345,7 @@ func TestAppListenerCollision(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	err = app.Run(ctx)
+	err := app.Run(ctx)
 	if err == nil {
 		t.Fatal("expected error for listener collision")
 	}
