@@ -186,3 +186,10 @@ approval. Entries are in the order they were taken, newest last.
 - **Options:** (a) fix F1 (and F4) in `cmd/siftail` and `internal/retention` within this task and rerun the soak; (b) close the task with the findings recorded and propose follow-up tasks; (c) hold the task open for the owner.
 - **Chosen:** (b). None of the findings is a leak, corruption, acknowledgement violation, or unexplained growth. F1 is a false failure of a diagnostic: data and the stopped-server check are unaffected, and Status records the cancelled check. So it is medium severity, not high risk, and fixing it would change product code outside this task's stated impact. The soak results name each finding with its evidence and a proposed fix, and the completion note points the owner at them.
 - **Reversal cost:** low. If the owner treats F1 as release-blocking, a small follow-up gives size-proportional control operations a longer deadline (`cmd/siftail/admin.go`, `controlRequest`), then reruns `make soak`.
+
+## SFT-056 — Close the interface task without the human SFT-127/128 evidence (2026-11-25)
+
+- **Question:** SFT-056 is "closed with the SFT-127/128 evidence", but the owner skipped both maintainer checks, so no screen-reader notes or phone screenshots exist. The documents do not say whether the task may close without them.
+- **Options:** (a) hold SFT-056 open until the owner runs the checks; (b) close it, record the H3 gate evidence, and state plainly that the two human checks are unevidenced; (c) fabricate or infer review notes from the automated pass (rejected: owner evidence must not be invented).
+- **Chosen:** (b). Skipping was the owner's explicit decision, holding open would block SFT-057/058 on a check the owner deferred, and the record names the gap so the SFT-058 release gate can weigh it.
+- **Reversal cost:** low. Run SFT-127/128 later and append the notes under SFT-056; reopen the task if the owner wants the gap to block release.
