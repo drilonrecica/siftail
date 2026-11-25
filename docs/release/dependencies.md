@@ -41,12 +41,10 @@ All other CSS, JavaScript, and SVG are Siftail's own.
 
 ## Runtime image
 
-`gcr.io/distroless/cc-debian13:nonroot`, pinned by index digest in the
+`gcr.io/distroless/base-nossl-debian13:nonroot`, pinned by index digest in the
 [`Dockerfile`](../../Dockerfile). Distroless itself is Apache-2.0; its Debian 13
-packages (`base-files`, `ca-certificates`, `gcc-14-base`, `libc6`,
-`libgcc-s1`, `libgomp1`, `libssl3t64`, `libstdc++6`, `libzstd1`,
-`media-types`, `netbase`, `tzdata`, `tzdata-legacy`, `zlib1g`) keep their own
-licenses, whose copyright files remain in the image
+packages (`base-files`, `ca-certificates`, `libc6`, `media-types`, `netbase`,
+`tzdata`, `tzdata-legacy`) keep their own licenses, whose copyright files remain in the image
 under `/usr/share/doc`. See
 [`container-image.md`](../operations/container-image.md#runtime-dependencies-licensing-and-security-maintenance).
 

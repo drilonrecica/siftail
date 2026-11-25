@@ -2836,7 +2836,7 @@ Recommended multi-stage build:
 
 1. Go build with CGO for the target architecture from the digest-pinned Go
    toolchain image;
-2. digest-pinned Distroless `cc-debian13:nonroot` runtime with the required
+2. digest-pinned Distroless `base-nossl-debian13:nonroot` runtime with the required
    glibc, CA certificates, and timezone database;
 3. Siftail binary, Apache license, and owner-writable empty `/data` directory;
 4. numeric non-root identity `65532:65532`.
