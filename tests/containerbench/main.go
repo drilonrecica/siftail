@@ -86,12 +86,30 @@ func main() {
 	keep := flag.Bool("keep", false, "keep the container and data directory")
 	uiPort := flag.Int("ui-port", 28180, "host UI port")
 	ingestPort := flag.Int("ingest-port", 28181, "host ingestion port")
+	soak := flag.Bool("soak", false, "run the bounded production soak (docs/performance/0.5.0-soak.md) instead of the benchmark")
+	duration := flag.Duration("duration", 3*time.Hour, "soak duration; -quick shortens it to 12 minutes")
+	seed := flag.Int64("seed", 55, "soak workload seed")
+	holdLock := flag.String("hold-write-lock", "", "internal: hold a SQLite write lock on this database (run by the soak under podman unshare)")
+	holdFor := flag.Duration("hold-for", time.Minute, "internal: how long -hold-write-lock holds the lock")
 	flag.Parse()
+	if *holdLock != "" {
+		if err := holdWriteLock(*holdLock, *holdFor); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
 	if *image == "" || *workdir == "" || *out == "" {
 		flag.Usage()
 		os.Exit(2)
 	}
+	if *soak {
+		os.Exit(runSoak(soakOptions{
+			image: *image, workdir: *workdir, out: *out, quick: *quick, keep: *keep,
+			duration: *duration, seed: *seed, uiPort: *uiPort, ingestPort: *ingestPort,
+		}))
+	}
 	run := &benchRun{
+		name:  containerName,
 		image: *image, workdir: *workdir, quick: *quick,
 		ui:     fmt.Sprintf("http://127.0.0.1:%d", *uiPort),
 		ingest: fmt.Sprintf("http://127.0.0.1:%d/api/v1/ingest", *ingestPort),
@@ -121,6 +139,7 @@ func main() {
 }
 
 type benchRun struct {
+	name                       string // container name
 	image, workdir, ui, ingest string
 	uiPort, ingestPort         int
 	quick                      bool
@@ -145,7 +164,7 @@ func (r *benchRun) execute() error {
 	ctx := context.Background()
 	r.recordEnvironment()
 	r.dataDir = filepath.Join(r.workdir, "data")
-	_, _ = podman("rm", "--force", containerName)
+	_, _ = podman("rm", "--force", r.name)
 	_, _ = podman("unshare", "rm", "-rf", r.dataDir)
 	if err := os.MkdirAll(r.dataDir, 0o750); err != nil {
 		return err
@@ -221,7 +240,7 @@ func (r *benchRun) execute() error {
 		return err
 	}
 	stopped := time.Now()
-	if _, err := podman("stop", "--time", "30", containerName); err != nil {
+	if _, err := podman("stop", "--time", "30", r.name); err != nil {
 		return err
 	}
 	r.summary.Shutdown["final_stop"] = time.Since(stopped).Seconds()
@@ -310,9 +329,9 @@ func (r *benchRun) setup() error {
 }
 
 func (r *benchRun) start(ctx context.Context, label string) error {
-	_, _ = podman("rm", "--force", containerName)
+	_, _ = podman("rm", "--force", r.name)
 	started := time.Now()
-	if _, err := podman("run", "-d", "--name", containerName,
+	if _, err := podman("run", "-d", "--name", r.name,
 		"-v", r.dataDir+":/data:Z",
 		"-p", fmt.Sprintf("127.0.0.1:%d:8080", r.uiPort),
 		"-p", fmt.Sprintf("127.0.0.1:%d:8081", r.ingestPort),
@@ -328,11 +347,11 @@ func (r *benchRun) awaitStart(ctx context.Context, label string, started time.Ti
 	waitCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
 	if _, err := waitReady(waitCtx, r.ui); err != nil {
-		logs, _ := podman("logs", containerName)
+		logs, _ := podman("logs", r.name)
 		return fmt.Errorf("container not ready: %w\n%s", err, logs)
 	}
 	r.summary.Startup[label] = time.Since(started).Seconds()
-	pid, err := podman("inspect", "--format", "{{.State.Pid}}", containerName)
+	pid, err := podman("inspect", "--format", "{{.State.Pid}}", r.name)
 	if err != nil {
 		return err
 	}
@@ -498,7 +517,7 @@ func (r *benchRun) backup(ctx context.Context) error {
 	}()
 	time.Sleep(r.seconds(10))
 	started := time.Now()
-	output, err := podman("exec", containerName, "/siftail", "backup", "--output", "/data/bench-backup.sqlite")
+	output, err := podman("exec", r.name, "/siftail", "backup", "--output", "/data/bench-backup.sqlite")
 	backupSeconds := time.Since(started).Seconds()
 	time.Sleep(r.seconds(10))
 	cancel()
@@ -512,7 +531,7 @@ func (r *benchRun) backup(ctx context.Context) error {
 	}
 	size, _ := podman("unshare", "stat", "-c", "%s", filepath.Join(r.dataDir, "bench-backup.sqlite"))
 	started = time.Now()
-	verify, verifyErr := podman("exec", containerName, "/siftail", "backup", "verify", "/data/bench-backup.sqlite")
+	verify, verifyErr := podman("exec", r.name, "/siftail", "backup", "verify", "/data/bench-backup.sqlite")
 	verifySeconds := time.Since(started).Seconds()
 	r.summary.Backup = map[string]any{
 		"backup_seconds": backupSeconds, "verify_seconds": verifySeconds,
@@ -566,12 +585,12 @@ func (r *benchRun) retention(ctx context.Context) error {
 		return err
 	}
 	stopped := time.Now()
-	if _, err := podman("stop", "--time", "30", containerName); err != nil {
+	if _, err := podman("stop", "--time", "30", r.name); err != nil {
 		return err
 	}
 	r.summary.Shutdown["restart_for_retention"] = time.Since(stopped).Seconds()
 	started := time.Now()
-	if _, err := podman("start", containerName); err != nil {
+	if _, err := podman("start", r.name); err != nil {
 		return err
 	}
 	if err := r.awaitStart(ctx, "restart_before_retention", started); err != nil {
@@ -620,6 +639,6 @@ func (r *benchRun) retention(ctx context.Context) error {
 }
 
 func (r *benchRun) cleanup() {
-	_, _ = podman("rm", "--force", containerName)
+	_, _ = podman("rm", "--force", r.name)
 	_, _ = podman("unshare", "rm", "-rf", r.dataDir)
 }

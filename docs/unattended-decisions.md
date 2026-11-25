@@ -151,3 +151,38 @@ approval. Entries are in the order they were taken, newest last.
 - **Chosen:** (c). Those layers came from the same digest pin, so the runtime filesystem is the production one. The image is the current tree, and nothing leaves the machine. Tag: `localhost/distroless-cc-debian12-amd64:fccdbb0a-from-sft083`. The image ID differs from a registry-built image, so the results document must name it as a local build.
 - **Reversal cost:** low. Pull the pinned base, rebuild, and rerun `scripts/container-bench.sh` (SFT-129).
 
+
+## SFT-055 — Soak duration: three hours in 30-minute scenario cycles (2026-11-25)
+
+- **Question:** `ARCHITECTURE.md` §36 asks for "several hours of mixed workload" before stable public milestones, and the task asks for "the documented pre-public soak duration", but no document gives a number.
+- **Options:** two hours; three hours; an overnight run of eight hours or more.
+- **Chosen:** three hours, as six 30-minute cycles that each run every scheduled scenario once and rotate the three disruptive ones (graceful restart, queue saturation, degraded database), so each disruptive scenario runs twice. Three hours is the shortest duration that reads as "several", and it covers three hourly retention runs plus the startup runs after each restart. `scripts/soak.sh --duration` runs longer soaks with the same schedule. `docs/performance/0.5.0-soak.md` records three hours as the pre-public duration.
+- **Reversal cost:** low. Change the default in `tests/containerbench/main.go` and the documents, then rerun `make soak`.
+
+## SFT-055 — Run the soak on the shared development host under unrelated load (2026-11-25)
+
+- **Question:** SFT-054's container measurement was moved to the owner because unrelated workloads kept the host busy. Before this soak, the load average was 15–25 on four cores (other agent sessions, Go test suites, a Remotion render). The soak criteria are mostly correctness (no accepted-batch loss, integrity, no leak, recovery), and latency is the only part load distorts.
+- **Options:** (a) stop and ask the owner for a quiet host, as for SFT-054; (b) run now, apply the correctness gates unchanged, and label every latency figure as contended.
+- **Chosen:** (b). Loss, duplication, ordering, atomicity, integrity, growth, and recovery do not depend on spare CPU, and a loaded host is a harsher test of bounded behavior than a quiet one. The results document records the load average and does not present latency as a baseline. Clean latency numbers belong to the quiet-host container measurement (the skipped SFT-129).
+- **Reversal cost:** low. Rerun `make soak IMAGE=…` on a quiet host and replace the results section.
+
+## SFT-055 — Degraded-database scenario uses an external SQLite write lock, not a full disk (2026-11-25)
+
+- **Question:** The soak must recover from "a controlled degraded condition" and "simulated temporary disk/database errors". Filling the real disk would endanger the host, and rootless podman without `sudo` cannot mount a small loop or quota filesystem under `/data`. A tmpfs `/data` would break the real-disk rule (`AGENTS.md` §17.2) for the whole run.
+- **Options:** (a) hold SQLite's write lock (`BEGIN IMMEDIATE`) on the live database from a second process in the container's user namespace, so Siftail's commits fail with `SQLITE_BUSY` and it degrades; (b) run a separate disk-full container on a size-limited tmpfs; (c) skip the scenario.
+- **Chosen:** (a). Busy is one of the four storage-wide failures that degrade ingestion (`docs/operations/storage-full-recovery.md`). It exercises the same path as a full disk: `503`, unready, the recovery probe, client retry, and recovery. It needs no privileges and does not touch the data. The real `SQLITE_FULL` path stays covered by the repository's `max_page_count` quota tests, and the results document says so.
+- **Reversal cost:** low. Add a second degraded scenario to `degradedScenario` in `tests/containerbench/soak.go` if a size-limited volume becomes available.
+
+## SFT-055 — Goroutine leaks are inferred from threads, descriptors, memory, and Live capacity (2026-11-25)
+
+- **Question:** `ARCHITECTURE.md` §36 lists "no goroutine leak" as a success criterion, but the production image exposes no goroutine count (no pprof or metrics endpoint), and the task requires the production container.
+- **Options:** (a) add a debug endpoint or a soak-only image build; (b) observe from outside: OS threads and open descriptors from `/proc` (through `podman unshare`), RSS trend per process lifetime, and a final check that all 16 Live subscriptions can still be opened after hundreds of reconnects and slow-client cycles; then rely on the in-process race and stress suites for goroutine-level checks.
+- **Chosen:** (b). Adding an endpoint changes the product's surface, and a separate image would not be the production container. A leaked Live handler holds a subscription slot and descriptors, so the capacity check and the descriptor trend catch the leak that matters most. The results document states that goroutines are not counted directly.
+- **Reversal cost:** low to medium. A future task can add a local-only runtime metric; the harness would then sample it.
+
+## SFT-055 — Soak findings are recorded for follow-up, not fixed in this task (2026-11-25)
+
+- **Question:** The three-hour soak passed every data-safety gate, but one gate failed: the online `siftail database check` gives up after the CLI's fixed 10-second control-socket timeout on a 1.6 GiB database (F1). The run also surfaced F2–F5: restart readiness of 174.5 s at 2.29 GiB, frequent Live truncation, a cleanup that met the degraded window waiting an hour, and idle RSS of 71.6 MiB after saturation (`docs/performance/0.5.0-soak.md`). The acceptance says leaks, corruption, acknowledgement violations, unexplained growth, and high-risk failures block completion. The task's impact is "development-only harness and operational evidence".
+- **Options:** (a) fix F1 (and F4) in `cmd/siftail` and `internal/retention` within this task and rerun the soak; (b) close the task with the findings recorded and propose follow-up tasks; (c) hold the task open for the owner.
+- **Chosen:** (b). None of the findings is a leak, corruption, acknowledgement violation, or unexplained growth. F1 is a false failure of a diagnostic: data and the stopped-server check are unaffected, and Status records the cancelled check. So it is medium severity, not high risk, and fixing it would change product code outside this task's stated impact. The soak results name each finding with its evidence and a proposed fix, and the completion note points the owner at them.
+- **Reversal cost:** low. If the owner treats F1 as release-blocking, a small follow-up gives size-proportional control operations a longer deadline (`cmd/siftail/admin.go`, `controlRequest`), then reruns `make soak`.

@@ -174,6 +174,16 @@ var routes = []string{"/api/v1/items", "/api/v1/orders", "/checkout", "/login", 
 // shape: transport metadata at the top level and the application line in
 // "log".
 func (f fixture) appendRecord(buffer *bytes.Buffer, i int64, server int) {
+	record := f.record(i, server)
+	record["timestamp"] = time.UnixMicro(f.timestampUS(i)).UTC().Format(time.RFC3339Nano)
+	encoded, _ := json.Marshal(record)
+	buffer.Write(encoded)
+	buffer.WriteByte('\n')
+}
+
+// record returns event i without its timestamp, which the bench derives
+// from the index and the soak from the clock.
+func (f fixture) record(i int64, server int) map[string]any {
 	roll := splitmix64(uint64(i) ^ 0xfeed)
 	source := f.source(i, server)
 	stream := "stdout"
@@ -234,8 +244,7 @@ func (f fixture) appendRecord(buffer *bytes.Buffer, i int64, server int) {
 		}
 		message = head
 	}
-	record := map[string]any{
-		"timestamp":      time.UnixMicro(f.timestampUS(i)).UTC().Format(time.RFC3339Nano),
+	return map[string]any{
 		"project":        source.project,
 		"environment":    source.environment,
 		"application":    source.application,
@@ -244,7 +253,4 @@ func (f fixture) appendRecord(buffer *bytes.Buffer, i int64, server int) {
 		"stream":         stream,
 		"log":            message,
 	}
-	encoded, _ := json.Marshal(record)
-	buffer.Write(encoded)
-	buffer.WriteByte('\n')
 }

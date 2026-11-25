@@ -1,4 +1,4 @@
-.PHONY: fmt fmt-check vet test race-test build compose-check check bench container-bench frontend-check playwright playwright-update clean
+.PHONY: fmt fmt-check vet test race-test build compose-check check bench container-bench soak frontend-check playwright playwright-update clean
 
 GO       := go
 # Upper bound for one package's test binary; a hung test fails instead of stalling igris.
@@ -53,6 +53,11 @@ bench:
 # IMAGE names a built image, e.g. `make container-bench IMAGE=localhost/siftail:dev`.
 container-bench:
 	scripts/container-bench.sh $(IMAGE)
+
+# The bounded production soak (docs/performance/0.5.0-soak.md), three hours
+# by default: `make soak IMAGE=localhost/siftail:dev [SOAK_FLAGS=--quick]`.
+soak:
+	scripts/soak.sh $(IMAGE) $(SOAK_FLAGS)
 
 frontend-check:
 	npm run frontend-check
