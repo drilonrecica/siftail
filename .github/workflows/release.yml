@@ -331,6 +331,14 @@ jobs:
           done
           skopeo logout ghcr.io
 
+      # The attestation actions read registry credentials from the Docker
+      # configuration, which `skopeo login` does not write.
+      - name: Log in to the registry for attestations
+        env:
+          ACTOR: ${{ github.actor }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: printf '%s' "$GITHUB_TOKEN" | docker login ghcr.io --username "$ACTOR" --password-stdin
+
       - name: Attest image provenance
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
@@ -358,6 +366,10 @@ jobs:
           subject-digest: ${{ steps.digests.outputs.arm64 }}
           sbom-path: dist/siftail-${{ env.VERSION }}-linux-arm64.cdx.json
           push-to-registry: true
+
+      - name: Log out of the registry
+        if: always()
+        run: docker logout ghcr.io
 
   draft-release:
     name: Draft the GitHub release
