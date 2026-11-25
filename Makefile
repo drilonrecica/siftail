@@ -1,4 +1,4 @@
-.PHONY: fmt fmt-check vet test race-test build compose-check check bench container-bench soak frontend-check playwright playwright-update clean
+.PHONY: fmt fmt-check vet test race-test build compose-check check bench container-bench soak frontend-check playwright playwright-update release-plan-test release-dry-run clean
 
 GO       := go
 # Upper bound for one package's test binary; a hung test fails instead of stalling igris.
@@ -58,6 +58,22 @@ container-bench:
 # by default: `make soak IMAGE=localhost/siftail:dev [SOAK_FLAGS=--quick]`.
 soak:
 	scripts/soak.sh $(IMAGE) $(SOAK_FLAGS)
+
+# Channel and tag rules of the release workflow (docs/release/process.md).
+release-plan-test:
+	scripts/release-plan-test.sh
+
+# Unpublished local release build of a committed revision: the
+# multi-architecture OCI archive, SBOMs, metadata, and checksums in
+# RELEASE_DIR, then the image contract check. Example:
+# `make release-dry-run RELEASE_VERSION=0.5.0-rc.1 RELEASE_BUILDER=siftail-release`.
+RELEASE_VERSION ?= edge-$(shell git rev-parse --short=12 HEAD 2>/dev/null)
+RELEASE_REF     ?= HEAD
+RELEASE_DIR     ?= .bench-tmp/release-$(RELEASE_VERSION)
+release-dry-run:
+	scripts/release-build.sh $(RELEASE_VERSION) $(RELEASE_REF) $(RELEASE_DIR)
+	scripts/release-inspect.sh $(RELEASE_DIR)/siftail-$(RELEASE_VERSION).oci.tar \
+		$(RELEASE_VERSION) $$(git rev-parse --short=12 $(RELEASE_REF))
 
 frontend-check:
 	npm run frontend-check

@@ -121,6 +121,17 @@ measurements, and both-architecture smoke commands are recorded in
 [`docs/operations/container-image.md`](docs/operations/container-image.md).
 No public image is implied until the release workflow publishes one.
 
+### Releases and security
+
+[`docs/release/process.md`](docs/release/process.md) defines the `edge`,
+candidate, and stable channels, what the release workflow verifies, and how
+to check a published image's provenance, checksums, and reproducible build.
+Release notes are in [`docs/release/notes/`](docs/release/notes/), current
+limitations in [`docs/release/known-issues.md`](docs/release/known-issues.md),
+and the dependency and license inventory in
+[`docs/release/dependencies.md`](docs/release/dependencies.md). Report
+vulnerabilities as described in [`SECURITY.md`](SECURITY.md).
+
 ### Operator guide and capacity
 
 Start with [`docs/operations/operator-guide.md`](docs/operations/operator-guide.md):

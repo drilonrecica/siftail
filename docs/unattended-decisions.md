@@ -193,3 +193,45 @@ approval. Entries are in the order they were taken, newest last.
 - **Options:** (a) hold SFT-056 open until the owner runs the checks; (b) close it, record the H3 gate evidence, and state plainly that the two human checks are unevidenced; (c) fabricate or infer review notes from the automated pass (rejected: owner evidence must not be invented).
 - **Chosen:** (b). Skipping was the owner's explicit decision, holding open would block SFT-057/058 on a check the owner deferred, and the record names the gap so the SFT-058 release gate can weigh it.
 - **Reversal cost:** low. Run SFT-127/128 later and append the notes under SFT-056; reopen the task if the owner wants the gap to block release.
+
+## SFT-057 — Edge publishes automatically after CI; candidates and stable need a tag and approval (2026-11-25)
+
+- **Question:** The acceptance says "publication still requires explicit maintainer action", while `ARCHITECTURE.md` §35 says `edge` "points to successful main build" and `AGENTS.md` §29 says to use `edge` for development. The documents do not say whether a development image is a publication that needs approval.
+- **Options:** (a) edge pushed automatically after a successful CI run on `master`, candidate and stable only from a maintainer tag plus approval of a protected `release` environment, with a draft GitHub release; (b) every channel, edge included, only on manual dispatch; (c) tags alone, without an environment.
+- **Chosen:** (a). It matches the channel definitions; edge versions are `edge-<commit>` and never move `latest` or a version tag, and every channel that users are told to deploy needs two maintainer actions (tag, approve) plus publishing the draft release. The `release` environment's required reviewer is an owner setting, listed in `docs/release/process.md`.
+- **Reversal cost:** low. Remove the `workflow_run` trigger from `release.yml` (and the `edge` branch of `scripts/release-plan.sh`) to make edge manual.
+
+## SFT-057 — No bare major tag before 1.0, and latest only for the highest stable version (2026-11-25)
+
+- **Question:** `PRODUCT.md` §18.3 lists `0.4.1`, `0.4`, `0` "as appropriate" but does not say when `0` or `latest` apply.
+- **Options:** (a) publish `X.Y.Z`, `X.Y`, and `X` always; (b) skip `X` while the major is 0, and move `latest` only when the release is the highest stable version; (c) only `X.Y.Z`.
+- **Chosen:** (b). Before 1.0 a minor release may break compatibility (§18.4), so `0` would promise nothing, and a patch to an older line must not move `latest` backwards. `PRODUCT.md` §18.3 and `ARCHITECTURE.md` §35 now state it; `make release-plan-test` covers it.
+- **Reversal cost:** low. One condition in `scripts/release-plan.sh` and its test.
+
+## SFT-057 — Release artifacts are the OCI archive, SBOMs, metadata, and checksums; the smoke loads a docker-archive copy (2026-11-25)
+
+- **Question:** The task asks for checksums and inspectable image contents, but the only supported artifact is the image (`PRODUCT.md` §18.2). Separately, Podman ignores the health check in an OCI image configuration, so the existing smoke cannot run against an OCI archive directly.
+- **Options:** (a) attach standalone Linux binaries with checksums; (b) attach the exact multi-architecture OCI archive, per-platform CycloneDX SBOMs, a metadata file with every digest and the binary SHA-256s, and `SHA256SUMS`, and push that same archive without conversion; (c) checksums of registry digests only.
+- **Chosen:** (b). It adds no new artifact type, lets anyone verify offline and rebuild, and guarantees the pushed digest is the inspected, scanned, smoked, and reproduced one. The smoke loads a `docker-archive` copy, which keeps the health check; `scripts/release-inspect.sh` checks the health check in the archive itself.
+- **Reversal cost:** low. Asset list in `release-build.sh` and the draft-release step.
+
+## SFT-057 — SECURITY.md commits to GitHub private reporting and a seven-day acknowledgement (2026-11-25)
+
+- **Question:** A vulnerability process needs a private channel and an expectation for reporters. Private vulnerability reporting is currently disabled on the repository, and no address is published; the owner's email must not be put in the repository without approval.
+- **Options:** (a) GitHub private vulnerability reporting with a seven-day acknowledgement and credit by default; (b) an email address; (c) no stated response time.
+- **Chosen:** (a). It needs no personal address and fits a single maintainer. Enabling it is listed as a one-time owner step in `docs/release/process.md`; until then the Security tab offers no report button.
+- **Reversal cost:** low. Edit `SECURITY.md`.
+
+## SFT-057 — Reachable GO-2026-6859 is recorded as a release blocker, not fixed here (2026-11-25)
+
+- **Question:** `govulncheck` reports GO-2026-6859 (net/http, fixed in go1.27.4) as reachable. `AGENTS.md` §21 makes a reachable vulnerability block the release gate. Fixing it means a toolchain update (`go.mod`, the Dockerfile builder digest), which is a dependency task, not release automation.
+- **Options:** (a) bump the toolchain in this task; (b) record it with evidence and leave the fix to a follow-up before SFT-058; (c) mark it accepted.
+- **Chosen:** (b). Acceptance only asks to run the checks and record results, the image-reproducibility evidence would otherwise need redoing, and accepting a vulnerability is the owner's call. The release workflow's CI job fails on it, so it cannot be published by accident.
+- **Reversal cost:** none; the follow-up is a toolchain refresh as in SFT-083, then rerun `make release-dry-run`.
+
+## SFT-057 — Closed with the GitHub-hosted workflow steps unexercised (2026-11-25)
+
+- **Question:** Verification asks to dry-run the complete release workflow. It can only run on GitHub after the owner pushes, which is an action on the owner's account; the native arm64 smoke needs GitHub's Arm runner.
+- **Options:** (a) hold the task open for the owner's first `workflow_dispatch` run; (b) close it after running every step locally that can run here (build, reproduce, inspect, amd64 smoke, fixture upgrades, backup and restore, plan rules, actionlint, licenses, secrets, vulnerabilities) and name the unexercised steps.
+- **Chosen:** (b). The workflow's logic lives in the scripts that were run, the remaining steps are standard pinned actions, and SFT-058 already requires evidence on production artifacts, so the first dispatch belongs there. The record lists exactly what did not run.
+- **Reversal cost:** low. Run **Actions → Release → Run workflow** with `0.5.0-rc.1`; fix whatever it finds under SFT-058.

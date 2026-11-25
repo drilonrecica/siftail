@@ -2945,11 +2945,20 @@ the compatible pre-upgrade backup.
 
 ## 35. Release architecture
 
-Channels:
+Channels (`docs/release/process.md`):
 
-- stable semver tags;
-- `latest` points to stable;
-- `edge` points to successful main build.
+- stable semver tags `X.Y.Z` and `X.Y` (and `X` from 1.0), published from a
+  maintainer-pushed `vX.Y.Z` tag on a `master` commit after approval of the
+  `release` environment;
+- `latest` points to the highest stable release and never to a candidate,
+  an older line, or a development build;
+- release candidates `X.Y.Z-rc.N`, from a `vX.Y.Z-rc.N` tag under the same
+  rules, move no other tag;
+- `edge` and `edge-<commit>` point to a successful `master` build; their
+  version is `edge-<commit>`, never a release number.
+
+Candidate and stable GitHub releases are created as drafts; publishing one is
+the maintainer's action.
 
 Stable release checklist includes:
 
@@ -2990,6 +2999,19 @@ CI lives in `.github/workflows/`:
   image, scans it with a pinned Trivy (HIGH and CRITICAL, fixable findings
   fail the job) and uploads a CycloneDX SBOM as a workflow artifact. It never
   pushes or publishes an image.
+- `release.yml` runs on a `v*` tag, after a successful `ci.yml` run on
+  `master` (edge), and as a manual dry run that never publishes. It reruns
+  `ci.yml` (called as a reusable workflow), builds both architectures from
+  `git archive` of the commit with a digest-pinned BuildKit and
+  `SOURCE_DATE_EPOCH` from the commit time, checks the image contract in the
+  OCI archive, scans both platforms for vulnerabilities and secrets, smokes
+  each platform natively (an Arm runner for arm64), and rebuilds on a second
+  runner that must reproduce the same index digest. Only then does it copy
+  that exact archive to GHCR with preserved digests and attach GitHub build
+  provenance and per-platform SBOM attestations. Release files (OCI archive,
+  SBOMs, metadata, `SHA256SUMS`) are attached to a draft release. Its scripts
+  are `scripts/release-plan.sh`, `release-build.sh`, and `release-inspect.sh`;
+  the channel rules are tested by `make release-plan-test`.
 - Every `uses:` is pinned to a commit SHA with a version comment, every
   workflow declares `permissions: contents: read`, and checkouts do not
   persist credentials.

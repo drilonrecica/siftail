@@ -72,8 +72,11 @@ arm64 cross-build uses only the builder-stage
 `gcc-aarch64-linux-gnu=4:12.2.0-3` and
 `libc6-dev-arm64-cross=2.36-8cross1`. Neither reaches the runtime image.
 
-Release automation must supply immutable values for `VERSION`, `COMMIT`, and
-`BUILD_DATE`, and normalize layer timestamps. The Go build removes filesystem
+The release workflow (`scripts/release-build.sh`, SFT-057) supplies immutable
+values for `VERSION`, `COMMIT`, and `BUILD_DATE` (the commit time), builds
+from `git archive` of the commit, and normalizes layer timestamps with
+`SOURCE_DATE_EPOCH` and BuildKit's `rewrite-timestamp`; see
+[`docs/release/process.md`](../release/process.md). The Go build removes filesystem
 paths, VCS auto-discovery, debug tables, and the random build ID. Module
 downloads are checked against `go.sum` with `go mod verify`.
 
@@ -105,6 +108,23 @@ Podman's OCI output format does not retain Docker health-check metadata.
 The tested command therefore uses `--format docker`. Docker Buildx emits
 Docker/OCI registry manifests with the Dockerfile health configuration; release
 automation must inspect the final registry artifact rather than assuming it.
+`scripts/release-inspect.sh` does so for the release archive, which is pushed
+without conversion.
+
+### SFT-057 release build (2026-11-25)
+
+`make release-dry-run` built both architectures of commit `8821338ad79e`
+with Docker 29.9.3, Buildx 0.38.1, and BuildKit 0.35.1 (pinned digest). Two
+independent `--no-cache` builds produced the same image index
+`sha256:ba3fe0c6bfb43d9ca587706ce6a5e0912c751974b9c14f36ba7822f9a86fa479`
+and byte-identical OCI archives, with binary SHA-256
+`bd3458a082f98a36418c0bb76d5d9a1e99947dfdd02e496ebaa6a247ce5145d4` (amd64)
+and `8f7d5e96a8c40520c9e688c93db5ea51ced4f3d87181d708fbd02beb45952a73`
+(arm64). The archive passed `scripts/release-inspect.sh`, and the amd64 image,
+loaded through `docker-archive`, passed `scripts/container-smoke.sh`. Podman
+ignores the health check in an OCI image configuration, which is why the
+smoke loads a `docker-archive` copy. arm64 was not executed on this host; the
+release workflow smokes it on a native Arm runner.
 
 ## Measured footprint
 

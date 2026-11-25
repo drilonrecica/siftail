@@ -5,6 +5,9 @@ on:
     branches: [master, main]
   pull_request:
     branches: [master, main]
+  # The release workflow runs the same checks before it builds a candidate or
+  # stable release.
+  workflow_call:
 
 # Least privilege: every job only reads the repository. A job that needs more
 # must declare it itself.
@@ -53,6 +56,9 @@ jobs:
 
       - name: Validate Docker Compose deployment
         run: make compose-check
+
+      - name: Release channel rules
+        run: make release-plan-test
 
   govulncheck:
     name: Go vulnerability check

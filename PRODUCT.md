@@ -1090,7 +1090,12 @@ A Coolify one-click template comes only after ordinary deployment is stable.
 
 - `latest`: latest stable release;
 - `edge`: successful development image;
-- semantic version tags: `0.4.1`, `0.4`, `0` as appropriate.
+- semantic version tags: `0.4.1`, `0.4`, `0` as appropriate (the bare major
+  tag starts at `1.0.0`);
+- release candidates such as `0.5.0-rc.1` carry only their own tag.
+
+Publishing a candidate or stable release is always an explicit maintainer
+action.
 
 ### 18.4 Versioning
 

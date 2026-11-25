@@ -1,0 +1,414 @@
+name: Release
+
+# Builds, verifies, and (only for the channels below) publishes the
+# multi-architecture image. The full process and the maintainer's steps are
+# in docs/release/process.md.
+#
+#   tag push vX.Y.Z-rc.N   candidate: image X.Y.Z-rc.N, draft pre-release
+#   tag push vX.Y.Z        stable: image X.Y.Z, X.Y (and latest when it is the
+#                          highest stable version), draft release
+#   CI success on master   edge: image edge and edge-<commit>
+#   manual dispatch        dry run of any of the above; never publishes
+#
+# Candidate and stable images wait for approval in the `release` environment,
+# and their GitHub release is created as a draft that the maintainer
+# publishes by hand.
+on:
+  push:
+    tags: ["v*"]
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [master]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to dry-run: X.Y.Z, X.Y.Z-rc.N, or edge. Nothing is published."
+        required: true
+        default: edge
+
+# Least privilege: every job only reads the repository. A job that needs more
+# must declare it itself.
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  # The BuildKit release is part of the reproducible build input.
+  BUILDKIT_IMAGE: docker.io/moby/buildkit:v0.35.1@sha256:baf6138eb8c37644800c7c913fba051e840ebb9ba13eaf92d92ef9a1712d0b4c
+  TRIVY_VERSION: v0.76.1
+
+jobs:
+  plan:
+    name: Plan
+    # Edge follows only a successful CI run of a push to this repository's
+    # master branch, never a pull request or a fork.
+    if: >-
+      github.event_name != 'workflow_run' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_branch == 'master' &&
+       github.event.workflow_run.head_repository.full_name == github.repository)
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.plan.outputs.version }}
+      channel: ${{ steps.plan.outputs.channel }}
+      commit: ${{ steps.plan.outputs.commit }}
+      short: ${{ steps.plan.outputs.short }}
+      image: ${{ steps.plan.outputs.image }}
+      tags: ${{ steps.plan.outputs.tags }}
+      latest: ${{ steps.plan.outputs.latest }}
+      prerelease: ${{ steps.plan.outputs.prerelease }}
+      publish: ${{ steps.plan.outputs.publish }}
+      notes: ${{ steps.plan.outputs.notes }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Plan the channel and tags
+        id: plan
+        env:
+          EVENT: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          case "$EVENT" in
+            push) scripts/release-plan.sh tag "$REF_NAME" HEAD ;;
+            workflow_run) scripts/release-plan.sh edge HEAD ;;
+            workflow_dispatch) scripts/release-plan.sh dry-run "$INPUT_VERSION" HEAD ;;
+            *) echo "unexpected event $EVENT" >&2; exit 1 ;;
+          esac | tee -a "$GITHUB_OUTPUT"
+
+  ci:
+    name: CI
+    needs: plan
+    # An edge run starts only after CI already passed for the same commit.
+    if: github.event_name != 'workflow_run'
+    uses: ./.github/workflows/ci.yml
+
+  build:
+    name: Build, inspect, and scan
+    needs: [plan, ci]
+    if: >-
+      !cancelled() && needs.plan.result == 'success' &&
+      (needs.ci.result == 'success' || needs.ci.result == 'skipped')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      VERSION: ${{ needs.plan.outputs.version }}
+      COMMIT: ${{ needs.plan.outputs.commit }}
+      SHORT: ${{ needs.plan.outputs.short }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.plan.outputs.commit }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Buildx
+        id: buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          driver-opts: image=${{ env.BUILDKIT_IMAGE }}
+
+      - name: Set up Syft
+        id: syft
+        uses: anchore/sbom-action/download-syft@dfcb83b97731532d72be422cbc51ee64adb6fd56 # v0.24.4
+
+      - name: Build release artifacts
+        env:
+          RELEASE_BUILDER: ${{ steps.buildx.outputs.name }}
+          SYFT: ${{ steps.syft.outputs.cmd }}
+        run: scripts/release-build.sh "$VERSION" "$COMMIT" dist
+
+      - name: Inspect the image contract
+        run: scripts/release-inspect.sh "dist/siftail-$VERSION.oci.tar" "$VERSION" "$SHORT"
+
+      - name: Export one archive per platform
+        run: |
+          mkdir smoke
+          for arch in amd64 arm64; do
+            skopeo copy --quiet --override-os linux --override-arch "$arch" \
+              "oci-archive:dist/siftail-$VERSION.oci.tar" \
+              "docker-archive:smoke/siftail-$arch.tar:localhost/siftail:release-$arch"
+          done
+
+      - name: Scan linux/amd64
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          version: ${{ env.TRIVY_VERSION }}
+          input: smoke/siftail-amd64.tar
+          format: table
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+          scanners: vuln,secret
+
+      - name: Scan linux/arm64
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          version: ${{ env.TRIVY_VERSION }}
+          input: smoke/siftail-arm64.tar
+          format: table
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+          scanners: vuln,secret
+          skip-setup-trivy: true
+
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-dist
+          path: dist/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload smoke archives
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-smoke
+          path: smoke/
+          if-no-files-found: error
+          retention-days: 7
+
+  smoke:
+    name: Smoke linux/${{ matrix.arch }}
+    needs: [plan, build]
+    # Explicit, because a skipped `ci` (edge) would otherwise skip every
+    # later job.
+    if: ${{ !cancelled() && needs.build.result == 'success' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.plan.outputs.commit }}
+          persist-credentials: false
+
+      - name: Download smoke archives
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-smoke
+          path: smoke
+
+      - name: Install Podman when missing
+        run: command -v podman || { sudo apt-get update && sudo apt-get install -y podman; }
+
+      # docker-archive keeps the health check, which Podman ignores in an OCI
+      # image configuration; the release archive itself was inspected above.
+      - name: Load the image
+        run: podman load --quiet --input "smoke/siftail-${{ matrix.arch }}.tar"
+
+      - name: Native container smoke
+        run: scripts/container-smoke.sh "localhost/siftail:release-${{ matrix.arch }}" "${{ matrix.arch }}"
+
+  reproduce:
+    name: Reproduce the build
+    needs: [plan, build]
+    if: ${{ !cancelled() && needs.build.result == 'success' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      VERSION: ${{ needs.plan.outputs.version }}
+      COMMIT: ${{ needs.plan.outputs.commit }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.plan.outputs.commit }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Buildx
+        id: buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          driver-opts: image=${{ env.BUILDKIT_IMAGE }}
+
+      - name: Set up Syft
+        id: syft
+        uses: anchore/sbom-action/download-syft@dfcb83b97731532d72be422cbc51ee64adb6fd56 # v0.24.4
+
+      - name: Download the first build
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-dist
+          path: dist
+
+      - name: Rebuild on a fresh runner
+        env:
+          RELEASE_BUILDER: ${{ steps.buildx.outputs.name }}
+          SYFT: ${{ steps.syft.outputs.cmd }}
+        run: scripts/release-build.sh "$VERSION" "$COMMIT" rebuild
+
+      # SBOMs carry a generation time and serial number, so only the image
+      # and binaries are compared.
+      - name: Compare digests and binaries
+        run: |
+          summary='[.index_digest, (.platforms[] | .platform, .manifest, .binary_sha256)]'
+          first=$(jq -c "$summary" "dist/siftail-$VERSION.release.json")
+          second=$(jq -c "$summary" "rebuild/siftail-$VERSION.release.json")
+          echo "first:  $first"
+          echo "second: $second"
+          [[ "$first" == "$second" ]] || { echo "the rebuild differs" >&2; exit 1; }
+
+  publish:
+    name: Publish image
+    needs: [plan, build, smoke, reproduce]
+    if: >-
+      !cancelled() && needs.plan.outputs.publish == 'true' &&
+      needs.build.result == 'success' && needs.smoke.result == 'success' &&
+      needs.reproduce.result == 'success'
+    # `release` must require the maintainer's approval (docs/release/process.md).
+    environment: ${{ needs.plan.outputs.channel == 'edge' && 'edge' || 'release' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    env:
+      VERSION: ${{ needs.plan.outputs.version }}
+      IMAGE: ${{ needs.plan.outputs.image }}
+      TAGS: ${{ needs.plan.outputs.tags }}
+    steps:
+      - name: Download release artifacts
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-dist
+          path: dist
+
+      - name: Read digests
+        id: digests
+        run: |
+          metadata="dist/siftail-$VERSION.release.json"
+          {
+            echo "index=$(jq -r .index_digest "$metadata")"
+            echo "amd64=$(jq -r '.platforms[] | select(.platform == "linux/amd64") | .manifest' "$metadata")"
+            echo "arm64=$(jq -r '.platforms[] | select(.platform == "linux/arm64") | .manifest' "$metadata")"
+          } | tee -a "$GITHUB_OUTPUT"
+
+      - name: Verify checksums
+        working-directory: dist
+        run: sha256sum --check --strict SHA256SUMS
+
+      # The exact archive that was inspected, scanned, smoke-tested, and
+      # reproduced is copied without conversion, so the registry digest is
+      # the one recorded in the release metadata.
+      - name: Push the tested archive
+        env:
+          ACTOR: ${{ github.actor }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          INDEX: ${{ steps.digests.outputs.index }}
+        run: |
+          printf '%s' "$GITHUB_TOKEN" | skopeo login ghcr.io --username "$ACTOR" --password-stdin
+          for tag in $TAGS; do
+            skopeo copy --all --preserve-digests --retry-times 3 \
+              "oci-archive:dist/siftail-$VERSION.oci.tar" "docker://$IMAGE:$tag"
+            pushed=sha256:$(skopeo inspect --raw "docker://$IMAGE:$tag" | sha256sum | cut -d' ' -f1)
+            [[ "$pushed" == "$INDEX" ]] ||
+              { echo "$IMAGE:$tag is $pushed, expected $INDEX" >&2; exit 1; }
+            echo "$IMAGE:$tag -> $pushed"
+          done
+          skopeo logout ghcr.io
+
+      - name: Attest image provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.digests.outputs.index }}
+          push-to-registry: true
+
+      - name: Attest release file provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-checksums: dist/SHA256SUMS
+
+      - name: Attest linux/amd64 SBOM
+        uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4.1.0
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.digests.outputs.amd64 }}
+          sbom-path: dist/siftail-${{ env.VERSION }}-linux-amd64.cdx.json
+          push-to-registry: true
+
+      - name: Attest linux/arm64 SBOM
+        uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4.1.0
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.digests.outputs.arm64 }}
+          sbom-path: dist/siftail-${{ env.VERSION }}-linux-arm64.cdx.json
+          push-to-registry: true
+
+  draft-release:
+    name: Draft the GitHub release
+    needs: [plan, publish]
+    if: >-
+      !cancelled() && needs.publish.result == 'success' &&
+      (needs.plan.outputs.channel == 'candidate' || needs.plan.outputs.channel == 'stable')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.plan.outputs.version }}
+      IMAGE: ${{ needs.plan.outputs.image }}
+      NOTES: ${{ needs.plan.outputs.notes }}
+      PRERELEASE: ${{ needs.plan.outputs.prerelease }}
+      LATEST: ${{ needs.plan.outputs.latest }}
+      TAG: ${{ github.ref_name }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.plan.outputs.commit }}
+          persist-credentials: false
+
+      - name: Download release artifacts
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-dist
+          path: dist
+
+      # A draft is invisible to users; publishing it is the maintainer's step.
+      - name: Create the draft release
+        run: |
+          index=$(jq -r .index_digest "dist/siftail-$VERSION.release.json")
+          {
+            printf 'Notes with working links: %s/%s/blob/%s/%s\n\n' \
+              "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$TAG" "$NOTES"
+            cat "$NOTES"
+            printf '\n## Artifacts\n\n'
+            printf -- '- Image: `%s:%s`\n' "$IMAGE" "$VERSION"
+            printf -- '- Image index digest: `%s`\n' "$index"
+            printf -- '- Verify: `gh attestation verify oci://%s@%s --repo %s`\n' \
+              "$IMAGE" "$index" "$GITHUB_REPOSITORY"
+            printf -- '- Checksums: `SHA256SUMS`; see docs/release/process.md for every check.\n'
+          } >release-notes.md
+          flags=(--draft --verify-tag --title "Siftail $VERSION" --notes-file release-notes.md)
+          if [[ "$PRERELEASE" == "true" ]]; then
+            flags+=(--prerelease --latest=false)
+          else
+            flags+=("--latest=$LATEST")
+          fi
+          gh release create "$TAG" "${flags[@]}" dist/*

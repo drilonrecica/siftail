@@ -66,14 +66,21 @@ if [[ "$architecture" == "arm64" && "$(uname -m)" != "aarch64" ]]; then
   entrypoint=(--entrypoint /qemu-aarch64-static)
 fi
 
+# Every command parses the same configuration as `serve`, which requires
+# both public URLs (SFT-106).
+public_urls=(
+  -e "SIFTAIL_PUBLIC_URL=http://127.0.0.1:$ui_port"
+  -e "SIFTAIL_INGEST_PUBLIC_URL=http://127.0.0.1:$ingest_port/api/v1/ingest"
+)
+
 run_command() {
   local volume=$1
   shift
   if [[ ${#entrypoint[@]} -eq 0 ]]; then
-    podman run --rm --platform "linux/$architecture" \
+    podman run --rm --platform "linux/$architecture" "${public_urls[@]}" \
       -v "$volume:/data:Z" "$image" "$@"
   else
-    podman run --rm --platform "linux/$architecture" \
+    podman run --rm --platform "linux/$architecture" "${public_urls[@]}" \
       -v "$volume:/data:Z" "${qemu[@]}" "${entrypoint[@]}" \
       "$image" /siftail "$@"
   fi
@@ -81,10 +88,10 @@ run_command() {
 
 create_administrator() {
   if [[ ${#entrypoint[@]} -eq 0 ]]; then
-    podman run --rm -i --platform "linux/$architecture" \
+    podman run --rm -i --platform "linux/$architecture" "${public_urls[@]}" \
       -v "$volume_name:/data:Z" "$image" admin create --username Admin
   else
-    podman run --rm -i --platform "linux/$architecture" \
+    podman run --rm -i --platform "linux/$architecture" "${public_urls[@]}" \
       -v "$volume_name:/data:Z" "${qemu[@]}" "${entrypoint[@]}" \
       "$image" /siftail admin create --username Admin
   fi
