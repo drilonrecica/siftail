@@ -182,7 +182,7 @@ instead.
 ## Image contents
 
 The image holds `/siftail`, an empty owner-writable `/data`, `/LICENSE`, and
-the Distroless `cc-debian12` runtime (glibc, CA certificates, timezone data,
+the Distroless `cc-debian13` runtime (glibc, CA certificates, timezone data,
 Debian package copyright files). It has no shell, package manager, compiler,
 Node.js, tests, or sources. Details, sizes, and the license of every runtime
 package family are in

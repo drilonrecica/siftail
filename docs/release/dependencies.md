@@ -15,11 +15,11 @@ Generated with `go run github.com/google/go-licenses/v2@v2.0.1 report
 
 | Module | Version | License | Why |
 |---|---|---|---|
-| `github.com/mattn/go-sqlite3` (bundles SQLite 3.53.4) | v1.14.52 | MIT (SQLite: public domain) | The SQLite driver (ADR 0001). |
-| `golang.org/x/crypto` (`argon2` only) | v0.58.0 | BSD-3-Clause | Argon2id password hashes. |
-| `golang.org/x/sync` (`errgroup` only) | v0.24.0 | BSD-3-Clause | Owned component lifecycles. |
-| `golang.org/x/term` | v0.47.0 | BSD-3-Clause | No-echo password prompt. |
-| `golang.org/x/sys` | v0.49.0 | BSD-3-Clause | Required by `x/term`. |
+| `github.com/mattn/go-sqlite3` (bundles SQLite 3.54.1) | v1.14.53 | MIT (SQLite: public domain) | The SQLite driver (ADR 0001). |
+| `golang.org/x/crypto` (`argon2` only) | v0.59.0 | BSD-3-Clause | Argon2id password hashes. |
+| `golang.org/x/sync` (`errgroup` only) | v0.25.0 | BSD-3-Clause | Owned component lifecycles. |
+| `golang.org/x/term` | v0.48.0 | BSD-3-Clause | No-echo password prompt. |
+| `golang.org/x/sys` | v0.50.0 | BSD-3-Clause | Required by `x/term`. |
 | Go standard library and runtime | go1.27.4 | BSD-3-Clause | Toolchain from `go.mod`. |
 
 `golang.org/x/net` and `golang.org/x/text` appear in `go list -m all` as
@@ -41,11 +41,12 @@ All other CSS, JavaScript, and SVG are Siftail's own.
 
 ## Runtime image
 
-`gcr.io/distroless/cc-debian12:nonroot`, pinned by index digest in the
-[`Dockerfile`](../../Dockerfile). Distroless itself is Apache-2.0; its Debian 12
-packages (`base-files`, `ca-certificates`, `gcc-12-base`, `libc6`,
-`libgcc-s1`, `libgomp1`, `libssl3`, `libstdc++6`, `media-types`, `netbase`,
-`tzdata`) keep their own licenses, whose copyright files remain in the image
+`gcr.io/distroless/cc-debian13:nonroot`, pinned by index digest in the
+[`Dockerfile`](../../Dockerfile). Distroless itself is Apache-2.0; its Debian 13
+packages (`base-files`, `ca-certificates`, `gcc-14-base`, `libc6`,
+`libgcc-s1`, `libgomp1`, `libssl3t64`, `libstdc++6`, `libzstd1`,
+`media-types`, `netbase`, `tzdata`, `tzdata-legacy`, `zlib1g`) keep their own
+licenses, whose copyright files remain in the image
 under `/usr/share/doc`. See
 [`container-image.md`](../operations/container-image.md#runtime-dependencies-licensing-and-security-maintenance).
 
@@ -59,9 +60,9 @@ Never present in the image.
 | `gcc-aarch64-linux-gnu`, `libc6-dev-arm64-cross` (and the amd64 equivalents) | exact Debian versions in the Dockerfile | Cross-compiling the CGO binary. |
 | `moby/buildkit` v0.35.1 | digest in `release.yml` | Reproducible release builds. |
 | GitHub Actions | commit SHAs in `.github/workflows/` | CI and release automation. |
-| Trivy v0.76.1, Syft (via `anchore/sbom-action`) | versions in the workflows | Scans and SBOMs. |
-| `govulncheck` v1.8.0 | version in `ci.yml` | Reachable-vulnerability check. |
-| `@playwright/test` 1.64.1, `@axe-core/playwright` 4.14.0 | exact versions in `package.json` and `package-lock.json` | Browser test suite. |
+| Trivy v0.76.2, Syft (via `anchore/sbom-action`) | versions in the workflows | Scans and SBOMs. |
+| `govulncheck` v1.10.0 | version in `ci.yml` | Reachable-vulnerability check. |
+| `@playwright/test` 1.65.1, `@axe-core/playwright` 4.14.1 | exact versions in `package.json` and `package-lock.json` | Browser test suite. |
 
 ## Keeping it current
 

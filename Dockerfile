@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 ARG GO_IMAGE=docker.io/library/golang:1.27.4-bookworm@sha256:ce59b41415e2524ae99926fe1f37ce48ba8c194dcbd2a56a65436cdcefa2bd34
-ARG RUNTIME_IMAGE=gcr.io/distroless/cc-debian12:nonroot@sha256:fccdbb0a547c14e23fcf4ce8ad62ca5d43b4faae8d22cd292f490fef9946c96e
+ARG RUNTIME_IMAGE=gcr.io/distroless/cc-debian13:nonroot@sha256:532c7a94f9e96ba9db75eb9388f4227751131c7cb0a411d1a8521af4096135de
 
 FROM --platform=${BUILDPLATFORM} ${GO_IMAGE} AS build
 

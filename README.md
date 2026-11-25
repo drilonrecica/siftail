@@ -805,7 +805,7 @@ See [`docs/operations/restores.md`](docs/operations/restores.md).
 
 ### Current dependency rationale
 
-- `github.com/mattn/go-sqlite3` v1.14.52 is the accepted SQLite driver. It
+- `github.com/mattn/go-sqlite3` v1.14.53 is the accepted SQLite driver. It
   bundles SQLite, is MIT licensed, requires CGO and a C toolchain, and adds no
   runtime service. Production images must therefore build explicitly for
   `linux/amd64` and `linux/arm64`. On linux/amd64 with Go 1.25, the initial
@@ -820,11 +820,11 @@ See [`docs/operations/restores.md`](docs/operations/restores.md).
   group/cancellation implementation is linked; binary-size impact has not yet
   been measured. It is maintained by the Go project under the BSD 3-Clause
   license.
-- `golang.org/x/crypto` v0.58.0 provides the reviewed Argon2id implementation;
-  the standard library has no Argon2 password hash. `golang.org/x/term` v0.47.0
+- `golang.org/x/crypto` v0.59.0 provides the reviewed Argon2id implementation;
+  the standard library has no Argon2 password hash. `golang.org/x/term` v0.48.0
   provides no-echo terminal password input. Both are maintained by the Go
   project under BSD 3-Clause licenses. `x/term` brings `golang.org/x/sys`
-  v0.49.0 as its only module dependency; these packages add no runtime service,
+  v0.50.0 as its only module dependency; these packages add no runtime service,
   outbound call, or public network API. On this linux/amd64 Go 1.26.5
   development build, linking the administrator implementation increased the
   unstripped binary from 14,523,440 to 14,757,904 bytes (+234,464 bytes,

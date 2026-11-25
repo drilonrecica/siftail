@@ -11,7 +11,7 @@ This document records the SFT-050 image contract and its verification on
 ## Runtime contract
 
 The final stage is the digest-pinned
-`gcr.io/distroless/cc-debian12:nonroot` image. Siftail runs directly as numeric
+`gcr.io/distroless/cc-debian13:nonroot` image. Siftail runs directly as numeric
 user and group `65532:65532`; there is no shell or init wrapper between the
 container runtime and Siftail. `SIGTERM` therefore reaches the Go process
 directly and invokes its bounded graceful shutdown.
@@ -58,14 +58,23 @@ The Dockerfile pins these multi-architecture image indexes:
 | Input | Index digest |
 |---|---|
 | `golang:1.27.4-bookworm` | `sha256:ce59b41415e2524ae99926fe1f37ce48ba8c194dcbd2a56a65436cdcefa2bd34` |
-| `distroless/cc-debian12:nonroot` | `sha256:fccdbb0a547c14e23fcf4ce8ad62ca5d43b4faae8d22cd292f490fef9946c96e` |
+| `distroless/cc-debian13:nonroot` | `sha256:532c7a94f9e96ba9db75eb9388f4227751131c7cb0a411d1a8521af4096135de` |
 
 The builder Go release matches `go.mod` (`go 1.27.0`, `toolchain go1.27.4`) and
-CI. It stays on the Debian 12 (bookworm) variant on purpose. The runtime is
-`cc-debian12`, so the binary must not depend on glibc symbols newer than
-Debian 12's glibc 2.36. A trixie builder would break that. The SFT-083 binaries
-require at most `GLIBC_2.34` on both architectures. When Go moves to a new
-release line, the builder moves with it.
+CI. The builder is still the Debian 12 (bookworm) variant, whose glibc is 2.36.
+The runtime is `cc-debian13` with glibc 2.41, and a binary linked against an
+older glibc runs on a newer one, so the builder may be as old as the runtime
+or older, never newer. The SFT-083 binaries require at most `GLIBC_2.34` on
+both architectures. When Go moves to a new release line, the builder moves
+with it.
+
+The runtime moved from `cc-debian12` to `cc-debian13` on 2026-11-25. The
+`v0.5.0-rc.1` release run failed its scan on CVE-2026-84782 in Debian 12's
+`libssl3` `3.0.20-1~deb12u2`. Debian fixed it for Debian 12 through an LTS
+advisory (DLA-4859-1, `3.0.22-1~deb12u2`), which the `cc-debian12` image had
+not picked up two months after the OpenSSL advisory. Debian 13 carries the
+fix from `3.5.7-1~deb13u3`; the pinned image has `libssl3t64`
+`3.5.9-1~deb13u1`. Siftail does not link OpenSSL.
 
 The amd64 builder installs no additional packages for an amd64 target. An
 arm64 cross-build uses only the builder-stage
@@ -171,9 +180,10 @@ The Go builder and cross compiler are build-time inputs only. The runtime is
 the Apache-2.0-licensed Distroless project plus the Debian package content it
 assembles. The image retains the applicable package copyright files under
 `/usr/share/doc`. Runtime package families are `base-files`,
-`ca-certificates`, `gcc-12-base`, `libc6`, `libgcc-s1`, `libgomp1`, `libssl3`,
-`libstdc++6`, `media-types`, `netbase`, and `tzdata`; each retains its own
-upstream/Debian license terms. `/LICENSE` covers Siftail itself.
+`ca-certificates`, `gcc-14-base`, `libc6`, `libgcc-s1`, `libgomp1`,
+`libssl3t64`, `libstdc++6`, `libzstd1`, `media-types`, `netbase`, `tzdata`,
+`tzdata-legacy`, and `zlib1g`; each retains its own upstream/Debian license
+terms. `/LICENSE` covers Siftail itself.
 
 Digest pinning makes changes reviewable but does not provide security updates.
 Each release and base-image refresh must:

@@ -39,7 +39,7 @@ concurrency:
 env:
   # The BuildKit release is part of the reproducible build input.
   BUILDKIT_IMAGE: docker.io/moby/buildkit:v0.35.1@sha256:baf6138eb8c37644800c7c913fba051e840ebb9ba13eaf92d92ef9a1712d0b4c
-  TRIVY_VERSION: v0.76.1
+  TRIVY_VERSION: v0.76.2
 
 jobs:
   plan:
